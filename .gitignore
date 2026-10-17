@@ -1,0 +1,13 @@
+## .NET / Visual Studio Build Outputs
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+publish/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+TestResults/
