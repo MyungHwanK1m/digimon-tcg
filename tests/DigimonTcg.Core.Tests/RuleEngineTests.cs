@@ -12,16 +12,15 @@ public class RuleEngineTests
     [Fact]
     public void StarterDeckPresets_ShouldPassDeckValidationAndGoldenRatio()
     {
-        var (st1Main, st1Digitama) = StarterDecks.CreateSt1GaiaRedPreset();
-        var (valid1, errors1) = DeckValidator.ValidateDeck(st1Main, st1Digitama);
-        Assert.True(valid1, string.Join(", ", errors1));
+        foreach (var preset in StarterDecks.GetRecommendedDeckPresets())
+        {
+            var (main, digitama) = preset.DeckFactory();
+            var (valid, errors) = DeckValidator.ValidateDeck(main, digitama);
+            Assert.True(valid, $"{preset.Name}: " + string.Join(", ", errors));
 
-        var ratio1 = DeckValidator.CalculateRatios(st1Main, st1Digitama);
-        Assert.All(ratio1.Items, item => Assert.Equal("적정", item.StatusText));
-
-        var (st2Main, st2Digitama) = StarterDecks.CreateSt2CocytusBluePreset();
-        var (valid2, errors2) = DeckValidator.ValidateDeck(st2Main, st2Digitama);
-        Assert.True(valid2, string.Join(", ", errors2));
+            var ratio = DeckValidator.CalculateRatios(main, digitama);
+            Assert.All(ratio.Items, item => Assert.Equal("적정", item.StatusText));
+        }
     }
 
     [Fact]
@@ -125,5 +124,40 @@ public class RuleEngineTests
         var blueCards = catalog.SearchCards(color: CardColor.Blue);
         Assert.NotEmpty(blueCards);
         Assert.All(blueCards, c => Assert.Equal(CardColor.Blue, c.Color));
+    }
+
+    [Fact]
+    public void CoinToss_OpponentFirst_ShouldRunAiOpeningTurnThenPlayerDrawsOnTurnOne()
+    {
+        var state = new GameState();
+        var engine = new GoldfishEngine(state);
+        var (main, digitama) = StarterDecks.CreateSt1GaiaRedPreset();
+        var (oppMain, oppDigitama) = StarterDecks.CreateSt2CocytusBluePreset();
+        engine.StartNewGame(main, digitama, seed: 7, stage: PracticeStage.Stage3_AiBattle,
+            opponentMainDeck: oppMain, opponentDigitamaDeck: oppDigitama, opponentDeckName: "테스트 상대");
+
+        // 플레이어 선공으로 시작하면 1턴째 드로우 없이 손패 5장
+        Assert.True(state.PlayerGoesFirst);
+        Assert.Equal(5, state.Player.Hand.Count);
+        int oppDeckBefore = state.DummyOpponent.MainDeck.Count;
+
+        var res = engine.GiveFirstTurnToOpponent();
+
+        Assert.True(res.CanExecute);
+        Assert.False(state.PlayerGoesFirst);
+        Assert.Equal(1, state.CurrentTurn);
+        // 선공 AI는 첫 턴 드로우 없음 (덱 매수가 드로우로 줄지 않음)
+        Assert.True(state.DummyOpponent.MainDeck.Count <= oppDeckBefore);
+        Assert.Contains(state.ActionLogs, l => l.Contains("상대 AI 선공"));
+        if (!state.IsGameOver)
+        {
+            // 후공 플레이어는 1턴째에도 드로우 → 손패 6장, 육성 페이즈에서 시작
+            Assert.Equal(6, state.Player.Hand.Count);
+            Assert.Equal(Phase.Breeding, state.CurrentPhase);
+            Assert.True(state.MemoryGauge >= 0);
+        }
+
+        // 두 번 넘길 수는 없음
+        Assert.False(engine.GiveFirstTurnToOpponent().CanExecute);
     }
 }

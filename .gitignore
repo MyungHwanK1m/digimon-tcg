@@ -11,3 +11,7 @@ publish/
 *.nupkg
 *.snupkg
 TestResults/
+
+## 공식 카드 뒷면 이미지 (저작권 - 로컬에서만 사용, 없으면 벡터 뒷면으로 대체)
+data/images/_card_back.jpg
+data/images/_digitama_back.jpg

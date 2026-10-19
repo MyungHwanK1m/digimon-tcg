@@ -6,11 +6,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using DigimonTcg.Core.Data;
 using DigimonTcg.Core.DeckBuilder;
 using DigimonTcg.Core.Engine;
 using DigimonTcg.Core.Models;
+using DigimonTcg.Wpf.Themes;
 
 namespace DigimonTcg.Wpf;
 
@@ -23,11 +26,15 @@ public partial class MainWindow : Window
 
     private List<CardData> _builderMainDeck = new();
     private List<CardData> _builderDigitamaDeck = new();
+    private string _activeDeckTitle = "🔥 [추천 1] 워그레이몬 & 오메가몬 초화력 비트 (50장)";
+
     private CardData? _pendingHandCard;
     private bool _pendingIsEvolution;
     private bool _pendingTargetsOpponent;
     private CardInstance? _pendingAttackerInstance;
+    private CardInstance? _pinnedFieldInstance;
     private bool _isSecurityPeekEnabled = false;
+    private DispatcherTimer? _ultimateCutInTimer;
 
     // 드래그 앤 드롭 상태 필드
     private Point _dragStartPoint;
@@ -39,6 +46,14 @@ public partial class MainWindow : Window
     private Border? _dragGhostBadgeBorder;
     private TextBlock? _dragGhostBadgeText;
 
+    private static bool IsAllyTargetedOption(CardData card) =>
+        card.Type == CardType.Option &&
+        card.CardId is "ST1-13" or "ST1-14" or "ST2-15" or "ST3-13" or "ST4-13";
+
+    private static bool IsEnemyTargetedOption(CardData card) =>
+        card.Type == CardType.Option &&
+        card.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16" or "ST3-16" or "ST4-14" or "ST4-16" or "ST5-15" or "ST5-16" or "ST6-15" or "ST6-16";
+
     public MainWindow()
     {
         InitializeComponent();
@@ -47,23 +62,50 @@ public partial class MainWindow : Window
         _gameState = new GameState();
         _engine = new GoldfishEngine(_gameState);
 
-        // 기본 ST-1 가이아 레드 프리셋 로드 및 메인 화면 [실전 AI 듀얼 아레나 (Stage 3)] 시작
+        // 기본 추천 1번 덱(ST-1 가이아 레드 + 오메가몬) 로드 및 백그라운드 대련 상태 준비
         var (st1Main, st1Digitama) = StarterDecks.CreateSt1GaiaRedPreset();
         _builderMainDeck = st1Main.ToList();
         _builderDigitamaDeck = st1Digitama.ToList();
 
         _isSecurityPeekEnabled = false;
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage3_AiBattle);
+        InitOpponentDeckCombos();
+        StartGameForStage(PracticeStage.Stage3_AiBattle);
 
         // 초기 프리뷰 카드 세팅 (워그레이몬 또는 첫 패 카드)
         var initialPreview = _gameState.Player.Hand.FirstOrDefault() ?? _catalogService.Catalog.First();
         UpdateCardInspector(initialPreview);
+        UpdateFieldDigimonBreakdown(null);
 
-        UpdateTopTabVisuals(activeTab: 0);
+        // 1. 처음 켰을 때 메인 로비 화면(실전 대련[AI], 덱빌딩, 연습)으로 시작!
+        UpdateTopTabVisuals(activeTab: -1);
         RefreshAllSimulatorUi();
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
-        ShowToast(true, "⚔️ [실전 AI 듀얼 아레나] 공식 플레이매트가 준비되었습니다! 패의 카드를 마우스로 드래그하여 진화/등장시키고 AI와 대결하세요.");
+        ApplyLobbyArtwork();
+        ShowToast(true, "🏠 [디지몬 TCG : DIGITAL COLOSSEUM] 메인 로비입니다! [⚔️ 실전 대련 (AI)], [🛠️ 덱 빌딩 & 도감], [🎯 연습] 모드를 선택하세요.");
+
+        // 신규 추가된 7색 TCG 카드 일러스트 백그라운드 프리패치
+        _ = PrefetchCatalogImagesAsync();
+    }
+
+    private async System.Threading.Tasks.Task PrefetchCatalogImagesAsync()
+    {
+        foreach (var card in _catalogService.Catalog.ToList())
+        {
+            string localPath = _catalogService.GetLocalImageFilePath(card);
+            if (!File.Exists(localPath) || new FileInfo(localPath).Length <= 500)
+            {
+                await _catalogService.EnsureCardImageCachedAsync(card);
+            }
+        }
+        Dispatcher.Invoke(() =>
+        {
+            ApplyLobbyArtwork();
+            if (DeckBuilderView.Visibility == Visibility.Visible)
+                RefreshCatalogUi();
+            if (SimulatorView.Visibility == Visibility.Visible)
+                RefreshAllSimulatorUi();
+        });
     }
 
     // ==================== 카드 이미지 로더 & 인스펙터 ====================
@@ -345,64 +387,821 @@ public partial class MainWindow : Window
         return outerBorder;
     }
 
-    // ==================== 3대 메인 모드 탭 전환 (실전 AI 듀얼 아레나 / 1인 솔리테어 훈련소 / 디지털 카드 도감 & 덱 공방) ====================
+    // ==================== 메인 로비 & 3대 메인 모드 탭 전환 (실전 대련[AI] / 덱 빌딩 / 연습[솔리테어]) ====================
     private void UpdateTopTabVisuals(int activeTab)
     {
-        // 0: 실전 AI 듀얼 아레나, 1: 1인 솔리테어 훈련소, 2: 디지털 카드 도감 & 덱 공방
-        BtnTabOfficialMatch.Background = BrushFromHex(activeTab == 0 ? "#F38BA8" : "#25293E");
-        BtnTabOfficialMatch.Foreground = BrushFromHex(activeTab == 0 ? "#11111B" : "#CDD6F4");
+        // -1: 메인 로비, 0: 실전 대련[AI], 1: 연습[솔리테어], 2: 덱 빌딩 & 도감
+        SetHeaderTabActive(BtnTabOfficialMatch, activeTab == 0, "Neo.Brush.Card.Red");
+        SetHeaderTabActive(BtnTabSimulator, activeTab == 1, "Neo.Brush.Card.Green");
+        SetHeaderTabActive(BtnTabDeckBuilder, activeTab == 2, "Neo.Brush.Card.Blue");
 
-        BtnTabSimulator.Background = BrushFromHex(activeTab == 1 ? "#89B4FA" : "#25293E");
-        BtnTabSimulator.Foreground = BrushFromHex(activeTab == 1 ? "#11111B" : "#CDD6F4");
+        // 로비(타이틀 화면)에서는 상단 헤더와 안내 바를 숨기고 전면 키 아트 + 세로 메뉴만 보여 준다
+        var chrome = activeTab == -1 ? Visibility.Collapsed : Visibility.Visible;
+        TopHeaderBar.Visibility = chrome;
+        ToastBanner.Visibility = chrome;
 
-        BtnTabDeckBuilder.Background = BrushFromHex(activeTab == 2 ? "#F9E2AF" : "#25293E");
-        BtnTabDeckBuilder.Foreground = BrushFromHex(activeTab == 2 ? "#11111B" : "#CDD6F4");
+        if (activeTab == -1)
+        {
+            MainLobbyView.Visibility = Visibility.Visible;
+            WorkspaceContainerGrid.Visibility = Visibility.Collapsed;
+            TxtLobbyActiveDeckName.Text = $"🎴 출전 덱: {_activeDeckTitle}";
+        }
+        else
+        {
+            MainLobbyView.Visibility = Visibility.Collapsed;
+            WorkspaceContainerGrid.Visibility = Visibility.Visible;
+            SimulatorView.Visibility = (activeTab == 0 || activeTab == 1) ? Visibility.Visible : Visibility.Collapsed;
+            DeckBuilderView.Visibility = activeTab == 2 ? Visibility.Visible : Visibility.Collapsed;
+            SoloStageButtonsPanel.Visibility = activeTab == 1 ? Visibility.Visible : Visibility.Collapsed;
+            MatchOpponentPanel.Visibility = activeTab == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyInspectorMode(deckBuilder: activeTab == 2);
+        }
 
         TxtCurrentModeSubtitle.Text = activeTab switch
         {
-            0 => "⚔️ 실전 AI 듀얼 아레나 — 공식 룰 플레이매트 대전",
-            1 => "🎯 1인 솔리테어 훈련소 — 5턴 타임어택 & 블로커 돌파 연습",
-            _ => "📚 디지털 카드 도감 & 덱 공방 — 50장 메인 덱 & 디지타마 황금 비율 설계"
+            -1 => string.Empty,
+            0 => "⚔️ 실전 대련 [AI] — 공식 룰 플레이매트 & 카드 효과 실전 대전",
+            1 => "🎯 연습 [솔리테어] — 5턴 타임어택 & 블로커 돌파 연습장",
+            _ => "🛠️ 덱 빌딩 & 도감 — 7색 전체 TCG 카드 도감 & 추천 메타 덱 공방"
         };
+    }
+
+    /// <summary>
+    /// 우측 사이드바 모드 전환.
+    /// 덱 빌딩: 대련 전용 패널(필드 DP 내역 · 전장 현황 · 로그)을 숨기고 카드를 크게 + 효과를 아래에 보여 주는 '카드 상세'.
+    /// 실전 / 연습: 작은 카드 + 효과 옆 배치에 대련 패널을 모두 표시.
+    /// </summary>
+    private void ApplyInspectorMode(bool deckBuilder)
+    {
+        var battleOnly = deckBuilder ? Visibility.Collapsed : Visibility.Visible;
+        FieldStatBreakdownBorder.Visibility = battleOnly;
+        InspectorHudSection.Visibility = Visibility.Collapsed;   // 전장 현황 지표는 사용하지 않음 (대련 화면에서도 숨김)
+        InspectorLogSection.Visibility = battleOnly;
+
+        TxtInspectorTitle.Text = deckBuilder ? "🔍 카드 상세" : "🔍 카드 효과 & 상세 프리뷰";
+        InspectorImageColumn.Width = deckBuilder ? new GridLength(1, GridUnitType.Star) : new GridLength(136);
+        InspectorTextColumn.Width = deckBuilder ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+
+        InspectorCardFrame.Width = deckBuilder ? 300 : 130;
+        InspectorCardFrame.Height = deckBuilder ? 418 : 182;
+        InspectorCardFrame.CornerRadius = new CornerRadius(deckBuilder ? 12 : 8);
+        InspectorCardFrame.HorizontalAlignment = deckBuilder ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+
+        Grid.SetColumn(InspectorTextPanel, deckBuilder ? 0 : 1);
+        Grid.SetRow(InspectorTextPanel, deckBuilder ? 1 : 0);
+        InspectorTextPanel.Margin = deckBuilder ? new Thickness(2, 12, 2, 0) : new Thickness(8, 0, 0, 0);
+        TxtInspectorName.FontSize = deckBuilder ? 19 : 15.5;
+        TxtInspectorStats.FontSize = deckBuilder ? 12.5 : 11;
+        TxtInspectorEffect.FontSize = deckBuilder ? 12 : 10.5;
+        TxtInspectorInherited.FontSize = deckBuilder ? 12 : 10.5;
+    }
+
+    private static void SetHeaderTabActive(Button tab, bool active, string accentBrushKey)
+    {
+        // 활성 탭 = 모드 색으로 채운 알약, 비활성 탭 = 고스트 (스타일 기본값으로 되돌림)
+        if (active)
+        {
+            tab.Background = Theme.GetBrush(accentBrushKey);
+            tab.Foreground = Theme.GetBrush("Neo.Brush.Text.OnNeon");
+            tab.BorderBrush = Theme.GetBrush(accentBrushKey);
+        }
+        else
+        {
+            tab.ClearValue(BackgroundProperty);
+            tab.ClearValue(ForegroundProperty);
+            tab.ClearValue(BorderBrushProperty);
+        }
+    }
+
+    // ==================== 🏠 메인 로비 모드 카드 일러스트 배너 ====================
+    private void ApplyLobbyArtwork()
+    {
+        // 타이틀 화면 키 아트: 초궁극체(Lv.7) 일러스트 → 없으면 레드 궁극체(Lv.6)
+        Func<CardData, bool> heroPick = c => c.Type == CardType.Digimon && c.Level == 7;
+        if (!_catalogService.Catalog.Any(c => heroPick(c) && GetCardBitmap(c) != null))
+            heroPick = c => c.Type == CardType.Digimon && c.Level == 6 && c.Color == CardColor.Red;
+
+        SetLobbyArt(LobbyHeroArt, heroPick, new Rect(0.17, 0.11, 0.79, 0.47));   // 코스트 아이콘 · 텍스트 박스를 피해 그림만
+        SetLobbyArt(LobbyHeroBlur, heroPick);
+    }
+
+    private void SetLobbyArt(System.Windows.Shapes.Rectangle target, Func<CardData, bool> pick, Rect? viewbox = null)
+    {
+        var card = _catalogService.Catalog.Where(pick).FirstOrDefault(c => GetCardBitmap(c) != null);
+        var bmp = card == null ? null : GetCardBitmap(card);
+        if (bmp == null)
+            return;
+
+        // 카드에서 텍스트 박스를 뺀 일러스트 부분만 잘라 배너로 쓴다
+        target.Fill = new ImageBrush(bmp)
+        {
+            Viewbox = viewbox ?? new Rect(0.04, 0.09, 0.92, 0.56),
+            ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+            Stretch = Stretch.UniformToFill,
+            AlignmentY = AlignmentY.Top
+        };
+        target.ToolTip = $"{card!.Name} ({card.CardId})";
+    }
+
+    private void BtnNavHome_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateTopTabVisuals(-1);
+        ShowToast(true, "🏠 메인 로비로 이동했습니다! 원하는 대련/덱빌딩/연습 모드를 선택하세요.");
     }
 
     private void BtnTabOfficialMatch_Click(object sender, RoutedEventArgs e)
     {
-        SimulatorView.Visibility = Visibility.Visible;
-        DeckBuilderView.Visibility = Visibility.Collapsed;
         UpdateTopTabVisuals(0);
 
         if (_gameState.CurrentStage != PracticeStage.Stage3_AiBattle)
         {
             _isSecurityPeekEnabled = false;
-            _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage3_AiBattle);
-            ShowToast(true, "⚔️ [실전 AI 듀얼 아레나] 공식 룰 AI 대전을 시작합니다! (시큐리티 비공개 & 메모리 줄다리기 적용)");
+            StartGameForStage(PracticeStage.Stage3_AiBattle);
         }
+        ShowToast(true, $"⚔️ [실전 대련 (AI)] 시작! 상대 덱: {_gameState.OpponentDeckName} — 상단 [👾 상대 덱] 선택 후 [🔄 재대전]으로 상대를 바꿀 수 있습니다.");
         RefreshAllSimulatorUi();
     }
 
     private void BtnTabSimulator_Click(object sender, RoutedEventArgs e)
     {
-        SimulatorView.Visibility = Visibility.Visible;
-        DeckBuilderView.Visibility = Visibility.Collapsed;
         UpdateTopTabVisuals(1);
 
         if (_gameState.CurrentStage == PracticeStage.Stage3_AiBattle)
         {
             _isSecurityPeekEnabled = true;
-            _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage1_Goldfish);
-            ShowToast(true, "🎯 [1인 솔리테어 훈련소] 5턴 타임어택 모드로 전환했습니다! 상단에서 [Stage 1: 솔리테어] 또는 [Stage 2: 블로커 돌파]를 선택할 수 있습니다.");
+            StartGameForStage(PracticeStage.Stage1_Goldfish);
         }
+        ShowToast(true, "🎯 [연습 (솔리테어)] 연습장 모드로 진입했습니다! 상단에서 [Stage 1: 솔리테어] 또는 [Stage 2: 블로커 돌파]를 선택할 수 있습니다.");
         RefreshAllSimulatorUi();
     }
 
     private void BtnTabDeckBuilder_Click(object sender, RoutedEventArgs e)
     {
-        SimulatorView.Visibility = Visibility.Collapsed;
-        DeckBuilderView.Visibility = Visibility.Visible;
         UpdateTopTabVisuals(2);
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
+        ShowToast(true, "🛠️ [덱 빌딩 & 도감] 7색 전체 TCG 카드와 6대 추천 메타 덱 프리셋, AI 자동 완성 기능을 사용할 수 있습니다.");
+    }
+
+    // ==================== 👾 상대 AI 덱 선택 (기초 덱 + 내가 만든 덱) ====================
+    private int _opponentChoiceIndex;
+    private bool _isSyncingOpponentCombo;
+
+    private static readonly string[] OpponentChoiceLabels =
+    {
+        "🎲 자동 배정 (내 덱 카운터)",
+        "🔥 [기초] ST-1 가이아 레드",
+        "❄️ [기초] ST-2 코퀴토스 블루",
+        "⚡ [기초] ST-3 헤븐즈 옐로우",
+        "🌿 [기초] ST-4 기가 그린",
+        "⚙️ [기초] ST-5 머신 블랙",
+        "💜 [기초] ST-6 베놈 바이올렛",
+        "🛠️ 내가 만든 덱 (저장된 덱)",
+        "🪞 미러전 (현재 내 출전 덱)"
+    };
+
+    private void InitOpponentDeckCombos()
+    {
+        _isSyncingOpponentCombo = true;
+        CmbMatchOpponentDeck.Items.Clear();
+        foreach (var label in OpponentChoiceLabels)
+            CmbMatchOpponentDeck.Items.Add(new ComboBoxItem { Content = label });
+        CmbMatchOpponentDeck.SelectedIndex = _opponentChoiceIndex;
+        _isSyncingOpponentCombo = false;
+    }
+
+    private void CmbOpponentDeck_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingOpponentCombo || sender is not ComboBox combo || combo.SelectedIndex < 0)
+            return;
+
+        _opponentChoiceIndex = combo.SelectedIndex;
+
+        if (_opponentChoiceIndex == 7 && _catalogService.LoadCustomDeck() == null)
+        {
+            ShowToast(false, "저장된 커스텀 덱이 없습니다. [🛠️ 덱 빌딩]에서 덱을 만든 뒤 [💾 덱 저장]을 눌러주세요. (그 전까지는 자동 배정으로 대전합니다)");
+            return;
+        }
+
+        ShowToast(true, $"👾 상대 AI 덱을 [{OpponentChoiceLabels[_opponentChoiceIndex]}](으)로 설정했습니다. 다음 실전 대련(또는 [🔄 재대전])부터 적용됩니다.");
+    }
+
+    private void BtnRematchAi_Click(object sender, RoutedEventArgs e)
+    {
+        _isSecurityPeekEnabled = false;
+        StartGameForStage(PracticeStage.Stage3_AiBattle);
+        UpdateTopTabVisuals(0);
+        RefreshAllSimulatorUi();
+        ShowToast(true, $"🔄 새 실전 대련 시작! 상대 덱: {_gameState.OpponentDeckName}");
+    }
+
+    /// <summary>
+    /// 현재 선택된 상대 덱 옵션을 실제 카드 리스트로 변환 (null = 자동 배정)
+    /// </summary>
+    private (List<CardData>? Main, List<CardData>? Digitama, string? Name) ResolveSelectedOpponentDeck()
+    {
+        switch (_opponentChoiceIndex)
+        {
+            case 1: { var (m, d) = StarterDecks.CreateSt1GaiaRedPreset(); return (m, d, OpponentChoiceLabels[1]); }
+            case 2: { var (m, d) = StarterDecks.CreateSt2CocytusBluePreset(); return (m, d, OpponentChoiceLabels[2]); }
+            case 3: { var (m, d) = StarterDecks.CreateSt3HeavensYellowPreset(); return (m, d, OpponentChoiceLabels[3]); }
+            case 4: { var (m, d) = StarterDecks.CreateSt4GigaGreenPreset(); return (m, d, OpponentChoiceLabels[4]); }
+            case 5: { var (m, d) = StarterDecks.CreateSt5MachineBlackPreset(); return (m, d, OpponentChoiceLabels[5]); }
+            case 6: { var (m, d) = StarterDecks.CreateSt6VenomVioletPreset(); return (m, d, OpponentChoiceLabels[6]); }
+            case 7:
+            {
+                var saved = _catalogService.LoadCustomDeck();
+                if (saved == null || saved.Value.MainDeck.Count < 10)
+                    return (null, null, null);
+                return (saved.Value.MainDeck, saved.Value.DigitamaDeck, $"🛠️ 내가 만든 덱: {saved.Value.DeckName} ({saved.Value.MainDeck.Count}장)");
+            }
+            case 8:
+                return (_builderMainDeck.ToList(), _builderDigitamaDeck.ToList(), $"🪞 미러전: {_activeDeckTitle}");
+            default:
+                return (null, null, null);
+        }
+    }
+
+    /// <summary>
+    /// 모든 게임 시작은 이 메서드를 통해 진행 (AI 대전일 때만 선택한 상대 덱 적용)
+    /// </summary>
+    private void StartGameForStage(PracticeStage stage)
+    {
+        if (stage == PracticeStage.Stage3_AiBattle)
+        {
+            var (oppMain, oppDigitama, oppName) = ResolveSelectedOpponentDeck();
+            _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: stage,
+                opponentMainDeck: oppMain, opponentDigitamaDeck: oppDigitama, opponentDeckName: oppName);
+        }
+        else
+        {
+            _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: stage);
+        }
+
+        // 실전 AI 대전은 화면에 대련장이 처음 보일 때 코인 토스로 선공 / 후공을 정한다
+        _coinTossPending = stage == PracticeStage.Stage3_AiBattle;
+    }
+
+    // ==================== 🎲 코인 토스 (실전 대련 선공 / 후공 결정) ====================
+    private bool _coinTossPending;
+    private bool _coinTossPlayerFirst;
+    private bool _coinTossLanded;
+    private DispatcherTimer? _coinTossTimer;
+
+    private void TryStartCoinToss()
+    {
+        if (!_coinTossPending || CoinTossOverlay.Visibility == Visibility.Visible)
+            return;
+        if (_gameState.CurrentStage != PracticeStage.Stage3_AiBattle ||
+            MainLobbyView.Visibility == Visibility.Visible ||
+            WorkspaceContainerGrid.Visibility != Visibility.Visible ||
+            SimulatorView.Visibility != Visibility.Visible)
+            return;
+
+        _coinTossPending = false;
+        _coinTossPlayerFirst = Random.Shared.Next(2) == 0;
+        _coinTossLanded = false;
+
+        TxtCoinResult.Text = string.Empty;
+        TxtCoinResultSub.Text = string.Empty;
+        TxtCoinResult.BeginAnimation(OpacityProperty, null);
+        TxtCoinResultSub.BeginAnimation(OpacityProperty, null);
+        TxtCoinResult.Opacity = 0;
+        TxtCoinResultSub.Opacity = 0;
+        CoinTossOverlay.BeginAnimation(OpacityProperty, null);
+        CoinTossOverlay.Opacity = 1;
+        CoinTossOverlay.Visibility = Visibility.Visible;
+
+        // 동전이 튀어 올라 회전하다가 결과 면으로 떨어진다 (앞면 ME / 뒷면 AI)
+        const double flipSeconds = 1.6;
+        int halfTurns = 2 * 7 + (_coinTossPlayerFirst ? 0 : 1);   // 짝수 번 뒤집히면 앞면, 홀수면 뒷면
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        _coinTossTimer?.Stop();
+        _coinTossTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(15) };
+        _coinTossTimer.Tick += (_, _) =>
+        {
+            double t = Math.Min(1.0, clock.Elapsed.TotalSeconds / flipSeconds);
+            double eased = 1 - Math.Pow(1 - t, 3);                 // 점점 느려지는 회전
+            double angle = eased * halfTurns * Math.PI;
+            double c = Math.Cos(angle);
+            CoinFlipScale.ScaleY = Math.Max(0.04, Math.Abs(c));
+            bool front = c >= 0;
+            TxtCoinFace.Text = front ? "ME" : "AI";
+            TxtCoinFace.Foreground = BrushFromHex(front ? "#0B4A7A" : "#7A0B2E");
+            double lift = Math.Sin(t * Math.PI) * 170;               // 포물선으로 떴다가 내려옴
+            CoinLift.Y = -lift;
+            CoinShadow.Opacity = 1 - lift / 240;
+            CoinShadow.Width = 150 - lift / 3;
+
+            if (t >= 1.0)
+            {
+                _coinTossTimer!.Stop();
+                LandCoin();
+            }
+        };
+        _coinTossTimer.Start();
+    }
+
+    private void LandCoin()
+    {
+        if (_coinTossLanded)
+            return;
+        _coinTossLanded = true;
+
+        CoinFlipScale.ScaleY = 1;
+        CoinLift.Y = 0;
+        TxtCoinFace.Text = _coinTossPlayerFirst ? "ME" : "AI";
+        TxtCoinFace.Foreground = BrushFromHex(_coinTossPlayerFirst ? "#0B4A7A" : "#7A0B2E");
+
+        TxtCoinResult.Text = _coinTossPlayerFirst ? "앞면! 내가 선공입니다" : "뒷면! 상대 AI 선공입니다";
+        TxtCoinResult.Foreground = Theme.GetBrush(_coinTossPlayerFirst ? "Neo.Brush.CyanBright" : "Neo.Brush.RoseSoft");
+        TxtCoinResultSub.Text = _coinTossPlayerFirst
+            ? "선공은 1턴째 드로우 없이 시작합니다."
+            : "상대가 먼저 1턴을 진행합니다. 후공인 나는 1턴째에도 1장 드로우합니다.";
+        var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220));
+        TxtCoinResult.BeginAnimation(OpacityProperty, fadeIn);
+        TxtCoinResultSub.BeginAnimation(OpacityProperty, fadeIn);
+
+        _coinTossTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+        _coinTossTimer.Tick += (_, _) => FinishCoinToss();
+        _coinTossTimer.Start();
+    }
+
+    private void FinishCoinToss()
+    {
+        _coinTossTimer?.Stop();
+        if (CoinTossOverlay.Visibility != Visibility.Visible)
+            return;
+
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220));
+        fade.Completed += (_, _) =>
+        {
+            CoinTossOverlay.Visibility = Visibility.Collapsed;
+            CoinTossOverlay.BeginAnimation(OpacityProperty, null);
+            CoinTossOverlay.Opacity = 1;
+        };
+        CoinTossOverlay.BeginAnimation(OpacityProperty, fade);
+
+        if (_coinTossPlayerFirst)
+        {
+            _engine.Log("🎲 코인 토스 결과: 플레이어 선공 / 상대 AI 후공");
+            RefreshAllSimulatorUi();
+            ShowToast(true, "🎲 코인 토스: 앞면 — 내가 선공! (1턴째 드로우 없음) 육성 페이즈부터 시작하세요.");
+        }
+        else
+        {
+            var res = _engine.GiveFirstTurnToOpponent();
+            RefreshAllSimulatorUi();
+            ShowToast(res.CanExecute, $"🎲 코인 토스: 뒷면 — 상대 AI 선공! {(res.CanExecute ? res.GuideMessage : res.Reason)}");
+        }
+    }
+
+    private void CoinTossOverlay_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        // 회전 중 클릭 = 바로 착지, 착지 후 클릭 = 바로 대련 시작
+        if (!_coinTossLanded)
+        {
+            _coinTossTimer?.Stop();
+            LandCoin();
+        }
+        else
+        {
+            FinishCoinToss();
+        }
+    }
+
+    private void ApplyPresetDeckAndSync(string deckTitle, (List<CardData> MainDeck, List<CardData> DigitamaDeck) preset)
+    {
+        _activeDeckTitle = deckTitle;
+        _builderMainDeck = preset.MainDeck;
+        _builderDigitamaDeck = preset.DigitamaDeck;
+        if (TxtLobbyActiveDeckName != null)
+        {
+            TxtLobbyActiveDeckName.Text = $"🎴 출전 덱: {_activeDeckTitle}";
+        }
+        StartGameForStage(_gameState.CurrentStage);
+        RefreshCatalogUi();
+        RefreshDeckBuilderUi();
+        if (SimulatorView.Visibility == Visibility.Visible)
+        {
+            RefreshAllSimulatorUi();
+        }
+        ShowToast(true, $"✅ [{deckTitle}] (메인 50장 + 디지타마 4장) 장착 완료!");
+    }
+
+    private void BtnQuickDeckRed_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("🔥 [추천 1] 워그레이몬 & 오메가몬 초화력 비트 (50장)", StarterDecks.CreateSt1GaiaRedPreset());
+
+    private void BtnQuickDeckBlue_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("❄️ [추천 2] 메탈가루루몬 & 오메가몬 연타 (50장)", StarterDecks.CreateSt2CocytusBluePreset());
+
+    private void BtnQuickDeckYellow_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("⚡ [추천 3] 세라피몬 & 샤인그레이몬 시큐 컨트롤 (50장)", StarterDecks.CreateSt3HeavensYellowPreset());
+
+    private void BtnQuickDeckGreen_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("🌿 [추천 4] 헤라클캅테리몬 초고속 진화 램프 (50장)", StarterDecks.CreateSt4GigaGreenPreset());
+
+    private void BtnQuickDeckBlack_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("⚙️ [추천 5] 파워드라몬 & 크레니엄몬 철벽 블로커 (50장)", StarterDecks.CreateSt5MachineBlackPreset());
+
+    private void BtnQuickDeckPurple_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("🔮 [추천 6] 베놈묘티스몬 & 벨제부몬 어그로 (50장)", StarterDecks.CreateSt6VenomVioletPreset());
+
+    // ==================== 📊 우측 사이드바: 필드 디지몬 DP & 테이머 효과 증가치 인스펙터 ====================
+    private void UpdateFieldDigimonBreakdown(CardInstance? instance, bool isPinned = false, bool isOpponent = false)
+    {
+        if (TxtFieldInspectHeader == null)
+            return;
+
+        if (instance == null)
+        {
+            if (_pinnedFieldInstance != null)
+            {
+                bool onPlayerField = _gameState.Player.BattleArea.Contains(_pinnedFieldInstance) ||
+                                     ReferenceEquals(_gameState.Player.BreedingArea, _pinnedFieldInstance);
+                bool onOppField = _gameState.DummyOpponent.BattleArea.Contains(_pinnedFieldInstance);
+                if (onPlayerField || onOppField)
+                {
+                    instance = _pinnedFieldInstance;
+                    isPinned = true;
+                    isOpponent = onOppField;
+                }
+                else
+                {
+                    _pinnedFieldInstance = null;
+                }
+            }
+        }
+
+        if (instance == null)
+        {
+            TxtFieldInspectHeader.Text = "필드 카드를 마우스로 가리키거나 클릭하세요";
+            TxtFieldInspectPinState.Text = "🖱️ 호버 / 클릭 확인";
+            TxtFieldDpBreakdown.Text = "⚔️ 총 DP: - (기본 - / 진화원 +0 / 테이머 +0 / 스킬 +0)";
+            TxtFieldSecBreakdown.Text = "💥 시큐리티 타격: - (기본 1장)";
+
+            if (_gameState.Player.Tamers.Count > 0)
+            {
+                var tamerSummaries = _gameState.Player.Tamers
+                    .GroupBy(t => t.CardId)
+                    .Select(g => $"{g.First().Name} x{g.Count()}");
+                TxtFieldTamerAndSources.Text = $"🎖️ 현재 내 필드 활성 테이머: {string.Join(", ", tamerSummaries)}\n(필드의 디지몬에 마우스를 올리면 정확한 DP/시큐 증가치가 계산됩니다)";
+            }
+            else
+            {
+                TxtFieldTamerAndSources.Text = "🎖️ 활성 테이머 & 진화원 스택: 필드의 디지몬 또는 테이머에 마우스를 올리세요.";
+            }
+            return;
+        }
+
+        string sideLabel = isOpponent ? "[상대 필드]" : ReferenceEquals(_gameState.Player.BreedingArea, instance) ? "[내 육성존]" : "[내 배틀존]";
+        TxtFieldInspectHeader.Text = $"{sideLabel} Lv.{instance.TopCard.Level} {instance.TopCard.Name}";
+        TxtFieldInspectPinState.Text = isPinned ? "📌 클릭 고정됨 (재클릭 해제)" : "🖱️ 마우스 오버 중 (클릭 시 고정)";
+        TxtFieldInspectPinState.Foreground = BrushFromHex(isPinned ? "#F9E2AF" : "#A6E3A1");
+
+        if (instance.TopCard.Type == CardType.Digimon)
+        {
+            int baseDp = instance.TopCard.DP;
+            int inhDp = instance.GetInheritedDpBonus();
+            int tamerDp = instance.TamerDpBonus;
+            int skillDp = instance.TemporaryDpBonus;
+            int totalBonusDp = instance.GetTotalBonusDP();
+            int currentDp = instance.GetCurrentDP();
+
+            TxtFieldDpBreakdown.Text =
+                $"⚔️ 현재 총 DP: {currentDp:N0} (▲ +{totalBonusDp:N0} 증가)\n" +
+                $"   └ 기본 {baseDp:N0} | 🧬진화원 +{inhDp:N0} | 🎖️테이머 +{tamerDp:N0} | ✨스킬/옵션 +{skillDp:N0}";
+
+            int secCount = instance.GetSecurityAttackCount();
+            int bonusSec = instance.GetTotalBonusSecurityAttack();
+            TxtFieldSecBreakdown.Text =
+                $"💥 시큐리티 타격: {secCount}장 (추가공격 +{bonusSec})\n" +
+                $"   └ 기본 1장 | 🔥고유 +{instance.TopCard.SecurityAttackBonus} | 🧬진화원 +{instance.GetInheritedSecurityAttackBonus()} | 🎖️테이머 +{instance.TamerSecurityAttackBonus} | ✨스킬 +{instance.TemporarySecurityAttackBonus}";
+        }
+        else
+        {
+            TxtFieldDpBreakdown.Text = "🥚 Lv.2 유년기 디지타마 (전투 DP 없음 — Lv.3 성장기로 진화시켜 배틀존으로 이동하세요)";
+            TxtFieldSecBreakdown.Text = "🛡️ 안전지대 육성 중";
+        }
+
+        var detailLines = new List<string>();
+        if (!isOpponent && _gameState.Player.Tamers.Count > 0)
+        {
+            var tamerNames = _gameState.Player.Tamers.GroupBy(t => t.CardId).Select(g => $"{g.First().Name} x{g.Count()}");
+            detailLines.Add($"🎖️ 테이머 오라 적용: {string.Join(", ", tamerNames)} (DP +{instance.TamerDpBonus:N0}, 시큐 +{instance.TamerSecurityAttackBonus})");
+        }
+        if (instance.ActiveSkillBuffLabels.Count > 0)
+        {
+            detailLines.Add($"✨ 활성 스킬 버프: {string.Join(" / ", instance.ActiveSkillBuffLabels)}");
+        }
+
+        var evoSources = instance.GetEvolutionStackBottomUp();
+        if (evoSources.Count > 0)
+        {
+            var srcTexts = evoSources.Select(s =>
+            {
+                string bonus = s.InheritedSecurityAttackBonus > 0
+                    ? $"[💥시큐+{s.InheritedSecurityAttackBonus}]"
+                    : s.InheritedDpBonus > 0
+                        ? $"[▲DP+{s.InheritedDpBonus:N0}]"
+                        : "";
+                return $"Lv.{s.Level} {s.Name}{bonus}";
+            });
+            detailLines.Add($"🧬 진화원({evoSources.Count}장): {string.Join(" ➔ ", srcTexts)}");
+        }
+        else
+        {
+            detailLines.Add("🧬 진화원 스택: 없음 (바닥 등장)");
+        }
+
+        TxtFieldTamerAndSources.Text = string.Join("\n", detailLines);
+    }
+
+    private void UpdateTamerBreakdownOnSidebar(CardData tamer, int count)
+    {
+        if (TxtFieldInspectHeader == null)
+            return;
+
+        TxtFieldInspectHeader.Text = $"[내 테이머 존] 🎖️ {tamer.Name} x{count}장";
+        TxtFieldInspectPinState.Text = "🎖️ 테이머 지속 효과";
+
+        string dpAura = tamer.Color == CardColor.Red
+            ? $"아군 모든 디지몬 DP +{count * 1000:N0}"
+            : $"진화원이 있는 아군 디지몬 DP +{count * 1000:N0}";
+
+        string secAndMemAura = tamer.CardId == "ST1-12"
+            ? $"진화원 4장 이상 디지몬 💥시큐어택 +{count} | 턴 시작 시 메모리 최소 3 보장"
+            : $"내 턴 시작 시 메모리 +{count} 추가 획득 | {tamer.EffectText}";
+
+        TxtFieldDpBreakdown.Text = $"⚔️ 필드 DP 증가치: {dpAura}";
+        TxtFieldSecBreakdown.Text = $"⚡ 특수 & 메모리 효과: {secAndMemAura}";
+        TxtFieldTamerAndSources.Text = $"📜 원문 효과: {tamer.EffectText}";
+    }
+
+    // ==================== ⚡ 2-3. 궁극체(Lv.6) / 초궁극체(Lv.7) 특수 소환 컷인 연출 ====================
+    private void ShowUltimateCutIn(CardInstance instance, bool isEvolution)
+    {
+        var card = instance.TopCard;
+        if (card.Type != CardType.Digimon || card.Level < 6)
+            return;
+
+        _ultimateCutInTimer?.Stop();
+        StopCutInVideo();
+
+        var colorBrush = GetCardColorBrush(card.Color);
+        Color auraColor = card.Level >= 7 ? (Color)ColorConverter.ConvertFromString("#F9E2AF") : colorBrush.Color;
+
+        UltimateCutInBanner.BorderBrush = colorBrush;
+        UltimateCutInBanner.Background = new LinearGradientBrush(
+            Color.FromArgb(0, auraColor.R, auraColor.G, auraColor.B),
+            Color.FromArgb(0, auraColor.R, auraColor.G, auraColor.B), 0)
+        {
+            GradientStops =
+            {
+                new GradientStop(Color.FromArgb(0, auraColor.R, auraColor.G, auraColor.B), 0),
+                new GradientStop(Color.FromArgb(90, auraColor.R, auraColor.G, auraColor.B), 0.5),
+                new GradientStop(Color.FromArgb(0, auraColor.R, auraColor.G, auraColor.B), 1)
+            }
+        };
+        TxtUltimateCutInTier.Text = card.Level >= 7
+            ? $"🌌 LV.{card.Level} ULTRA DIGIVOLUTION // 초궁극체 강림!"
+            : isEvolution
+                ? $"⚡ LV.{card.Level} ULTIMATE DIGIVOLUTION // 궁극체 진화!"
+                : $"⚡ LV.{card.Level} ULTIMATE SUMMON // 궁극체 전장 강림!";
+        TxtUltimateCutInTier.Foreground = card.Level >= 7 ? BrushFromHex("#F9E2AF") : colorBrush;
+
+        TxtUltimateCutInName.Text = card.Name;
+        TxtUltimateCutInStats.Text =
+            $"⚔️ DP {instance.GetCurrentDP():N0} (▲+{instance.GetTotalBonusDP():N0})   |   💥 시큐리티 타격 {instance.GetSecurityAttackCount()}장";
+        TxtUltimateCutInEffect.Text = string.IsNullOrWhiteSpace(card.EffectText)
+            ? "압도적인 궁극체 전투력으로 상대 필드를 제압합니다!"
+            : card.EffectText;
+
+        // 배경 오라 + 카드 색 집중선
+        CutInAura.Background = new RadialGradientBrush(Color.FromArgb(150, auraColor.R, auraColor.G, auraColor.B), Color.FromArgb(0, 0, 0, 0))
+        {
+            Center = new Point(0.5, 0.42),
+            GradientOrigin = new Point(0.5, 0.42),
+            RadiusX = 0.6,
+            RadiusY = 0.7
+        };
+        CutInSpeedLines.Fill = CreateCutInSpeedLinesBrush(Color.FromArgb(150, auraColor.R, auraColor.G, auraColor.B));
+
+        // 영상이 있으면 영상, 없으면 카드 일러스트(텍스트 박스를 뺀 그림 부분만 잘라 크게)로 포효 연출
+        string? videoPath = FindCutInVideo(card);
+        bool playVideo = videoPath != null;
+        CutInVideo.Visibility = playVideo ? Visibility.Visible : Visibility.Collapsed;
+        CutInArt.Visibility = playVideo ? Visibility.Collapsed : Visibility.Visible;
+        // 일러스트는 영상 재생이 실패할 때의 대체 화면으로도 쓰이므로 항상 준비해 둔다
+        var bmp = GetCardBitmap(card);
+        CutInArt.Fill = bmp == null
+            ? new RadialGradientBrush(auraColor, Colors.Transparent)
+            : new ImageBrush(bmp)
+            {
+                Viewbox = new Rect(0.04, 0.09, 0.92, 0.56),
+                ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+                Stretch = Stretch.UniformToFill
+            };
+        if (playVideo)
+        {
+            CutInVideo.Source = new Uri(videoPath!, UriKind.Absolute);
+            CutInVideo.Play();
+        }
+
+        UltimateCutInOverlay.BeginAnimation(OpacityProperty, null);
+        UltimateCutInOverlay.Opacity = 1;
+        UltimateCutInOverlay.Visibility = Visibility.Visible;
+        PlayRoarCutInAnimation(withArtZoom: !playVideo);
+
+        // 영상은 끝날 때 닫히고(최대 12초), 일러스트 연출은 3.2초 뒤에 닫힌다
+        _ultimateCutInTimer = new DispatcherTimer
+        {
+            Interval = playVideo ? TimeSpan.FromSeconds(12) : TimeSpan.FromMilliseconds(3200)
+        };
+        _ultimateCutInTimer.Tick += (_, _) => CloseUltimateCutIn();
+        _ultimateCutInTimer.Start();
+    }
+
+    private void PlayRoarCutInAnimation(bool withArtZoom)
+    {
+        var easeOut = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 5 };
+
+        // 화면 플래시
+        CutInFlash.BeginAnimation(OpacityProperty, new DoubleAnimation(0.95, 0, TimeSpan.FromMilliseconds(380)));
+
+        // 줌 펀치 → 천천히 다가오는 카메라
+        var zoom = new DoubleAnimationUsingKeyFrames();
+        zoom.KeyFrames.Add(new DiscreteDoubleKeyFrame(withArtZoom ? 1.55 : 1.15, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        zoom.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(260)), easeOut));
+        zoom.KeyFrames.Add(new LinearDoubleKeyFrame(withArtZoom ? 1.12 : 1.03, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(3200))));
+        CutInArtScale.BeginAnimation(ScaleTransform.ScaleXProperty, zoom);
+        CutInArtScale.BeginAnimation(ScaleTransform.ScaleYProperty, zoom);
+
+        // 포효 순간의 카메라 흔들림 (점점 약해짐)
+        var rng = new Random();
+        var shakeX = new DoubleAnimationUsingKeyFrames();
+        var shakeY = new DoubleAnimationUsingKeyFrames();
+        shakeX.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        shakeY.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        for (int i = 0; i < 16; i++)
+        {
+            double power = 18 * (1 - i / 16.0);
+            var t = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(220 + i * 40));
+            shakeX.KeyFrames.Add(new LinearDoubleKeyFrame((rng.NextDouble() * 2 - 1) * power, t));
+            shakeY.KeyFrames.Add(new LinearDoubleKeyFrame((rng.NextDouble() * 2 - 1) * power, t));
+        }
+        var settle = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(900));
+        shakeX.KeyFrames.Add(new LinearDoubleKeyFrame(0, settle));
+        shakeY.KeyFrames.Add(new LinearDoubleKeyFrame(0, settle));
+        CutInShake.BeginAnimation(TranslateTransform.XProperty, shakeX);
+        CutInShake.BeginAnimation(TranslateTransform.YProperty, shakeY);
+
+        // 집중선 회전
+        CutInSpeedLinesRotate.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(0, 24, TimeSpan.FromMilliseconds(3200)));
+
+        // 충격파 3연발
+        var waves = new[] { CutInShockwave1, CutInShockwave2, CutInShockwave3 };
+        for (int i = 0; i < waves.Length; i++)
+        {
+            var begin = TimeSpan.FromMilliseconds(200 + i * 260);
+            var scale = (ScaleTransform)waves[i].RenderTransform;
+            var grow = new DoubleAnimation(0.2, 5.5, TimeSpan.FromMilliseconds(800)) { BeginTime = begin, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+            waves[i].BeginAnimation(OpacityProperty, new DoubleAnimation(0.85, 0, TimeSpan.FromMilliseconds(800)) { BeginTime = begin });
+        }
+
+        // "크아아아앙!!" 효과음 문자: 쾅 하고 커졌다가 떨리며 사라짐
+        var roarScale = new DoubleAnimationUsingKeyFrames { BeginTime = TimeSpan.FromMilliseconds(180) };
+        roarScale.KeyFrames.Add(new DiscreteDoubleKeyFrame(2.4, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        roarScale.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(200)), easeOut));
+        roarScale.KeyFrames.Add(new LinearDoubleKeyFrame(1.12, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1600))));
+        CutInRoarScale.BeginAnimation(ScaleTransform.ScaleXProperty, roarScale);
+        CutInRoarScale.BeginAnimation(ScaleTransform.ScaleYProperty, roarScale);
+        var roarFade = new DoubleAnimationUsingKeyFrames();
+        roarFade.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        roarFade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(180))));
+        roarFade.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1500))));
+        roarFade.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2000))));
+        TxtCutInRoar.BeginAnimation(OpacityProperty, roarFade);
+
+        // 이름 슬라이드 인
+        CutInTextShift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(-260, 0, TimeSpan.FromMilliseconds(420)) { BeginTime = TimeSpan.FromMilliseconds(250), EasingFunction = easeOut });
+        CutInTextPanel.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(300)) { BeginTime = TimeSpan.FromMilliseconds(250) });
+    }
+
+    private static Brush CreateCutInSpeedLinesBrush(Color color)
+    {
+        // 중심에서 뻗어 나가는 가는 쐐기 60개 = 만화식 집중선
+        var group = new GeometryGroup();
+        for (int i = 0; i < 60; i++)
+        {
+            double angle = i * 6 * Math.PI / 180 + (i % 2 == 0 ? 0 : 0.03);
+            double half = (i % 3 == 0 ? 1.1 : 0.5) * Math.PI / 180;
+            var tip = new Point(0, 0);
+            var a = new Point(Math.Cos(angle - half) * 1000, Math.Sin(angle - half) * 1000);
+            var b = new Point(Math.Cos(angle + half) * 1000, Math.Sin(angle + half) * 1000);
+            group.Children.Add(new PathGeometry(new[]
+            {
+                new PathFigure(tip, new PathSegment[] { new LineSegment(a, false), new LineSegment(b, false) }, true)
+            }));
+        }
+        var brush = new DrawingBrush(new GeometryDrawing(new SolidColorBrush(color), null, group)) { Stretch = Stretch.Uniform };
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>data/cutins/ 에서 {카드번호} 또는 {디지몬 이름} 으로 된 영상(.mp4 / .wmv / .mov)을 찾는다.</summary>
+    private string? FindCutInVideo(CardData card)
+    {
+        string? dataDir = Path.GetDirectoryName(_catalogService.ImagesDirectoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (dataDir == null)
+            return null;
+
+        string cutInDir = Path.Combine(dataDir, "cutins");
+        if (!Directory.Exists(cutInDir))
+            return null;
+
+        foreach (string baseName in new[] { card.CardId, card.Name })
+        {
+            foreach (string ext in new[] { ".mp4", ".wmv", ".mov" })
+            {
+                string path = Path.Combine(cutInDir, baseName + ext);
+                if (File.Exists(path))
+                    return path;
+            }
+        }
+        return null;
+    }
+
+    private void StopCutInVideo()
+    {
+        CutInVideo.Stop();
+        CutInVideo.Source = null;
+    }
+
+    private void CloseUltimateCutIn()
+    {
+        _ultimateCutInTimer?.Stop();
+        if (UltimateCutInOverlay.Visibility != Visibility.Visible)
+            return;
+
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(260));
+        fade.Completed += (_, _) =>
+        {
+            UltimateCutInOverlay.Visibility = Visibility.Collapsed;
+            UltimateCutInOverlay.BeginAnimation(OpacityProperty, null);
+            UltimateCutInOverlay.Opacity = 1;
+            StopCutInVideo();
+        };
+        UltimateCutInOverlay.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private void CutInVideo_MediaEnded(object sender, RoutedEventArgs e) => CloseUltimateCutIn();
+
+    private void CutInVideo_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        // 코덱 문제 등으로 영상 재생이 실패하면 일러스트 연출로 대체
+        CutInVideo.Visibility = Visibility.Collapsed;
+        CutInArt.Visibility = Visibility.Visible;
+        PlayRoarCutInAnimation(withArtZoom: true);
+        if (_ultimateCutInTimer != null)
+        {
+            _ultimateCutInTimer.Stop();
+            _ultimateCutInTimer.Interval = TimeSpan.FromMilliseconds(3200);
+            _ultimateCutInTimer.Start();
+        }
+    }
+
+    private void UltimateCutInOverlay_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e) => CloseUltimateCutIn();
+
+    private void ExecutePlayCardWithEffects(CardData card, CardInstance? target = null)
+    {
+        var res = _engine.PlayCard(card, target);
+        ApplyActionResult(res);
+        if (res.CanExecute && card.Type == CardType.Digimon && card.Level >= 6)
+        {
+            var spawned = _gameState.Player.BattleArea.LastOrDefault(d => d.TopCard.CardId == card.CardId);
+            if (spawned != null)
+            {
+                ShowUltimateCutIn(spawned, isEvolution: false);
+                UpdateFieldDigimonBreakdown(spawned, isPinned: false);
+            }
+        }
+    }
+
+    private void ExecuteEvolveDigimonWithEffects(CardInstance target, CardData evoCard)
+    {
+        var res = _engine.EvolveDigimon(target, evoCard);
+        ApplyActionResult(res);
+        if (res.CanExecute)
+        {
+            UpdateFieldDigimonBreakdown(target, isPinned: ReferenceEquals(_pinnedFieldInstance, target));
+            if (evoCard.Type == CardType.Digimon && evoCard.Level >= 6)
+            {
+                ShowUltimateCutIn(target, isEvolution: true);
+            }
+        }
     }
 
     private void AutoPassBreedingIfNeeded()
@@ -418,15 +1217,15 @@ public partial class MainWindow : Window
     {
         if (isSuccessOrGuide)
         {
-            ToastBanner.Background = BrushFromHex("#1E293B");
-            ToastBanner.BorderBrush = BrushFromHex("#38BDF8");
+            ToastBanner.Background = BrushFromHex("#E60E1729");
+            ToastBanner.BorderBrush = BrushFromHex("#6638BDF8");
             ToastBadge.Text = "💡 가이드 / 승인";
             ToastBadge.Foreground = BrushFromHex("#38BDF8");
         }
         else
         {
-            ToastBanner.Background = BrushFromHex("#3B1D2E");
-            ToastBanner.BorderBrush = BrushFromHex("#F38BA8");
+            ToastBanner.Background = BrushFromHex("#E62A0F1E");
+            ToastBanner.BorderBrush = BrushFromHex("#99F43F75");
             ToastBadge.Text = "⚠️ 규칙 위반 차단";
             ToastBadge.Foreground = BrushFromHex("#F38BA8");
         }
@@ -474,7 +1273,7 @@ public partial class MainWindow : Window
             _pendingAttackerInstance = null;
         }
 
-        if (SimulatorView.Visibility == Visibility.Visible)
+        if (MainLobbyView.Visibility != Visibility.Visible && SimulatorView.Visibility == Visibility.Visible)
         {
             UpdateTopTabVisuals(_gameState.CurrentStage == PracticeStage.Stage3_AiBattle ? 0 : 1);
         }
@@ -485,47 +1284,96 @@ public partial class MainWindow : Window
         RenderOpponentBattleArea();
         RenderBreedingArea();
         RenderBattleArea();
+        UpdateFieldDigimonBreakdown(null);
         RenderHand();
+        RenderDuelPlates();
         RenderTimeAttackHudAndLogs();
+        TryStartCoinToss();
     }
+
+    // ==================== 🔮 중앙 네온 메모리 코어 (+10 내 쪽 ← 0 → -10 상대 쪽) ====================
+    private const int MemoryCoreCells = 21;
+    private const double MemoryCoreIndicatorSize = 34;
+    private int? _memoryCoreShownValue;
 
     private void RenderMemoryGauge()
     {
+        int memory = Math.Clamp(_gameState.MemoryGauge, -10, 10);
+        bool playerSide = memory >= 0;
+
+        // 공식 플레이매트의 메모리 게이지처럼 10 … 1 · 0 · 1 … 10 숫자 원형 칸 (왼쪽 = 내 쪽, 오른쪽 = 상대 쪽)
         MemoryGaugeGrid.Children.Clear();
+        var monoFont = (FontFamily)FindResource("Neo.Font.Mono");
         for (int m = 10; m >= -10; m--)
         {
-            bool isCurrent = _gameState.MemoryGauge == m;
-            string bgHex = isCurrent
-                ? "#F9E2AF"
-                : m > 0 ? "#1E3A5F" : m == 0 ? "#313244" : "#4A1E2E";
+            bool isCurrent = memory == m;
+            bool onPlayerSide = m > 0;
+            // 현재 값과 0 사이(에너지가 넘어온 구간)는 밝게, 나머지는 어둡게
+            bool energized = playerSide ? (m >= 0 && m <= memory) : (m <= 0 && m >= memory);
+            string sideBrush = m == 0 ? "Neo.Brush.Text.Primary" : onPlayerSide ? "Neo.Brush.Cyan" : "Neo.Brush.RoseSoft";
 
-            string fgHex = isCurrent ? "#11111B" : "#F8FAFC";
-            string label = m > 0 ? $"+{m}" : m.ToString();
-
-            var cell = new Border
+            MemoryGaugeGrid.Children.Add(new Border
             {
-                Background = BrushFromHex(bgHex),
-                BorderBrush = BrushFromHex(isCurrent ? "#F38BA8" : "#11111B"),
-                BorderThickness = new Thickness(isCurrent ? 2 : 1),
-                CornerRadius = new CornerRadius(4),
-                Margin = new Thickness(1, 0, 1, 0),
+                Width = m == 0 ? 26 : 22,
+                Height = m == 0 ? 26 : 22,
+                CornerRadius = new CornerRadius(13),
+                Background = Theme.GetBrush("Neo.Brush.SurfaceInput"),
+                BorderBrush = Theme.GetBrush(sideBrush),
+                BorderThickness = new Thickness(m == 0 ? 2 : 1.2),
+                Opacity = isCurrent ? 0 : energized ? 1.0 : 0.45,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock
                 {
-                    Text = label,
-                    Foreground = BrushFromHex(fgHex),
-                    FontWeight = isCurrent ? FontWeights.ExtraBold : FontWeights.SemiBold,
-                    FontSize = isCurrent ? 12.5 : 10.5,
+                    Text = Math.Abs(m).ToString(),
+                    FontFamily = monoFont,
+                    FontSize = m == 0 ? 11 : 9.5,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Theme.GetBrush(sideBrush),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center
                 }
-            };
-            MemoryGaugeGrid.Children.Add(cell);
+            });
         }
 
+        TxtMemoryCoreValue.Text = Math.Abs(memory).ToString();
+        MemoryCoreOrb.Fill = Theme.GetBrush(playerSide ? "Neo.Brush.Button.Cyan" : "Neo.Brush.Button.Rose");
+        MemoryCoreOrb.Effect = Theme.GetEffect(playerSide ? "Neo.Glow.Cyan" : "Neo.Glow.Rose");
+        MemoryCoreHalo.Fill = Theme.GetBrush(playerSide ? "Neo.Brush.Cyan" : "Neo.Brush.Rose");
+
+        PlaceMemoryCoreIndicator(memory, animate: _memoryCoreShownValue != null && _memoryCoreShownValue != memory);
+        _memoryCoreShownValue = memory;
+
         TxtMemoryStatus.Text = _gameState.MemoryGauge >= 0
-            ? $"현재 메모리: +{_gameState.MemoryGauge} (플레이어 턴 유지)"
-            : $"현재 메모리: {_gameState.MemoryGauge} (상대 턴 전환)";
+            ? $"메모리 +{_gameState.MemoryGauge} · 내 턴 유지"
+            : $"메모리 {_gameState.MemoryGauge} · 상대 턴 전환";
     }
+
+    private void PlaceMemoryCoreIndicator(int memory, bool animate)
+    {
+        double width = MemoryCoreHost.ActualWidth;
+        if (width <= 0)
+            return;
+
+        double cell = width / MemoryCoreCells;
+        int index = 10 - memory;
+        double targetX = (index + 0.5) * cell - MemoryCoreIndicatorSize / 2;
+
+        if (!animate)
+        {
+            MemoryCoreShift.BeginAnimation(TranslateTransform.XProperty, null);
+            MemoryCoreShift.X = targetX;
+            return;
+        }
+
+        MemoryCoreShift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(targetX, TimeSpan.FromMilliseconds(420))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        });
+    }
+
+    private void MemoryCoreHost_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        PlaceMemoryCoreIndicator(Math.Clamp(_gameState.MemoryGauge, -10, 10), animate: false);
 
     private void RenderTurnAndPhases()
     {
@@ -546,16 +1394,19 @@ public partial class MainWindow : Window
             bool active = _gameState.CurrentPhase == p.Phase;
             var badge = new Border
             {
-                Background = BrushFromHex(active ? "#89B4FA" : "#313244"),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(9, 3, 9, 3),
-                Margin = new Thickness(0, 0, 5, 0),
+                Background = active ? Theme.GetBrush("Neo.Brush.Button.Cyan") : Theme.GetBrush("Neo.Brush.Cyan.Tint"),
+                BorderBrush = active ? Brushes.Transparent : Theme.GetBrush("Neo.Brush.Line"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(10, 2, 10, 2),
+                Margin = new Thickness(0, 0, 4, 0),
+                Effect = active ? Theme.GetEffect("Neo.Glow.Cyan.Soft") : null,
                 Child = new TextBlock
                 {
                     Text = p.Name,
-                    Foreground = BrushFromHex(active ? "#11111B" : "#A6ADC8"),
-                    FontWeight = active ? FontWeights.Bold : FontWeights.Normal,
-                    FontSize = 11.5
+                    Foreground = active ? Theme.GetBrush("Neo.Brush.Text.OnNeon") : Theme.GetBrush("Neo.Brush.Text.Muted"),
+                    FontWeight = active ? FontWeights.ExtraBold : FontWeights.Normal,
+                    FontSize = 11
                 }
             };
             PhaseStepPanel.Children.Add(badge);
@@ -649,23 +1500,23 @@ public partial class MainWindow : Window
         }
 
         // 시큐리티가 타격/파괴될 때마다 방금 오픈된 시큐리티 카드(좌측)와 다음 타격 대상 시큐리티(우측)가 한눈에 보이도록 자동 스크롤 이동!
-        double targetOffset = clearedCount <= 1 ? 0 : (clearedCount - 1) * 220.0;
+        double targetOffset = clearedCount <= 1 ? 0 : (clearedCount - 1) * 78.0;
         OpponentSecurityScrollViewer.UpdateLayout();
-        OpponentSecurityScrollViewer.ScrollToHorizontalOffset(targetOffset);
+        OpponentSecurityScrollViewer.ScrollToVerticalOffset(targetOffset);
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
         {
             if (clearedCount == 0)
             {
-                OpponentSecurityScrollViewer.ScrollToHorizontalOffset(0);
+                OpponentSecurityScrollViewer.ScrollToVerticalOffset(0);
             }
             else if (nextTargetSlot != null && lastClearedSlot != null)
             {
-                OpponentSecurityScrollViewer.ScrollToHorizontalOffset(targetOffset);
+                OpponentSecurityScrollViewer.ScrollToVerticalOffset(targetOffset);
                 nextTargetSlot.BringIntoView();
             }
             else if (lastClearedSlot != null)
             {
-                OpponentSecurityScrollViewer.ScrollToRightEnd();
+                OpponentSecurityScrollViewer.ScrollToBottom();
                 lastClearedSlot.BringIntoView();
             }
         }));
@@ -717,26 +1568,15 @@ public partial class MainWindow : Window
         }
         else
         {
+            // 비공개 시큐리티 = 실제 TCG 카드 뒷면
             thumbBorder = new Border
             {
                 Width = 44,
                 Height = 60,
                 CornerRadius = new CornerRadius(4),
-                Background = new LinearGradientBrush(
-                    (Color)ColorConverter.ConvertFromString("#1E3A8A"),
-                    (Color)ColorConverter.ConvertFromString("#0F172A"),
-                    35.0),
-                BorderBrush = BrushFromHex("#38BDF8"),
-                BorderThickness = new Thickness(1.5),
-                Child = new TextBlock
-                {
-                    Text = "SEC\n?",
-                    Foreground = BrushFromHex("#38BDF8"),
-                    FontWeight = FontWeights.ExtraBold,
-                    FontSize = 11,
-                    TextAlignment = TextAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
+                Background = Theme.GetBrush("Duel.Brush.CardBackArt"),
+                BorderBrush = BrushFromHex(isNextTarget ? "#F9E2AF" : "#38BDF8"),
+                BorderThickness = new Thickness(1.5)
             };
         }
         Grid.SetColumn(thumbBorder, 0);
@@ -845,7 +1685,7 @@ public partial class MainWindow : Window
             BorderThickness = new Thickness(isNextTarget ? 2.5 : 1),
             CornerRadius = new CornerRadius(7),
             Padding = new Thickness(7, 5, 7, 5),
-            Margin = new Thickness(0, 0, 8, 0),
+            Margin = new Thickness(0, 0, 0, 6),
             Cursor = System.Windows.Input.Cursors.Hand,
             Child = row
         };
@@ -879,7 +1719,7 @@ public partial class MainWindow : Window
             {
                 PracticeStage.Stage1_Goldfish => "🎯 상대 배틀 에어리어 [1인 솔리테어 타임어택 — 방해 디지몬 없음]",
                 PracticeStage.Stage2_BlockerDefense => "🛡️ 상대 배틀 에어리어 [블로커 수비진 — 옵션 또는 고DP로 돌파!]",
-                _ => "👾 상대 AI 배틀 에어리어 [공식 룰 실전 대전 — 레스트 디지몬 직접 타격 가능!]"
+                _ => $"👾 상대 AI 배틀 에어리어 [VS {_gameState.OpponentDeckName}] — 레스트 디지몬 직접 타격 가능!"
             };
             TxtOpponentFieldHeader.Foreground = BrushFromHex("#FAB387");
         }
@@ -891,26 +1731,13 @@ public partial class MainWindow : Window
         if (_gameState.DummyOpponent.BattleArea.Count == 0)
         {
             string emptyMsg = _gameState.CurrentStage == PracticeStage.Stage1_Goldfish
-                ? "🎯 [1인 솔리테어 훈련 모드] 상대 필드가 비어 있습니다! 진화 체인을 완성해 좌측의 상대 시큐리티 5장을 빠르게 돌파하세요!"
-                : "✅ 상대 배틀 에어리어가 비어 있습니다! 지금 바로 좌측 상대 시큐리티를 총공격하세요!";
-
-            OpponentBattleAreaPanel.Children.Add(new Border
-            {
-                Background = BrushFromHex("#11111B"),
-                BorderBrush = BrushFromHex("#313244"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(16, 12, 16, 12),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text = emptyMsg,
-                    Foreground = BrushFromHex("#A6E3A1"),
-                    FontWeight = FontWeights.Bold,
-                    FontSize = 12
-                }
-            });
-            return;
+                ? "🎯 [1인 솔리테어 훈련] 상대 필드가 비어 있습니다! 진화 체인을 완성해 상대 시큐리티 5장을 빠르게 돌파하세요!"
+                : "✅ 상대 배틀 존이 비어 있습니다! 지금 바로 상대 시큐리티를 총공격하세요!";
+            OpponentBattleAreaBorder.ToolTip = emptyMsg;
+        }
+        else
+        {
+            OpponentBattleAreaBorder.ToolTip = null;
         }
 
         foreach (var opp in _gameState.DummyOpponent.BattleArea.ToList())
@@ -919,23 +1746,30 @@ public partial class MainWindow : Window
             bool isTargetForAttack = _pendingAttackerInstance != null && opp.IsSuspended;
             bool isHighlighted = isTargetForOption || isTargetForAttack;
 
+            // 존에 놓인 카드 1장 (위: 카드 / 아래: 상태·이름·DP·대상 버튼)
             var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(66) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var thumb = CreateCardVisualFrame(
                 opp.TopCard,
-                width: 62,
-                height: 84,
+                width: OpponentCardArtWidth,
+                height: OpponentCardArtHeight,
                 customDpOrBadge: $"{opp.GetCurrentDP()}",
                 isRested: opp.IsSuspended);
-            Grid.SetColumn(thumb, 0);
+            thumb.HorizontalAlignment = HorizontalAlignment.Center;
+            if (opp.IsSuspended)
+            {
+                // 레스트 = 가로로 눕힌 수비 표시
+                thumb.LayoutTransform = new RotateTransform(90);
+            }
+            Grid.SetRow(thumb, 0);
             row.Children.Add(thumb);
 
             var infoStack = new StackPanel
             {
-                Margin = new Thickness(8, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
+                Margin = new Thickness(0, 4, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center
             };
 
             string statusText = opp.TopCard.IsBlocker && !opp.IsSuspended
@@ -954,7 +1788,7 @@ public partial class MainWindow : Window
                 Text = statusText,
                 Foreground = BrushFromHex(statusColor),
                 FontWeight = FontWeights.ExtraBold,
-                FontSize = 11
+                FontSize = 10
             });
 
             infoStack.Children.Add(new TextBlock
@@ -962,7 +1796,7 @@ public partial class MainWindow : Window
                 Text = $"Lv.{opp.TopCard.Level} {opp.TopCard.Name}",
                 Foreground = BrushFromHex("#F8FAFC"),
                 FontWeight = FontWeights.Bold,
-                FontSize = 12.5,
+                FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = OpponentZoneSlotWidth - 14,
                 Margin = new Thickness(0, 2, 0, 2)
             });
 
@@ -1032,12 +1866,12 @@ public partial class MainWindow : Window
                 }
             }
 
-            Grid.SetColumn(infoStack, 1);
+            Grid.SetRow(infoStack, 1);
             row.Children.Add(infoStack);
 
             var oppCardBorder = new Border
             {
-                Width = 235,
+                Width = OpponentZoneSlotWidth,
                 Tag = opp,
                 Background = BrushFromHex(isHighlighted ? "#1B2E28" : "#141522"),
                 BorderBrush = BrushFromHex(isHighlighted ? "#A6E3A1" : opp.TopCard.IsBlocker && !opp.IsSuspended ? "#F38BA8" : "#45475A"),
@@ -1052,6 +1886,10 @@ public partial class MainWindow : Window
             oppCardBorder.MouseEnter += (_, _) =>
             {
                 UpdateCardInspector(opp.TopCard);
+                if (_pinnedFieldInstance == null)
+                {
+                    UpdateFieldDigimonBreakdown(opp, isPinned: false, isOpponent: true);
+                }
                 if (_pendingAttackerInstance != null)
                 {
                     var check = ActionValidator.ValidateAttack(_gameState, _pendingAttackerInstance, opp);
@@ -1071,10 +1909,118 @@ public partial class MainWindow : Window
                     _pendingAttackerInstance = null;
                     ApplyActionResult(_engine.AttackOpponentDigimon(attacker, opp));
                 }
+                else
+                {
+                    _pinnedFieldInstance = ReferenceEquals(_pinnedFieldInstance, opp) ? null : opp;
+                    UpdateFieldDigimonBreakdown(opp, isPinned: _pinnedFieldInstance != null, isOpponent: true);
+                }
             };
 
             OpponentBattleAreaPanel.Children.Add(oppCardBorder);
         }
+
+        for (int i = _gameState.DummyOpponent.BattleArea.Count; i < DuelZoneSlotCount; i++)
+        {
+            OpponentBattleAreaPanel.Children.Add(CreateEmptyZoneSlot(OpponentZoneSlotWidth, OpponentZoneSlotHeight, isOpponent: true, new Thickness(0, 0, 8, 0)));
+        }
+    }
+
+    // ==================== 🎴 듀얼 필드 카드 존 (유희왕 몬스터 존처럼 빈 슬롯을 각인해 둔다) ====================
+    private const int DuelZoneSlotCount = 4;
+    private const double PlayerZoneSlotWidth = 160;
+    private const double PlayerZoneSlotHeight = 214;
+    private const double FieldCardArtWidth = 104;
+    private const double FieldCardArtHeight = 142;
+    private const double OpponentZoneSlotWidth = 150;
+    private const double OpponentZoneSlotHeight = 184;
+    private const double OpponentCardArtWidth = 88;
+    private const double OpponentCardArtHeight = 120;
+
+    private static FrameworkElement CreateEmptyZoneSlot(double width, double height, bool isOpponent, Thickness margin)
+    {
+        var edge = Theme.GetBrush(isOpponent ? "Duel.Brush.ZoneEdge.Opponent" : "Duel.Brush.ZoneEdge.Player");
+        var slot = new Grid { Width = width, Height = height, Margin = margin, IsHitTestVisible = false };
+        slot.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Background = Theme.GetBrush("Duel.Brush.ZoneFill")
+        });
+        slot.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            RadiusX = 10,
+            RadiusY = 10,
+            Stroke = edge,
+            StrokeThickness = 1.2,
+            StrokeDashArray = new DoubleCollection { 4, 3 }
+        });
+        // 카드 모양 안쪽 각인 + 마름모 문양
+        slot.Children.Add(new Border
+        {
+            Width = width * 0.62,
+            Height = height * 0.62,
+            CornerRadius = new CornerRadius(6),
+            BorderBrush = edge,
+            BorderThickness = new Thickness(1),
+            Opacity = 0.45,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = "◇",
+                FontSize = 26,
+                Foreground = edge,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        });
+        return slot;
+    }
+
+    // ==================== 🪪 플레이어 플레이트 & 상대 손패 (유희왕 LP 표시 자리) ====================
+    private void RenderDuelPlates()
+    {
+        var opp = _gameState.DummyOpponent;
+        TxtOppPlateName.Text = _gameState.CurrentStage switch
+        {
+            PracticeStage.Stage1_Goldfish => "솔리테어 훈련 (방해 없음)",
+            PracticeStage.Stage2_BlockerDefense => "블로커 수비진",
+            _ => $"VS {_gameState.OpponentDeckName}"
+        };
+        TxtOppPlateSecurity.Text = opp.SecurityStack.Count.ToString();
+        TxtOppPlateInfo.Text = $"HAND {opp.Hand.Count} · DECK {opp.MainDeck.Count} · TRASH {opp.Trash.Count}";
+        TxtOppDeckCount.Text = opp.MainDeck.Count.ToString();
+        TxtOppTrashCount.Text = opp.Trash.Count.ToString();
+
+        OppHandBacksPanel.Children.Clear();
+        int handCount = opp.Hand.Count;
+        for (int i = 0; i < Math.Min(handCount, 10); i++)
+        {
+            double offset = i - (Math.Min(handCount, 10) - 1) / 2.0;
+            OppHandBacksPanel.Children.Add(new Border
+            {
+                Width = 26,
+                Height = 36,
+                CornerRadius = new CornerRadius(3),
+                Background = Theme.GetBrush("Duel.Brush.CardBackArt"),
+                BorderBrush = Theme.GetBrush("Neo.Brush.Rose.Soft"),
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(i == 0 ? 0 : -8, 0, 0, 0),
+                RenderTransformOrigin = new Point(0.5, 0),
+                // 상대 손패는 위쪽을 축으로 뒤집힌 부채꼴
+                RenderTransform = new TransformGroup
+                {
+                    Children =
+                    {
+                        new RotateTransform(-offset * 4),
+                        new TranslateTransform(0, -Math.Abs(offset) * Math.Abs(offset) * 0.8)
+                    }
+                }
+            });
+        }
+
+        var me = _gameState.Player;
+        TxtPlayerPlateSecurity.Text = me.SecurityStack.Count.ToString();
+        TxtPlayerPlateInfo.Text = $"DECK {me.MainDeck.Count} · TRASH {me.Trash.Count} · EGG {me.DigitamaDeck.Count}";
     }
 
     private void RenderBreedingArea()
@@ -1085,7 +2031,7 @@ public partial class MainWindow : Window
             BreedingSlotControl.Content = new Border
             {
                 Width = 175,
-                Height = 230,
+                Height = 150,
                 Background = BrushFromHex("#11111B"),
                 BorderBrush = BrushFromHex("#313244"),
                 BorderThickness = new Thickness(1.5),
@@ -1127,31 +2073,14 @@ public partial class MainWindow : Window
     private void RenderBattleArea()
     {
         BattleAreaPanel.Children.Clear();
-        if (_gameState.Player.BattleArea.Count == 0)
+        foreach (var instance in _gameState.Player.BattleArea)
         {
-            BattleAreaPanel.Children.Add(new Border
-            {
-                Background = BrushFromHex("#11111B"),
-                BorderBrush = BrushFromHex("#313244"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(24, 18, 24, 18),
-                Margin = new Thickness(8),
-                Child = new TextBlock
-                {
-                    Text = "배틀 에어리어에 디지몬이 없습니다.\n육성 에어리어에서 성장한 디지몬을 이동시키거나, 아래 패(Hand)에서 디지몬을 등장시키세요.",
-                    Foreground = BrushFromHex("#6C7086"),
-                    FontSize = 12.5,
-                    TextAlignment = TextAlignment.Center
-                }
-            });
+            BattleAreaPanel.Children.Add(CreateFieldDigimonWidget(instance, isBreedingArea: false));
         }
-        else
+        // 빈 배틀 존 슬롯 (육성 존에서 이동하거나 손패를 끌어 놓을 자리)
+        for (int i = _gameState.Player.BattleArea.Count; i < DuelZoneSlotCount; i++)
         {
-            foreach (var instance in _gameState.Player.BattleArea)
-            {
-                BattleAreaPanel.Children.Add(CreateFieldDigimonWidget(instance, isBreedingArea: false));
-            }
+            BattleAreaPanel.Children.Add(CreateEmptyZoneSlot(PlayerZoneSlotWidth, PlayerZoneSlotHeight, isOpponent: false, new Thickness(0, 0, 10, 6)));
         }
 
         if (_pendingHandCard != null)
@@ -1172,16 +2101,16 @@ public partial class MainWindow : Window
         }
         else
         {
-            TxtSelectedTarget.Text = "패에서 [🧬진화] 또는 [✨사용]을 누른 뒤 필드의 디지몬을 선택하세요";
+            TxtSelectedTarget.Text = "💡 필드 디지몬/테이머에 마우스를 올리거나 클릭하면 우측 카드 설명에서 DP·테이머·진화원 증가치를 확인할 수 있습니다";
             TxtSelectedTarget.Foreground = BrushFromHex("#F9E2AF");
             BtnCancelPendingAction.Visibility = Visibility.Collapsed;
         }
 
-        // 필드 테이머 미니 카드 칩 렌더링 (지속 DP 버프 & 시큐리티 추가공격 & 메모리 효과 명시)
+        // 필드 테이머 미니 카드 칩 렌더링 (호버/클릭 시 우측 패널에서 테이머 증가치 확인 가능)
         TamerZonePanel.Children.Clear();
         TamerZonePanel.Children.Add(new TextBlock
         {
-            Text = "🎖️ 필드 테이머 지속 효과: ",
+            Text = "🎖️ 필드 테이머 지속 효과 (마우스 오버 확인): ",
             Foreground = BrushFromHex("#CBA6F7"),
             FontWeight = FontWeights.ExtraBold,
             FontSize = 11.5,
@@ -1193,7 +2122,7 @@ public partial class MainWindow : Window
         {
             TamerZonePanel.Children.Add(new TextBlock
             {
-                Text = "없음 (패에서 신태일/매튜를 등장시키면 아군 디지몬 DP 증가 & 턴 시작 메모리가 보정됩니다)",
+                Text = "없음 (패에서 테이머 카드를 등장시키면 아군 디지몬 DP 증가 & 턴 시작 메모리가 보정됩니다)",
                 Foreground = BrushFromHex("#6C7086"),
                 FontSize = 11,
                 VerticalAlignment = VerticalAlignment.Center
@@ -1206,8 +2135,8 @@ public partial class MainWindow : Window
                 var tamer = group.First();
                 int count = group.Count();
                 string auraDesc = tamer.CardId == "ST1-12" || tamer.Color == CardColor.Red
-                    ? $"아군 전체 DP +{count * 1000:N0} | 진화원 4장↑ 시큐어택 +{count} | 턴 시작 최소 3메모리"
-                    : $"진화 디지몬 DP +{count * 1000:N0} | 턴 시작 메모리 +{count} 추가";
+                    ? $"전체 DP +{count * 1000:N0} | 진화4장↑ 시큐+{count} | 최소 3메모리"
+                    : $"진화 디지몬 DP +{count * 1000:N0} | 턴 시작 메모리 +{count}";
 
                 var tamerChip = new Border
                 {
@@ -1224,7 +2153,17 @@ public partial class MainWindow : Window
                         FontSize = 11
                     }
                 };
-                tamerChip.MouseEnter += (_, _) => UpdateCardInspector(tamer);
+                tamerChip.MouseEnter += (_, _) =>
+                {
+                    UpdateCardInspector(tamer);
+                    UpdateTamerBreakdownOnSidebar(tamer, count);
+                };
+                tamerChip.MouseLeftButtonUp += (_, _) =>
+                {
+                    UpdateCardInspector(tamer);
+                    UpdateTamerBreakdownOnSidebar(tamer, count);
+                    ShowToast(true, $"🎖️ 테이머 [{tamer.Name}] x{count}장 활성 중: {auraDesc}");
+                };
                 TamerZonePanel.Children.Add(tamerChip);
             }
         }
@@ -1242,32 +2181,35 @@ public partial class MainWindow : Window
         TxtMySecurityLastEvent.Foreground = BrushFromHex(_gameState.PlayerSecurityCheckHistory.Count > 0 ? "#F9E2AF" : "#A6ADC8");
 
         MySecurityVisualStack.Children.Clear();
-        int myClearedCount = _gameState.PlayerSecurityCheckHistory.Count;
         int myRemainingCount = _gameState.Player.SecurityStack.Count;
-        int myTotalSlots = Math.Max(5, myClearedCount + myRemainingCount);
 
         for (int i = 0; i < 5; i++)
         {
             if (i < myRemainingCount)
             {
+                // 실제 플레이매트처럼 시큐리티는 가로로 눕힌 카드 뒷면
                 var activeSecBox = new Border
                 {
-                    Background = new LinearGradientBrush(
-                        (Color)ColorConverter.ConvertFromString("#1E3A8A"),
-                        (Color)ColorConverter.ConvertFromString("#0F172A"),
-                        35.0),
+                    Background = Theme.GetBrush("Duel.Brush.CardBackArt.Sideways"),
                     BorderBrush = BrushFromHex("#38BDF8"),
-                    BorderThickness = new Thickness(1.5),
-                    CornerRadius = new CornerRadius(4),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
                     Margin = new Thickness(1, 0, 1, 0),
-                    Child = new TextBlock
+                    ToolTip = $"내 시큐리티 #{i + 1} (비공개)",
+                    Child = new Border
                     {
-                        Text = $"🛡️#{i + 1}",
-                        Foreground = BrushFromHex("#38BDF8"),
-                        FontWeight = FontWeights.ExtraBold,
-                        FontSize = 9.5,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center
+                        Background = BrushFromHex("#CC050A18"),
+                        CornerRadius = new CornerRadius(0, 0, 3, 0),
+                        Padding = new Thickness(3, 0, 3, 0),
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Child = new TextBlock
+                        {
+                            Text = $"{i + 1}",
+                            Foreground = BrushFromHex("#7DE3FF"),
+                            FontWeight = FontWeights.ExtraBold,
+                            FontSize = 9
+                        }
                     }
                 };
                 MySecurityVisualStack.Children.Add(activeSecBox);
@@ -1338,9 +2280,11 @@ public partial class MainWindow : Window
         }
     }
 
+    // ==================== 2-1. 실제 플레이매트 감각의 슬림 & 입체형 필드 디지몬 카드 위젯 ====================
     private UIElement CreateFieldDigimonWidget(CardInstance instance, bool isBreedingArea)
     {
         bool isSummoningSick = !isBreedingArea && instance.TurnPlayed == _gameState.CurrentTurn;
+        bool isPinned = ReferenceEquals(_pinnedFieldInstance, instance);
 
         // 현재 패에서 선택된 카드(_pendingHandCard)의 유효한 아군 필드 대상인지 판별
         bool isPendingAllyTargetMode = _pendingHandCard != null && !_pendingTargetsOpponent;
@@ -1376,15 +2320,20 @@ public partial class MainWindow : Window
 
         var stack = new StackPanel();
 
-        // 상단 상태 표시줄
-        var statusDock = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+        // 1) 상단 상태 표시줄 (액티브/레스트/소환멀미/블로커 + 고정 핀 표시)
+        var statusDock = new DockPanel { Margin = new Thickness(0, 0, 0, 3) };
         string stateText = isBreedingArea
-            ? "🛡️ 안전지대"
-            : instance.IsSuspended ? "↻ REST" : isSummoningSick ? "⏳ 소환 멀미" : "⚡ ACTIVE";
+            ? "🛡️ 육성존"
+            : instance.IsSuspended ? "↻ REST" : isSummoningSick ? "⏳ 등장대기" : "⚡ ACTIVE";
         if (!isBreedingArea && instance.TopCard.IsBlocker)
         {
             stateText += " 🛡️블로커";
         }
+        if (isPinned)
+        {
+            stateText += " 📌";
+        }
+
         string stateColor = isBreedingArea
             ? "#A6E3A1"
             : instance.IsSuspended ? "#FAB387" : isSummoningSick ? "#F9E2AF" : "#A6E3A1";
@@ -1394,7 +2343,7 @@ public partial class MainWindow : Window
             Text = stateText,
             Foreground = BrushFromHex(stateColor),
             FontWeight = FontWeights.ExtraBold,
-            FontSize = 11
+            FontSize = 10.5
         });
 
         if (instance.TopCard.Type == CardType.Digimon)
@@ -1408,16 +2357,74 @@ public partial class MainWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Child = new TextBlock
                 {
-                    Text = secChecks >= 2 ? $"💥 시큐 {secChecks}장 타격!" : $"시큐 1장",
+                    Text = secChecks >= 2 ? $"💥 시큐 {secChecks}장" : "시큐 1장",
                     Foreground = BrushFromHex(secChecks >= 2 ? "#11111B" : "#CDD6F4"),
                     FontWeight = FontWeights.ExtraBold,
-                    FontSize = 10.5
+                    FontSize = 10
                 }
             });
         }
         stack.Children.Add(statusDock);
 
-        // 실물 최상단 카드 아트워크 렌더링
+        // 2) 실제 TCG 플레이매트처럼 메인 카드 위쪽으로 살짝 겹쳐 보이는 [진화원 피킹 탭 (Peeking Evolution Sources)]
+        var evoSources = instance.GetEvolutionStackBottomUp();
+        if (evoSources.Count > 0)
+        {
+            var evoPeekStack = new StackPanel { Margin = new Thickness(2, 0, 2, -2) };
+            foreach (var src in evoSources.TakeLast(4))
+            {
+                string srcBonus = src.InheritedSecurityAttackBonus > 0
+                    ? $"💥시큐+{src.InheritedSecurityAttackBonus}"
+                    : src.InheritedDpBonus > 0
+                        ? $"▲+{src.InheritedDpBonus:N0}"
+                        : $"Lv.{src.Level}";
+
+                var peekStrip = new Border
+                {
+                    Height = 18,
+                    Background = BrushFromHex("#1D2033"),
+                    BorderBrush = GetCardColorBrush(src.Color),
+                    BorderThickness = new Thickness(3, 1, 1, 0),
+                    CornerRadius = new CornerRadius(4, 4, 0, 0),
+                    Padding = new Thickness(5, 1, 5, 1),
+                    Margin = new Thickness(0, 0, 0, 1),
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    ToolTip = $"진화원: [{src.CardId}] Lv.{src.Level} {src.Name} — {src.InheritedEffectText}",
+                    Child = new DockPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = $"🧬 Lv.{src.Level} {src.Name}",
+                                Foreground = BrushFromHex("#CDD6F4"),
+                                FontWeight = FontWeights.Bold,
+                                FontSize = 9.5,
+                                VerticalAlignment = VerticalAlignment.Center
+                            },
+                            new TextBlock
+                            {
+                                Text = srcBonus,
+                                Foreground = BrushFromHex(src.InheritedSecurityAttackBonus > 0 ? "#F9E2AF" : src.InheritedDpBonus > 0 ? "#A6E3A1" : "#89DCEB"),
+                                FontWeight = FontWeights.ExtraBold,
+                                FontSize = 9.5,
+                                HorizontalAlignment = HorizontalAlignment.Right,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                        }
+                    }
+                };
+                peekStrip.MouseEnter += (_, _) =>
+                {
+                    UpdateCardInspector(src);
+                    UpdateFieldDigimonBreakdown(instance, isPinned: isPinned, isOpponent: false);
+                };
+                evoPeekStack.Children.Add(peekStrip);
+            }
+            stack.Children.Add(evoPeekStack);
+        }
+
+        // 3) 실물 최상단 카드 아트워크 프레임 (152 x 204)
         int totalBonusDp = instance.GetTotalBonusDP();
         string dpBadge = instance.TopCard.Type == CardType.Digimon
             ? totalBonusDp > 0
@@ -1427,213 +2434,48 @@ public partial class MainWindow : Window
 
         var cardArt = CreateCardVisualFrame(
             instance.TopCard,
-            width: 162,
-            height: 218,
+            width: FieldCardArtWidth,
+            height: FieldCardArtHeight,
             customDpOrBadge: dpBadge,
             isRested: instance.IsSuspended);
         cardArt.HorizontalAlignment = HorizontalAlignment.Center;
+        // 유희왕 수비 표시처럼 레스트(REST) 디지몬은 카드를 가로로 눕힌다
+        if (instance.IsSuspended && !isBreedingArea)
+        {
+            cardArt.LayoutTransform = new RotateTransform(90);
+            cardArt.Margin = new Thickness(0, 4, 0, 4);
+        }
         stack.Children.Add(cardArt);
 
-        // ==================== 📊 전투력(DP) & 시큐리티 추가공격권 상세 전광판 ====================
+        // 4) 카드 하단 1줄 컴팩트 전투력 배지 (상세 내역은 호버/클릭 시 우측 사이드바에서 확인!)
         if (instance.TopCard.Type == CardType.Digimon)
         {
-            int baseDp = instance.TopCard.DP;
-            int inhDp = instance.GetInheritedDpBonus();
-            int tamerDp = instance.TamerDpBonus;
-            int skillDp = instance.TemporaryDpBonus;
             int currentDp = instance.GetCurrentDP();
+            string buffSummary = totalBonusDp > 0
+                ? $"⚔️ DP {currentDp:N0} (▲+{totalBonusDp:N0}) | 🧬진화원 {evoSources.Count}장"
+                : $"⚔️ DP {currentDp:N0} (기본) | 🧬진화원 {evoSources.Count}장";
 
-            int secCount = instance.GetSecurityAttackCount();
-            int bonusSec = instance.GetTotalBonusSecurityAttack();
-
-            var statHudStack = new StackPanel { Margin = new Thickness(0, 6, 0, 2) };
-
-            // 1) DP 증가 상세 박스
-            var dpBreakdownParts = new List<string> { $"기본 {baseDp:N0}" };
-            if (inhDp > 0) dpBreakdownParts.Add($"🧬진화원 +{inhDp:N0}");
-            if (tamerDp > 0) dpBreakdownParts.Add($"🎖️테이머 +{tamerDp:N0}");
-            if (skillDp > 0) dpBreakdownParts.Add($"✨스킬 +{skillDp:N0}");
-
-            var dpBox = new Border
+            stack.Children.Add(new Border
             {
                 Background = BrushFromHex(totalBonusDp > 0 ? "#162C26" : "#181926"),
                 BorderBrush = BrushFromHex(totalBonusDp > 0 ? "#A6E3A1" : "#313244"),
-                BorderThickness = new Thickness(totalBonusDp > 0 ? 1.5 : 1),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(6, 4, 6, 4),
-                Margin = new Thickness(0, 0, 0, 4),
-                Child = new StackPanel
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(5, 3, 5, 3),
+                Margin = new Thickness(0, 4, 0, 0),
+                Child = new TextBlock
                 {
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = totalBonusDp > 0
-                                ? $"⚔️ 총 DP: {currentDp:N0} (▲ +{totalBonusDp:N0} 강화!)"
-                                : $"⚔️ 총 DP: {currentDp:N0} (기본)",
-                            Foreground = BrushFromHex(totalBonusDp > 0 ? "#A6E3A1" : "#F8FAFC"),
-                            FontWeight = FontWeights.ExtraBold,
-                            FontSize = 11.5
-                        },
-                        new TextBlock
-                        {
-                            Text = string.Join(" | ", dpBreakdownParts),
-                            Foreground = BrushFromHex(totalBonusDp > 0 ? "#F9E2AF" : "#9399B2"),
-                            FontWeight = FontWeights.SemiBold,
-                            FontSize = 10,
-                            TextWrapping = TextWrapping.Wrap,
-                            Margin = new Thickness(0, 1, 0, 0)
-                        }
-                    }
-                }
-            };
-            statHudStack.Children.Add(dpBox);
-
-            // 2) 시큐리티 추가공격권 상세 박스
-            var secBreakdownParts = new List<string> { "기본 1장" };
-            if (instance.TopCard.SecurityAttackBonus > 0) secBreakdownParts.Add($"🔥고유 +{instance.TopCard.SecurityAttackBonus}");
-            if (instance.GetInheritedSecurityAttackBonus() > 0) secBreakdownParts.Add($"🧬진화원 +{instance.GetInheritedSecurityAttackBonus()}");
-            if (instance.TamerSecurityAttackBonus > 0) secBreakdownParts.Add($"🎖️테이머 +{instance.TamerSecurityAttackBonus}");
-            if (instance.TemporarySecurityAttackBonus > 0) secBreakdownParts.Add($"✨스킬 +{instance.TemporarySecurityAttackBonus}");
-
-            string shieldIcons = string.Concat(Enumerable.Repeat("💥", Math.Min(secCount, 5)));
-            var secBox = new Border
-            {
-                Background = BrushFromHex(bonusSec > 0 ? "#3B1D2E" : "#181926"),
-                BorderBrush = BrushFromHex(bonusSec > 0 ? "#F9E2AF" : "#313244"),
-                BorderThickness = new Thickness(bonusSec > 0 ? 1.5 : 1),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(6, 4, 6, 4),
-                Margin = new Thickness(0, 0, 0, 3),
-                Child = new StackPanel
-                {
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = bonusSec > 0
-                                ? $"{shieldIcons} 시큐리티 타격: {secCount}장! (추가공격 +{bonusSec})"
-                                : "🛡️ 시큐리티 타격: 1장 (기본 1회 체크)",
-                            Foreground = BrushFromHex(bonusSec > 0 ? "#F9E2AF" : "#CDD6F4"),
-                            FontWeight = FontWeights.ExtraBold,
-                            FontSize = 11
-                        },
-                        new TextBlock
-                        {
-                            Text = string.Join(" | ", secBreakdownParts),
-                            Foreground = BrushFromHex(bonusSec > 0 ? "#F38BA8" : "#9399B2"),
-                            FontWeight = FontWeights.SemiBold,
-                            FontSize = 10,
-                            TextWrapping = TextWrapping.Wrap,
-                            Margin = new Thickness(0, 1, 0, 0)
-                        }
-                    }
-                }
-            };
-            statHudStack.Children.Add(secBox);
-
-            // 3) 현재 적용된 스킬/테이머/고유 어빌리티 칩 표시
-            var activeBuffLines = new List<string>();
-            activeBuffLines.AddRange(instance.ActiveSkillBuffLabels);
-            if (instance.TamerDpBonus > 0 || instance.TamerSecurityAttackBonus > 0)
-            {
-                activeBuffLines.Add($"🎖️ 테이머 버프: DP +{instance.TamerDpBonus:N0}" +
-                                    (instance.TamerSecurityAttackBonus > 0 ? $" / 시큐 +{instance.TamerSecurityAttackBonus}" : ""));
-            }
-            if (instance.TopCard.CardId == "ST2-11" && !instance.HasUsedOncePerTurnEffect)
-            {
-                activeBuffLines.Add("⚡ [어택 시] 스스로 액티브 재기상 (2회 연속공격!)");
-            }
-
-            foreach (var buffLabel in activeBuffLines)
-            {
-                statHudStack.Children.Add(new Border
-                {
-                    Background = BrushFromHex("#2A213E"),
-                    BorderBrush = BrushFromHex("#CBA6F7"),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(4),
-                    Padding = new Thickness(5, 2, 5, 2),
-                    Margin = new Thickness(0, 1, 0, 1),
-                    Child = new TextBlock
-                    {
-                        Text = buffLabel,
-                        Foreground = BrushFromHex("#F8FAFC"),
-                        FontWeight = FontWeights.Bold,
-                        FontSize = 10,
-                        TextWrapping = TextWrapping.Wrap
-                    }
-                });
-            }
-
-            stack.Children.Add(statHudStack);
-        }
-
-        // 아래에 겹쳐진 진화원 미니 카드 스트립 스택 시각화
-        var evoSources = instance.GetEvolutionStackBottomUp();
-        if (evoSources.Count > 0)
-        {
-            var evoContainer = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
-            evoContainer.Children.Add(new TextBlock
-            {
-                Text = $"🧬 진화원 스택 ({evoSources.Count}장):",
-                Foreground = BrushFromHex("#89DCEB"),
-                FontWeight = FontWeights.Bold,
-                FontSize = 10.5,
-                Margin = new Thickness(0, 0, 0, 2)
-            });
-
-            foreach (var src in evoSources)
-            {
-                var srcRow = new DockPanel();
-                var srcBmp = GetCardBitmap(src);
-                if (srcBmp != null)
-                {
-                    srcRow.Children.Add(new Border
-                    {
-                        Width = 22,
-                        Height = 28,
-                        CornerRadius = new CornerRadius(2),
-                        Margin = new Thickness(0, 0, 5, 0),
-                        ClipToBounds = true,
-                        Child = new Image { Source = srcBmp, Stretch = Stretch.UniformToFill }
-                    });
-                }
-
-                string srcBonusBadge = src.InheritedSecurityAttackBonus > 0
-                    ? $" [💥시큐어택 +{src.InheritedSecurityAttackBonus}]"
-                    : src.InheritedDpBonus > 0
-                        ? $" [▲DP +{src.InheritedDpBonus:N0}]"
-                        : " (진화원)";
-
-                srcRow.Children.Add(new TextBlock
-                {
-                    Text = $"Lv.{src.Level} {src.Name}{srcBonusBadge}",
-                    Foreground = BrushFromHex(src.InheritedSecurityAttackBonus > 0 ? "#F9E2AF" : src.InheritedDpBonus > 0 ? "#A6E3A1" : "#F8FAFC"),
-                    FontWeight = FontWeights.Bold,
-                    FontSize = 10.5,
-                    VerticalAlignment = VerticalAlignment.Center,
+                    Text = buffSummary,
+                    Foreground = BrushFromHex(totalBonusDp > 0 ? "#A6E3A1" : "#CDD6F4"),
+                    FontWeight = FontWeights.ExtraBold,
+                    FontSize = 10,
+                    HorizontalAlignment = HorizontalAlignment.Center,
                     TextTrimming = TextTrimming.CharacterEllipsis
-                });
-
-                var strip = new Border
-                {
-                    Background = BrushFromHex("#232438"),
-                    BorderBrush = GetCardColorBrush(src.Color),
-                    BorderThickness = new Thickness(3, 0, 0, 0),
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(4, 2, 4, 2),
-                    Margin = new Thickness(0, 1, 0, 1),
-                    Cursor = System.Windows.Input.Cursors.Hand,
-                    Child = srcRow
-                };
-                strip.MouseEnter += (_, _) => UpdateCardInspector(src);
-                evoContainer.Children.Add(strip);
-            }
-            stack.Children.Add(evoContainer);
+                }
+            });
         }
 
-        // 패에서 카드를 먼저 선택한 상태(_pendingHandCard != null)일 때 필드 대상 선택 버튼 표시
+        // 5) 패에서 카드를 먼저 선택한 상태(_pendingHandCard != null)일 때 필드 대상 선택 버튼 표시
         if (isPendingAllyTargetMode && _pendingHandCard != null)
         {
             if (isValidPendingTarget)
@@ -1646,9 +2488,9 @@ public partial class MainWindow : Window
                     Background = BrushFromHex("#A6E3A1"),
                     Foreground = BrushFromHex("#11111B"),
                     FontWeight = FontWeights.ExtraBold,
-                    FontSize = 11.5,
-                    Padding = new Thickness(6, 6, 6, 6),
-                    Margin = new Thickness(0, 5, 0, 3),
+                    FontSize = 11,
+                    Padding = new Thickness(5, 5, 5, 5),
+                    Margin = new Thickness(0, 4, 0, 2),
                     BorderThickness = new Thickness(0),
                     Cursor = System.Windows.Input.Cursors.Hand
                 };
@@ -1665,22 +2507,22 @@ public partial class MainWindow : Window
                 {
                     Background = BrushFromHex("#232438"),
                     CornerRadius = new CornerRadius(4),
-                    Padding = new Thickness(4, 3, 4, 3),
-                    Margin = new Thickness(0, 5, 0, 3),
+                    Padding = new Thickness(4, 2, 4, 2),
+                    Margin = new Thickness(0, 4, 0, 2),
                     Child = new TextBlock
                     {
                         Text = _pendingIsEvolution
                             ? $"대상 불가 (Lv.{_pendingHandCard.EvoRequirementLevel} 필요)"
                             : "대상 불가",
                         Foreground = BrushFromHex("#6C7086"),
-                        FontSize = 10.5,
+                        FontSize = 10,
                         HorizontalAlignment = HorizontalAlignment.Center
                     }
                 });
             }
         }
 
-        // 일반 상태에서 배틀 에어리어 디지몬의 공격 버튼 (시큐리티 어택 + 상대 레스트 디지몬 타격)
+        // 6) 일반 상태에서 배틀 에어리어 디지몬의 공격 버튼 (시큐리티 어택 + 상대 레스트 디지몬 타격)
         if (!isBreedingArea && _pendingHandCard == null)
         {
             int checks = instance.GetSecurityAttackCount();
@@ -1692,20 +2534,22 @@ public partial class MainWindow : Window
                 Background = BrushFromHex("#F38BA8"),
                 Foreground = BrushFromHex("#11111B"),
                 FontWeight = FontWeights.ExtraBold,
-                FontSize = 11,
-                Padding = new Thickness(5, 5, 5, 5),
-                Margin = new Thickness(0, 5, 0, 0),
+                FontSize = 10.5,
+                Padding = new Thickness(4, 4, 4, 4),
+                Margin = new Thickness(0, 4, 0, 0),
                 BorderThickness = new Thickness(0),
                 Cursor = System.Windows.Input.Cursors.Hand
             };
             btnAttack.MouseEnter += (_, _) =>
             {
                 UpdateCardInspector(instance.TopCard);
+                UpdateFieldDigimonBreakdown(instance, isPinned: isPinned, isOpponent: false);
                 var check = ActionValidator.ValidateAttack(_gameState, instance, null);
                 ShowToast(check.CanExecute, check.CanExecute ? check.GuideMessage : check.Reason);
             };
-            btnAttack.Click += (_, _) =>
+            btnAttack.Click += (_, e) =>
             {
+                e.Handled = true;
                 AutoPassBreedingIfNeeded();
                 _pendingAttackerInstance = null;
                 var res = _engine.AttackSecurityOrDirect(instance);
@@ -1729,7 +2573,6 @@ public partial class MainWindow : Window
             };
             stack.Children.Add(btnAttack);
 
-            // 상대 필드에 레스트 상태인 디지몬이 있으면 [🎯 상대 디지몬 타격] 버튼 표시 (내 카드 먼저 클릭 -> 상대 디지몬 클릭)
             if (_gameState.DummyOpponent.BattleArea.Any(d => d.IsSuspended))
             {
                 bool isThisAttackerSelected = ReferenceEquals(_pendingAttackerInstance, instance);
@@ -1739,14 +2582,15 @@ public partial class MainWindow : Window
                     Background = BrushFromHex(isThisAttackerSelected ? "#FAB387" : "#89DCEB"),
                     Foreground = BrushFromHex("#11111B"),
                     FontWeight = FontWeights.ExtraBold,
-                    FontSize = 10.5,
-                    Padding = new Thickness(5, 4, 5, 4),
-                    Margin = new Thickness(0, 4, 0, 0),
+                    FontSize = 10,
+                    Padding = new Thickness(4, 3, 4, 3),
+                    Margin = new Thickness(0, 3, 0, 0),
                     BorderThickness = new Thickness(0),
                     Cursor = System.Windows.Input.Cursors.Hand
                 };
-                btnAttackDigimon.Click += (_, _) =>
+                btnAttackDigimon.Click += (_, e) =>
                 {
+                    e.Handled = true;
                     if (isThisAttackerSelected)
                     {
                         _pendingAttackerInstance = null;
@@ -1772,23 +2616,49 @@ public partial class MainWindow : Window
             }
         }
 
+        var scaleTrans = new ScaleTransform(1.0, 1.0);
         var fieldCardBorder = new Border
         {
-            Width = isBreedingArea ? 206 : 210,
+            Width = PlayerZoneSlotWidth,
             Tag = instance,
-            Background = BrushFromHex(isValidPendingTarget ? "#1B2E28" : "#11111B"),
-            BorderBrush = BrushFromHex(isValidPendingTarget ? "#A6E3A1" : "#45475A"),
-            BorderThickness = new Thickness(isValidPendingTarget ? 3 : 1),
+            Background = BrushFromHex(isValidPendingTarget ? "#1B2E28" : isPinned ? "#1E2238" : "#C00B1020"),
+            BorderBrush = BrushFromHex(isValidPendingTarget ? "#A6E3A1" : isPinned ? "#F9E2AF" : GetCardColorBrush(instance.TopCard.Color).Color.ToString()),
+            BorderThickness = new Thickness(isValidPendingTarget ? 3 : isPinned ? 2.5 : 1.5),
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(8),
-            Margin = new Thickness(0, 0, 10, 8),
+            Padding = new Thickness(7, 6, 7, 6),
+            Margin = new Thickness(0, 0, 10, 6),
             Opacity = isPendingAllyTargetMode && !isValidPendingTarget ? 0.55 : 1.0,
             Cursor = System.Windows.Input.Cursors.Hand,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = scaleTrans,
             Child = stack
         };
 
-        // 배틀 에어리어 디지몬을 마우스로 드래그해서 상대 시큐리티나 상대 레스트 디지몬에게 드롭하면 즉시 공격!
-        // 육성 에어리어 디지몬을 배틀 에어리어로 드래그하면 즉시 배틀 이동!
+        // 2-4. 필드 카드에 마우스를 대거나 클릭하면 우측 사이드바에서 DP 증가치 및 테이머/진화원 효과를 즉시 확인!
+        fieldCardBorder.MouseEnter += (_, _) =>
+        {
+            UpdateCardInspector(instance.TopCard);
+            if (_pinnedFieldInstance == null || ReferenceEquals(_pinnedFieldInstance, instance))
+            {
+                UpdateFieldDigimonBreakdown(instance, isPinned: isPinned, isOpponent: false);
+            }
+            var anim = new DoubleAnimation(1.03, TimeSpan.FromMilliseconds(120));
+            scaleTrans.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+            scaleTrans.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+        };
+
+        fieldCardBorder.MouseLeave += (_, _) =>
+        {
+            var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(120));
+            scaleTrans.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+            scaleTrans.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+            if (_pinnedFieldInstance != null)
+            {
+                UpdateFieldDigimonBreakdown(_pinnedFieldInstance, isPinned: true);
+            }
+        };
+
+        // 배틀 에어리어 디지몬 드래그 공격 & 육성 에어리어 디지몬 드래그 이동
         fieldCardBorder.PreviewMouseLeftButtonDown += (_, e) =>
         {
             if (!_gameState.IsGameOver && !isPendingAllyTargetMode)
@@ -1808,7 +2678,7 @@ public partial class MainWindow : Window
             }
         };
 
-        // 패에서 카드 사용을 누른 상태에서는 필드 디지몬 카드 자체를 클릭해도 즉시 진화/적용 실행!
+        // 클릭 시: 대상 지정 모드면 즉시 진화/버프 실행, 일반 모드면 우측 DP 증가치 인스펙터 고정/해제!
         fieldCardBorder.MouseLeftButtonUp += (_, _) =>
         {
             if (isPendingAllyTargetMode && _pendingHandCard != null)
@@ -1821,6 +2691,12 @@ public partial class MainWindow : Window
                 {
                     ShowToast(false, invalidTargetReason);
                 }
+            }
+            else
+            {
+                _pinnedFieldInstance = ReferenceEquals(_pinnedFieldInstance, instance) ? null : instance;
+                UpdateFieldDigimonBreakdown(instance, isPinned: _pinnedFieldInstance != null, isOpponent: false);
+                RefreshAllSimulatorUi();
             }
         };
 
@@ -1838,33 +2714,40 @@ public partial class MainWindow : Window
         _pendingHandCard = null;
         _pendingTargetsOpponent = false;
 
-        var res = isEvo
-            ? _engine.EvolveDigimon(target, cardToUse)
-            : _engine.PlayCard(cardToUse, target);
-
-        ApplyActionResult(res);
+        if (isEvo)
+        {
+            ExecuteEvolveDigimonWithEffects(target, cardToUse);
+        }
+        else
+        {
+            ExecutePlayCardWithEffects(cardToUse, target);
+        }
     }
 
     private static (string Text, string ColorHex) GetHandCardQuickEffectSummary(CardData card)
     {
         return card.CardId switch
         {
-            "ST1-12" => ("🎖️ 전체 DP+1000 & 진화4장↑ 시큐+1", "#F9E2AF"),
-            "ST2-12" => ("🎖️ 진화아군 DP+1000 & 메모리+1", "#89DCEB"),
-            "ST1-13" => ("✨ [옵션] 아군 1체 DP +3,000", "#A6E3A1"),
+            "ST1-12" or "BT1-085" => ("🎖️ 전체 DP+1000 & 최소 3메모리", "#F9E2AF"),
+            "ST2-12" or "BT1-086" => ("🎖️ 진화아군 DP+1000 & 메모리+", "#89DCEB"),
+            "ST3-12" or "BT1-087" => ("🎖️ 황색 아군 DP+1000 & 메모리+", "#F9E2AF"),
+            "ST4-12" or "BT1-089" => ("🎖️ 녹색 아군 DP+1000 & 메모리+", "#A6E3A1"),
+            "ST5-14" => ("🎖️ 흑색 블로커 DP+1000 & 메모리+1", "#94A3B8"),
+            "ST6-14" => ("🎖️ 자색 아군 DP+1000 & 메모리+1", "#CBA6F7"),
+            "ST1-13" or "ST3-13" or "ST4-13" => ("✨ [옵션] 아군 1체 DP +3,000", "#A6E3A1"),
             "ST1-14" => ("💥 [옵션] DP +2,000 & 시큐어택 +1", "#F9E2AF"),
             "ST1-15" => ("🔥 [옵션] 상대 DP 4000↓ 2체 소멸", "#F38BA8"),
-            "ST1-16" => ("🔥 [옵션] 상대 디지몬 1체 즉시 소멸", "#F38BA8"),
+            "ST1-16" or "ST3-16" or "ST4-16" or "ST5-16" or "ST6-15" or "ST6-16" => ("🔥 [옵션] 상대 디지몬 즉시 소멸!", "#F38BA8"),
             "ST2-13" => ("⚡ [옵션] 공짜 메모리 +2 획득!", "#89DCEB"),
-            "ST2-14" => ("❄️ [옵션] 상대 블로커 강제 레스트", "#89DCEB"),
+            "ST2-14" or "ST4-14" or "ST5-15" => ("❄️ [옵션] 상대 디지몬 강제 레스트", "#89DCEB"),
             "ST2-15" => ("❄️ [옵션] 내 진화원 1장 공짜 등장", "#A6E3A1"),
             "ST2-16" => ("🌊 [옵션] 상대 디지몬 패로 바운스", "#89B4FA"),
-            "ST1-07" or "ST2-08" => ("🧬 [진화원 효과] 💥시큐리티 어택 +1", "#F9E2AF"),
+            "ST1-07" or "ST2-08" or "ST3-08" or "BT1-021" => ("🧬 [진화원 효과] 💥시큐리티 어택 +1", "#F9E2AF"),
             "ST1-08" => ("🔥 [진화시] DP+3000 / 🧬진화원 DP+1000", "#A6E3A1"),
-            "ST1-09" => ("🧬 [진화원 효과] ▲DP +2,000", "#A6E3A1"),
-            "ST1-11" => ("💥 시큐어택+1 & [진화시] 추가 시큐+1", "#F9E2AF"),
-            "ST2-11" => ("⚡ 시큐어택+1 & [어택시] 재기상 2연타", "#89DCEB"),
-            "BT1-084" => ("👑 [Lv.7] DP 15,000 & 시큐어택 +1", "#F9E2AF"),
+            "ST1-09" or "ST4-10" or "BT3-054" => ("🧬 [진화원 효과] ▲DP +2,000", "#A6E3A1"),
+            "ST1-11" or "BT1-025" or "ST5-12" or "BT2-065" => ("💥 궁극체 시큐어택+1 & 고화력 돌파", "#F9E2AF"),
+            "ST2-11" or "BT1-044" or "ST6-12" or "BT2-080" => ("⚡ 궁극체 연속 어택 & 시큐 돌파", "#89DCEB"),
+            "BT1-084" or "BT3-112" or "BT5-086" => ("🌌 [Lv.7 초궁극체] DP 15,000 & 적 소멸!", "#F9E2AF"),
             _ when card.IsBlocker => ("🛡️ ≪블로커≫ 상대 공격 방어", "#FAB387"),
             _ when card.InheritedDpBonus > 0 => ($"🧬 [진화원 효과] ▲DP +{card.InheritedDpBonus:N0}", "#A6E3A1"),
             _ => ("⚔️ 기본 전투 디지몬", "#9399B2")
@@ -1874,15 +2757,16 @@ public partial class MainWindow : Window
     private void RenderHand()
     {
         HandPanel.Children.Clear();
-        TxtHandHeader.Text = $"🃏 내 손패 (Hand: {_gameState.Player.Hand.Count}장)";
 
+        int handCount = _gameState.Player.Hand.Count;
+        int handIndex = 0;
         foreach (var card in _gameState.Player.Hand.ToList())
         {
             bool isThisCardPending = ReferenceEquals(_pendingHandCard, card);
             var cardStack = new StackPanel();
 
-            // 실물 카드 디자인 프레임 (132 x 162)
-            var visualCard = CreateCardVisualFrame(card, width: 132, height: 162);
+            // 실물 카드 디자인 프레임 (132 x 162) — 좌상단에 숫자 코스트 배지 표시
+            var visualCard = CreateCardVisualFrame(card, width: 114, height: 150);
             cardStack.Children.Add(visualCard);
 
             // 패 카드 하단 핵심 효과(DP증가/시큐리티 추가공격/테이머/옵션) 한줄 요약 배지
@@ -1906,195 +2790,67 @@ public partial class MainWindow : Window
                 }
             });
 
-            // 하단 [등장/사용] / [진화] 버튼
-            var btnGrid = new UniformGrid
-            {
-                Rows = 1,
-                Columns = card.Type == CardType.Digimon ? 2 : 1,
-                Margin = new Thickness(0, 4, 0, 0)
-            };
+            // 등장 / 진화 / 사용은 버튼 대신 드래그 앤 드롭으로만 한다 (필드 디지몬 위 = 진화, 배틀 에어리어 빈 곳 = 등장·옵션 발동)
 
-            bool isAllyTargetedOption = card.Type == CardType.Option && card.CardId is "ST1-13" or "ST1-14" or "ST2-15";
-            bool isEnemyTargetedOption = card.Type == CardType.Option && card.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16";
+            // 2-2. 실제 카드를 손에서 집어드는 느낌의 호버 리프트 & 스케일 트랜스폼 애니메이션
+            // 유희왕식 부채꼴 손패: 가운데 카드를 기준으로 양옆으로 기울이고 바깥쪽일수록 살짝 내려간다
+            double fanOffset = handIndex - (handCount - 1) / 2.0;
+            double fanAngle = fanOffset * 2.5;
+            double restY = (isThisCardPending ? -14 : 0) + fanOffset * fanOffset * 2.2;
+            handIndex++;
 
-            var btnPlay = new Button
-            {
-                Content = isThisCardPending && !_pendingIsEvolution
-                    ? "❌취소"
-                    : card.Type == CardType.Option ? $"✨사용({card.PlayCost})" : $"✨등장({card.PlayCost})",
-                Height = 26,
-                Background = BrushFromHex(isThisCardPending && !_pendingIsEvolution ? "#F38BA8" : "#89B4FA"),
-                Foreground = BrushFromHex("#11111B"),
-                FontWeight = FontWeights.ExtraBold,
-                FontSize = 10.5,
-                Padding = new Thickness(3, 3, 3, 3),
-                Margin = new Thickness(0, 0, 2, 0),
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.Hand
-            };
-            btnPlay.MouseEnter += (_, _) =>
-            {
-                UpdateCardInspector(card);
-                var check = ActionValidator.ValidatePlay(_gameState, card);
-                ShowToast(check.CanExecute, check.CanExecute ? check.GuideMessage : check.Reason);
-            };
-            btnPlay.Click += (_, _) =>
-            {
-                if (isThisCardPending && !_pendingIsEvolution)
-                {
-                    _pendingHandCard = null;
-                    _pendingTargetsOpponent = false;
-                    ShowToast(true, $"[{card.Name}] 사용 대상 선택을 취소했습니다.");
-                    RefreshAllSimulatorUi();
-                    return;
-                }
-
-                AutoPassBreedingIfNeeded();
-
-                if (isAllyTargetedOption)
-                {
-                    var playCheck = ActionValidator.ValidatePlay(_gameState, card);
-                    if (!playCheck.CanExecute)
-                    {
-                        ShowToast(false, playCheck.Reason);
-                        return;
-                    }
-                    if (_gameState.Player.BattleArea.Count == 0)
-                    {
-                        ShowToast(false, $"배틀 에어리어에 [{card.Name}] 효과를 적용할 아군 디지몬이 없습니다.");
-                        return;
-                    }
-
-                    _pendingAttackerInstance = null;
-                    _pendingHandCard = card;
-                    _pendingIsEvolution = false;
-                    _pendingTargetsOpponent = false;
-                    ShowToast(true, $"🎯 [{card.Name}] 사용을 선택했습니다! 내 배틀 에어리어에서 효과를 받을 아군 디지몬을 클릭하세요.");
-                    RefreshAllSimulatorUi();
-                    return;
-                }
-
-                if (isEnemyTargetedOption)
-                {
-                    var playCheck = ActionValidator.ValidatePlay(_gameState, card);
-                    if (!playCheck.CanExecute)
-                    {
-                        ShowToast(false, playCheck.Reason);
-                        return;
-                    }
-                    if (_gameState.DummyOpponent.BattleArea.Count == 0)
-                    {
-                        ShowToast(false, $"상대 배틀 에어리어에 [{card.Name}] 효과를 적용할 상대 디지몬이 없습니다.");
-                        return;
-                    }
-
-                    _pendingAttackerInstance = null;
-                    _pendingHandCard = card;
-                    _pendingIsEvolution = false;
-                    _pendingTargetsOpponent = true;
-                    ShowToast(true, $"🎯 [{card.Name}] 사용을 선택했습니다! 상단 상대 배틀 에어리어에서 제거/무력화할 상대 디지몬을 클릭하세요.");
-                    RefreshAllSimulatorUi();
-                    return;
-                }
-
-                _pendingAttackerInstance = null;
-                _pendingHandCard = null;
-                _pendingTargetsOpponent = false;
-                var res = _engine.PlayCard(card);
-                ApplyActionResult(res);
-            };
-            btnGrid.Children.Add(btnPlay);
-
-            if (card.Type == CardType.Digimon)
-            {
-                var btnEvo = new Button
-                {
-                    Content = isThisCardPending && _pendingIsEvolution ? "❌취소" : $"🧬진화({card.EvoCost})",
-                    Height = 26,
-                    Background = BrushFromHex(isThisCardPending && _pendingIsEvolution ? "#F38BA8" : "#A6E3A1"),
-                    Foreground = BrushFromHex("#11111B"),
-                    FontWeight = FontWeights.ExtraBold,
-                    FontSize = 10.5,
-                    Padding = new Thickness(3, 3, 3, 3),
-                    Margin = new Thickness(2, 0, 0, 0),
-                    BorderThickness = new Thickness(0),
-                    Cursor = System.Windows.Input.Cursors.Hand
-                };
-                btnEvo.MouseEnter += (_, _) =>
-                {
-                    UpdateCardInspector(card);
-                    var allFieldTargets = new List<CardInstance>();
-                    if (_gameState.Player.BreedingArea != null) allFieldTargets.Add(_gameState.Player.BreedingArea);
-                    allFieldTargets.AddRange(_gameState.Player.BattleArea);
-
-                    var firstValid = allFieldTargets.FirstOrDefault(t => ActionValidator.ValidateEvolution(_gameState, t, card).CanExecute);
-                    if (firstValid != null)
-                    {
-                        var check = ActionValidator.ValidateEvolution(_gameState, firstValid, card);
-                        ShowToast(true, $"[{card.Name}] {check.GuideMessage} (클릭 후 필드의 디지몬을 선택하세요)");
-                    }
-                    else
-                    {
-                        var check = ActionValidator.ValidateEvolution(_gameState, allFieldTargets.FirstOrDefault(), card);
-                        ShowToast(false, check.Reason);
-                    }
-                };
-                btnEvo.Click += (_, _) =>
-                {
-                    if (isThisCardPending && _pendingIsEvolution)
-                    {
-                        _pendingHandCard = null;
-                        ShowToast(true, $"[{card.Name}] 진화 대상 선택을 취소했습니다.");
-                        RefreshAllSimulatorUi();
-                        return;
-                    }
-
-                    AutoPassBreedingIfNeeded();
-
-                    var allFieldTargets = new List<CardInstance>();
-                    if (_gameState.Player.BreedingArea != null) allFieldTargets.Add(_gameState.Player.BreedingArea);
-                    allFieldTargets.AddRange(_gameState.Player.BattleArea);
-
-                    var validTargets = allFieldTargets
-                        .Where(t => ActionValidator.ValidateEvolution(_gameState, t, card).CanExecute)
-                        .ToList();
-
-                    if (validTargets.Count == 0)
-                    {
-                        var reasonCheck = ActionValidator.ValidateEvolution(_gameState, allFieldTargets.FirstOrDefault(), card);
-                        ShowToast(false, reasonCheck.Reason);
-                        return;
-                    }
-
-                    _pendingAttackerInstance = null;
-                    _pendingHandCard = card;
-                    _pendingIsEvolution = true;
-                    _pendingTargetsOpponent = false;
-                    ShowToast(true, $"🎯 패에서 [{card.Name}(Lv.{card.Level})] 진화를 선택했습니다! 이제 내 필드(육성/배틀 에어리어)에서 초록색으로 빛나는 디지몬을 클릭하세요.");
-                    RefreshAllSimulatorUi();
-                };
-                btnGrid.Children.Add(btnEvo);
-            }
-
-            cardStack.Children.Add(btnGrid);
+            var translateTrans = new TranslateTransform(0, restY);
+            var scaleTrans = new ScaleTransform(1.0, 1.0);
+            var rotateTrans = new RotateTransform(isThisCardPending ? 0 : fanAngle);
+            var transformGroup = new TransformGroup();
+            transformGroup.Children.Add(scaleTrans);
+            transformGroup.Children.Add(rotateTrans);
+            transformGroup.Children.Add(translateTrans);
 
             var wrapper = new Border
             {
-                Width = 148,
-                Background = BrushFromHex(isThisCardPending ? "#26283E" : "#141522"),
-                BorderBrush = BrushFromHex(isThisCardPending ? "#F9E2AF" : "#313244"),
+                Width = 128,
+                Background = BrushFromHex(isThisCardPending ? "#E626283E" : "#E00E1222"),
+                BorderBrush = BrushFromHex(isThisCardPending ? "#F9E2AF" : "#40FFFFFF"),
                 BorderThickness = new Thickness(isThisCardPending ? 2.5 : 1),
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(6),
-                Margin = new Thickness(0, 0, 8, 4),
+                Margin = new Thickness(0, 6, -4, 4),
                 Cursor = System.Windows.Input.Cursors.Hand,
+                RenderTransformOrigin = new Point(0.5, 1.0),
+                RenderTransform = transformGroup,
+                Effect = Theme.GetEffect("Neo.Shadow.Float"),
                 Child = cardStack
             };
-            wrapper.MouseEnter += (_, _) => UpdateCardInspector(card);
 
-            // 패 카드를 마우스로 잡고 위로 드래그하면:
-            // - 필드 디지몬 위에 드롭 -> 즉시 [진화] 또는 [옵션 버프/제거]
-            // - 배틀 에어리어 빈 공간에 드롭 -> 즉시 [일반 등장/사용]
+            wrapper.MouseEnter += (_, _) =>
+            {
+                UpdateCardInspector(card);
+                Panel.SetZIndex(wrapper, 100);
+                wrapper.BorderBrush = GetCardColorBrush(card.Color);
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                var liftAnim = new DoubleAnimation(-22, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease };
+                var zoomAnim = new DoubleAnimation(1.07, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease };
+                var straightenAnim = new DoubleAnimation(0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease };
+                translateTrans.BeginAnimation(TranslateTransform.YProperty, liftAnim);
+                rotateTrans.BeginAnimation(RotateTransform.AngleProperty, straightenAnim);
+                scaleTrans.BeginAnimation(ScaleTransform.ScaleXProperty, zoomAnim);
+                scaleTrans.BeginAnimation(ScaleTransform.ScaleYProperty, zoomAnim);
+            };
+
+            wrapper.MouseLeave += (_, _) =>
+            {
+                Panel.SetZIndex(wrapper, 0);
+                wrapper.BorderBrush = BrushFromHex(isThisCardPending ? "#F9E2AF" : "#40FFFFFF");
+                var dropAnim = new DoubleAnimation(restY, TimeSpan.FromMilliseconds(140));
+                var tiltAnim = new DoubleAnimation(isThisCardPending ? 0 : fanAngle, TimeSpan.FromMilliseconds(140));
+                var zoomOutAnim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(140));
+                translateTrans.BeginAnimation(TranslateTransform.YProperty, dropAnim);
+                rotateTrans.BeginAnimation(RotateTransform.AngleProperty, tiltAnim);
+                scaleTrans.BeginAnimation(ScaleTransform.ScaleXProperty, zoomOutAnim);
+                scaleTrans.BeginAnimation(ScaleTransform.ScaleYProperty, zoomOutAnim);
+            };
+
             wrapper.PreviewMouseLeftButtonDown += (_, e) =>
             {
                 if (!_gameState.IsGameOver)
@@ -2113,6 +2869,7 @@ public partial class MainWindow : Window
     // ==================== 🖱️ 드래그 앤 드롭 (패 -> 진화/등장/옵션 & 필드 디지몬 -> 배틀이동/공격) ====================
     private void Window_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
+
         if (SimulatorView.Visibility != Visibility.Visible)
             return;
 
@@ -2182,7 +2939,7 @@ public partial class MainWindow : Window
             _pendingAttackerInstance = null;
             _pendingHandCard = hc;
             _pendingIsEvolution = hc.Type == CardType.Digimon;
-            _pendingTargetsOpponent = hc.Type == CardType.Option && hc.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16";
+            _pendingTargetsOpponent = IsEnemyTargetedOption(hc);
             RefreshAllSimulatorUi();
         }
         else if (_potentialDragFieldAttacker != null)
@@ -2385,17 +3142,17 @@ public partial class MainWindow : Window
 
     private void ResetDropZoneHighlights()
     {
-        BreedingAreaZoneBorder.BorderBrush = BrushFromHex("#A6E3A1");
-        BreedingAreaZoneBorder.BorderThickness = new Thickness(1.5);
+        BreedingAreaZoneBorder.BorderBrush = Theme.GetBrush("Neo.Brush.Green.Soft");
+        BreedingAreaZoneBorder.BorderThickness = new Thickness(1);
 
-        BattleAreaZoneBorder.BorderBrush = BrushFromHex("#89B4FA");
-        BattleAreaZoneBorder.BorderThickness = new Thickness(1.5);
+        BattleAreaZoneBorder.BorderBrush = Theme.GetBrush("Neo.Brush.Cyan.Soft");
+        BattleAreaZoneBorder.BorderThickness = new Thickness(1);
 
-        OpponentSecurityZoneBorder.BorderBrush = BrushFromHex("#F38BA8");
-        OpponentSecurityZoneBorder.BorderThickness = new Thickness(1.5);
+        OpponentSecurityZoneBorder.BorderBrush = Theme.GetBrush("Neo.Brush.Rose.Soft");
+        OpponentSecurityZoneBorder.BorderThickness = new Thickness(1);
 
-        OpponentBattleAreaBorder.BorderBrush = BrushFromHex("#FAB387");
-        OpponentBattleAreaBorder.BorderThickness = new Thickness(1.5);
+        OpponentBattleAreaBorder.BorderBrush = Theme.GetBrush("Neo.Brush.Rose.Soft");
+        OpponentBattleAreaBorder.BorderThickness = new Thickness(1);
     }
 
     private void HighlightDropZone(Border? targetZone, string hexColor)
@@ -2492,7 +3249,7 @@ public partial class MainWindow : Window
                         _dragGhostBadgeBorder.Background = BrushFromHex("#F9E2AF");
                     }
                 }
-                else if (card.CardId is "ST1-13" or "ST1-14" or "ST2-15")
+                else if (IsAllyTargetedOption(card))
                 {
                     var allyTarget = info.AllyDigimon
                         ?? (info.OverBattleZone ? _gameState.Player.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault() : null);
@@ -2607,20 +3364,20 @@ public partial class MainWindow : Window
 
                 if (intent.IsEvolve && intent.EvoTarget != null)
                 {
-                    ApplyActionResult(_engine.EvolveDigimon(intent.EvoTarget, draggedHand));
+                    ExecuteEvolveDigimonWithEffects(intent.EvoTarget, draggedHand);
                     return;
                 }
 
                 if (intent.IsPlay)
                 {
-                    ApplyActionResult(_engine.PlayCard(draggedHand));
+                    ExecutePlayCardWithEffects(draggedHand);
                     return;
                 }
             }
             else if (draggedHand.Type == CardType.Option)
             {
-                bool isEnemyTargeted = draggedHand.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16";
-                bool isAllyTargeted = draggedHand.CardId is "ST1-13" or "ST1-14" or "ST2-15";
+                bool isEnemyTargeted = IsEnemyTargetedOption(draggedHand);
+                bool isAllyTargeted = IsAllyTargetedOption(draggedHand);
 
                 if (isEnemyTargeted)
                 {
@@ -2630,7 +3387,7 @@ public partial class MainWindow : Window
                             : null);
                     if (oppTarget != null)
                     {
-                        ApplyActionResult(_engine.PlayCard(draggedHand, oppTarget));
+                        ExecutePlayCardWithEffects(draggedHand, oppTarget);
                         return;
                     }
                 }
@@ -2643,13 +3400,13 @@ public partial class MainWindow : Window
                             : null);
                     if (allyTarget != null)
                     {
-                        ApplyActionResult(_engine.PlayCard(draggedHand, allyTarget));
+                        ExecutePlayCardWithEffects(draggedHand, allyTarget);
                         return;
                     }
                 }
                 else if (info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null)
                 {
-                    ApplyActionResult(_engine.PlayCard(draggedHand));
+                    ExecutePlayCardWithEffects(draggedHand);
                     return;
                 }
             }
@@ -2657,7 +3414,7 @@ public partial class MainWindow : Window
             {
                 if (info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null)
                 {
-                    ApplyActionResult(_engine.PlayCard(draggedHand));
+                    ExecutePlayCardWithEffects(draggedHand);
                     return;
                 }
             }
@@ -2767,7 +3524,7 @@ public partial class MainWindow : Window
     private void BtnStage1_Click(object sender, RoutedEventArgs e)
     {
         _isSecurityPeekEnabled = true;
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage1_Goldfish);
+        StartGameForStage(PracticeStage.Stage1_Goldfish);
         RefreshAllSimulatorUi();
         ShowToast(true, "🥇 [STAGE 1: 5턴 타임어택] 시작! 상대 방해 없이 5턴 안에 시큐리티 5장을 깨고 다이렉트 어택을 성공시키세요.");
     }
@@ -2775,7 +3532,7 @@ public partial class MainWindow : Window
     private void BtnStage2_Click(object sender, RoutedEventArgs e)
     {
         _isSecurityPeekEnabled = true;
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage2_BlockerDefense);
+        StartGameForStage(PracticeStage.Stage2_BlockerDefense);
         RefreshAllSimulatorUi();
         ShowToast(true, "🥈 [STAGE 2: 블로커 돌파] 시작! 상대 필드의 ≪블로커≫ 디지몬을 옵션 카드(가이아 포스/코큐토스 브레스)나 고DP 진화로 돌파하세요!");
     }
@@ -2783,7 +3540,7 @@ public partial class MainWindow : Window
     private void BtnStage3_Click(object sender, RoutedEventArgs e)
     {
         _isSecurityPeekEnabled = false; // 공식 대인전 룰: 상대 시큐리티는 뒷면 비공개로 시작하며 공격 시 오픈됩니다!
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage3_AiBattle);
+        StartGameForStage(PracticeStage.Stage3_AiBattle);
         RefreshAllSimulatorUi();
         ShowToast(true, "🥉 [STAGE 3: 공식 룰 AI 실전 배틀] 시작! 양쪽 모두 50장 덱 맨 위 5장이 시큐리티(비공개)로 세팅되며, 테이머/옵션의 [시큐리티] 효과가 100% 발동됩니다!");
     }
@@ -2818,7 +3575,7 @@ public partial class MainWindow : Window
         var (main, digitama) = StarterDecks.CreateSt1GaiaRedPreset();
         _builderMainDeck = main;
         _builderDigitamaDeck = digitama;
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: _gameState.CurrentStage);
+        StartGameForStage(_gameState.CurrentStage);
         RefreshAllSimulatorUi();
         ShowToast(true, "🔥 ST-1 가이아 레드 프리셋으로 새 연습 게임을 시작했습니다!");
     }
@@ -2828,7 +3585,7 @@ public partial class MainWindow : Window
         var (main, digitama) = StarterDecks.CreateSt2CocytusBluePreset();
         _builderMainDeck = main;
         _builderDigitamaDeck = digitama;
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: _gameState.CurrentStage);
+        StartGameForStage(_gameState.CurrentStage);
         RefreshAllSimulatorUi();
         ShowToast(true, "❄️ ST-2 코큐토스 블루 프리셋으로 새 연습 게임을 시작했습니다!");
     }
@@ -2853,6 +3610,8 @@ public partial class MainWindow : Window
             "Blue" => CardColor.Blue,
             "Yellow" => CardColor.Yellow,
             "Green" => CardColor.Green,
+            "Black" => CardColor.Black,
+            "Purple" => CardColor.Purple,
             "White" => CardColor.White,
             _ => null
         };
@@ -2878,7 +3637,7 @@ public partial class MainWindow : Window
         };
 
         var results = _catalogService.SearchCards(keyword, color, type, level);
-        TxtCatalogCount.Text = $"검색된 카드: {results.Count}종 (전체 도감: {_catalogService.Catalog.Count}종 | 이미지 캐시: data/images/)";
+        TxtCatalogCount.Text = $"검색된 카드: {results.Count}종 (전체 7색 TCG 도감: {_catalogService.Catalog.Count}종 | ST-1~6 & BT-1~5 수록)";
 
         CatalogWrapPanel.Children.Clear();
         foreach (var card in results)
@@ -2886,75 +3645,128 @@ public partial class MainWindow : Window
             int countInDeck = _builderMainDeck.Count(c => c.CardId == card.CardId) +
                               _builderDigitamaDeck.Count(c => c.CardId == card.CardId);
 
-            var stack = new StackPanel();
-
-            var topInfo = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-            topInfo.Children.Add(new TextBlock
-            {
-                Text = card.CardId,
-                Foreground = BrushFromHex("#A6ADC8"),
-                FontWeight = FontWeights.Bold,
-                FontSize = 11
-            });
-            topInfo.Children.Add(new TextBlock
-            {
-                Text = $"덱 투입: {countInDeck}/4장",
-                Foreground = BrushFromHex(countInDeck > 0 ? "#F9E2AF" : "#6C7086"),
-                FontWeight = FontWeights.ExtraBold,
-                FontSize = 11,
-                HorizontalAlignment = HorizontalAlignment.Right
-            });
-            stack.Children.Add(topInfo);
-
-            // 실물 카드 아트워크 프레임
-            var visualCard = CreateCardVisualFrame(card, width: 152, height: 210);
-            stack.Children.Add(visualCard);
-
-            var btnRow = new UniformGrid { Rows = 1, Columns = 2, Margin = new Thickness(0, 6, 0, 0) };
-            var btnAdd = new Button
-            {
-                Content = "+ 덱 추가",
-                Background = BrushFromHex("#A6E3A1"),
-                Foreground = BrushFromHex("#11111B"),
-                FontWeight = FontWeights.Bold,
-                Padding = new Thickness(4, 4, 4, 4),
-                Margin = new Thickness(0, 0, 2, 0),
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.Hand
-            };
-            btnAdd.Click += (_, _) => AddCardToBuilderDeck(card);
-
-            var btnRem = new Button
-            {
-                Content = "- 제거",
-                Background = BrushFromHex("#45475A"),
-                Foreground = BrushFromHex("#F8FAFC"),
-                FontWeight = FontWeights.Bold,
-                Padding = new Thickness(4, 4, 4, 4),
-                Margin = new Thickness(2, 0, 0, 0),
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.Hand
-            };
-            btnRem.Click += (_, _) => RemoveCardFromBuilderDeck(card);
-
-            btnRow.Children.Add(btnAdd);
-            btnRow.Children.Add(btnRem);
-            stack.Children.Add(btnRow);
-
-            var cardContainer = new Border
-            {
-                Width = 170,
-                Background = BrushFromHex("#11111B"),
-                BorderBrush = BrushFromHex(countInDeck > 0 ? "#F9E2AF" : "#313244"),
-                BorderThickness = new Thickness(countInDeck > 0 ? 1.5 : 1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(8),
-                Margin = new Thickness(0, 0, 8, 8),
-                Child = stack
-            };
-            cardContainer.MouseEnter += (_, _) => UpdateCardInspector(card);
-            CatalogWrapPanel.Children.Add(cardContainer);
+            CatalogWrapPanel.Children.Add(CreateBinderPocket(card, countInDeck));
         }
+    }
+
+    /// <summary>
+    /// 바인더 앨범의 카드 포켓 1칸: 슬리브에 넣은 카드 + 투입 매수 배지.
+    /// 클릭 = 덱에 넣기 / 우클릭 = 빼기 (덱에 들어간 카드는 금색 테두리 + 매수 칩으로 표시)
+    /// </summary>
+    private FrameworkElement CreateBinderPocket(CardData card, int countInDeck)
+    {
+        const double cardW = 142, cardH = 198;
+        bool inDeck = countInDeck > 0;
+
+        var cardGrid = new Grid { Width = cardW, Height = cardH };
+        cardGrid.Children.Add(CreateCardVisualFrame(card, width: cardW, height: cardH));
+        // 슬리브 비닐 광택
+        cardGrid.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            Background = Theme.GetBrush("Duel.Brush.SleeveSheen"),
+            IsHitTestVisible = false
+        });
+
+        if (inDeck)
+        {
+            // 덱 투입 매수: 카드 오른쪽 위에 겹쳐 놓은 칩 (최대 4장)
+            var chips = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 30, 4, 0) };
+            chips.Children.Add(new Border
+            {
+                Background = Theme.GetBrush("Neo.Brush.Button.Gold"),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(8, 1, 8, 1),
+                Effect = Theme.GetEffect("Neo.Shadow.Float"),
+                Child = new TextBlock
+                {
+                    Text = $"×{countInDeck}",
+                    Foreground = Theme.GetBrush("Neo.Brush.Text.OnNeon"),
+                    FontFamily = (FontFamily)FindResource("Neo.Font.Mono"),
+                    FontWeight = FontWeights.ExtraBold,
+                    FontSize = 12
+                }
+            });
+            cardGrid.Children.Add(chips);
+        }
+
+        // 포켓 아래 칸: 카드 번호 + 매수 표시 + 빼기/넣기 소형 버튼
+        var footer = new DockPanel { Margin = new Thickness(2, 5, 2, 0) };
+        var btnRem = new Button
+        {
+            Content = "−",
+            Width = 24,
+            Height = 20,
+            Padding = new Thickness(0),
+            FontWeight = FontWeights.ExtraBold,
+            IsEnabled = inDeck,
+            ToolTip = "덱에서 1장 빼기 (우클릭과 동일)"
+        };
+        ThemeAssist.SetCornerRadius(btnRem, new CornerRadius(999));
+        btnRem.Click += (_, _) => RemoveCardFromBuilderDeck(card);
+        var btnAdd = new Button
+        {
+            Content = "+",
+            Width = 24,
+            Height = 20,
+            Padding = new Thickness(0),
+            FontWeight = FontWeights.ExtraBold,
+            Background = Theme.GetBrush("Neo.Brush.Green"),
+            Foreground = Theme.GetBrush("Neo.Brush.Text.OnNeon"),
+            BorderThickness = new Thickness(0),
+            ToolTip = "덱에 1장 넣기 (클릭과 동일)"
+        };
+        ThemeAssist.SetCornerRadius(btnAdd, new CornerRadius(999));
+        btnAdd.Click += (_, _) => AddCardToBuilderDeck(card);
+        DockPanel.SetDock(btnRem, Dock.Left);
+        DockPanel.SetDock(btnAdd, Dock.Right);
+        footer.Children.Add(btnRem);
+        footer.Children.Add(btnAdd);
+        footer.Children.Add(new TextBlock
+        {
+            Text = $"{card.CardId} · {countInDeck}/4",
+            Foreground = Theme.GetBrush(inDeck ? "Neo.Brush.Gold" : "Neo.Brush.Text.Dim"),
+            FontFamily = (FontFamily)FindResource("Neo.Font.Mono"),
+            FontWeight = FontWeights.Bold,
+            FontSize = 10,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var scale = new ScaleTransform(1, 1);
+        var pocket = new Border
+        {
+            Width = cardW + 14,
+            Padding = new Thickness(6, 6, 6, 6),
+            Margin = new Thickness(0, 0, 10, 12),
+            CornerRadius = new CornerRadius(10),
+            Background = BrushFromHex("#8C050811"),
+            BorderBrush = inDeck ? Theme.GetBrush("Duel.Brush.GoldEdge") : Theme.GetBrush("Duel.Brush.ZoneEdge.Neutral"),
+            BorderThickness = new Thickness(inDeck ? 1.6 : 1),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = "클릭: 덱에 넣기 · 우클릭: 빼기",
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = scale,
+            Child = new StackPanel { Children = { cardGrid, footer } }
+        };
+
+        pocket.MouseEnter += (_, _) =>
+        {
+            UpdateCardInspector(card);
+            var up = new DoubleAnimation(1.04, TimeSpan.FromMilliseconds(120));
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, up);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, up);
+        };
+        pocket.MouseLeave += (_, _) =>
+        {
+            var down = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(120));
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, down);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, down);
+        };
+        // 카드 그림 부분 클릭/우클릭으로 넣고 빼기 (아래 소형 버튼 클릭은 버튼이 처리)
+        cardGrid.MouseLeftButtonUp += (_, e) => { e.Handled = true; AddCardToBuilderDeck(card); };
+        cardGrid.MouseRightButtonUp += (_, e) => { e.Handled = true; RemoveCardFromBuilderDeck(card); };
+        return pocket;
     }
 
     private void AddCardToBuilderDeck(CardData card)
@@ -3037,8 +3849,9 @@ public partial class MainWindow : Window
                 Minimum = 0,
                 Maximum = Math.Max(item.RecommendedMax + 4, 16),
                 Value = item.CurrentCount,
-                Height = 10,
+                Height = 8,
                 Margin = new Thickness(5, 0, 5, 0),
+                Style = (Style)FindResource("Neo.ProgressBar"),
                 Background = BrushFromHex("#313244"),
                 Foreground = BrushFromHex(item.StatusText == "적정" ? "#A6E3A1" : item.StatusText == "부족" ? "#F9E2AF" : "#F38BA8"),
                 BorderThickness = new Thickness(0)
@@ -3124,8 +3937,8 @@ public partial class MainWindow : Window
 
             var btnMinus = new Button
             {
-                Content = "-",
-                Width = 22,
+                Content = "−",
+                Width = 22, Padding = new Thickness(0), FontWeight = FontWeights.ExtraBold,
                 Height = 20,
                 Background = BrushFromHex("#45475A"),
                 Foreground = BrushFromHex("#F8FAFC"),
@@ -3137,7 +3950,7 @@ public partial class MainWindow : Window
             var btnPlus = new Button
             {
                 Content = "+",
-                Width = 22,
+                Width = 22, Padding = new Thickness(0),
                 Height = 20,
                 Background = BrushFromHex("#A6E3A1"),
                 Foreground = BrushFromHex("#11111B"),
@@ -3152,7 +3965,7 @@ public partial class MainWindow : Window
 
             var rowBorder = new Border
             {
-                Background = BrushFromHex("#11111B"),
+                Background = BrushFromHex("#B30B1020"),
                 BorderBrush = GetCardColorBrush(card.Color),
                 BorderThickness = new Thickness(3, 0, 0, 0),
                 CornerRadius = new CornerRadius(4),
@@ -3168,31 +3981,49 @@ public partial class MainWindow : Window
     private async void BtnSyncApi_Click(object sender, RoutedEventArgs e)
     {
         BtnSyncApi.IsEnabled = false;
-        ShowToast(true, "DigimonCard.io 공개 REST API에서 카드 메타데이터를 동기화하는 중입니다...");
-        var (success, msg) = await _catalogService.SyncFromDigimonCardApiAsync("ST1-03");
+        ShowToast(true, "🌐 DigimonCard.io 공개 REST API에서 ST-1~ST-6 & BT-1~BT-3 전체 TCG 카드를 일괄 업데이트하는 중입니다...");
+        var (success, msg) = await _catalogService.SyncAllSetsFromApiAsync();
         ShowToast(success, msg);
         RefreshCatalogUi();
+        _ = PrefetchCatalogImagesAsync();
         BtnSyncApi.IsEnabled = true;
     }
 
-    private void BtnLoadPresetSt1_Click(object sender, RoutedEventArgs e)
-    {
-        var (main, digitama) = StarterDecks.CreateSt1GaiaRedPreset();
-        _builderMainDeck = main;
-        _builderDigitamaDeck = digitama;
-        RefreshCatalogUi();
-        RefreshDeckBuilderUi();
-        ShowToast(true, "ST-1 가이아 레드 공식 프리셋(메인 50장, 디지타마 4장)을 불러왔습니다.");
-    }
+    private void BtnLoadPresetSt1_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("🔥 [추천 1] 워그레이몬 & 오메가몬 초화력 비트 (50장)", StarterDecks.CreateSt1GaiaRedPreset());
 
-    private void BtnLoadPresetSt2_Click(object sender, RoutedEventArgs e)
+    private void BtnLoadPresetSt2_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("❄️ [추천 2] 메탈가루루몬 & 오메가몬 연타 (50장)", StarterDecks.CreateSt2CocytusBluePreset());
+
+    private void BtnLoadPresetSt3_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("⚡ [추천 3] 세라피몬 & 샤인그레이몬 시큐 컨트롤 (50장)", StarterDecks.CreateSt3HeavensYellowPreset());
+
+    private void BtnLoadPresetSt4_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("🌿 [추천 4] 헤라클캅테리몬 초고속 진화 램프 (50장)", StarterDecks.CreateSt4GigaGreenPreset());
+
+    private void BtnLoadPresetSt5_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("⚙️ [추천 5] 파워드라몬 & 크레니엄몬 철벽 블로커 (50장)", StarterDecks.CreateSt5MachineBlackPreset());
+
+    private void BtnLoadPresetSt6_Click(object sender, RoutedEventArgs e) =>
+        ApplyPresetDeckAndSync("🔮 [추천 6] 베놈묘티스몬 & 벨제부몬 어그로 (50장)", StarterDecks.CreateSt6VenomVioletPreset());
+
+    private void BtnAutoCompleteDeck_Click(object sender, RoutedEventArgs e)
     {
-        var (main, digitama) = StarterDecks.CreateSt2CocytusBluePreset();
-        _builderMainDeck = main;
-        _builderDigitamaDeck = digitama;
+        var (completedMain, completedDigitama, guideMsg) = StarterDecks.AutoCompleteRecommendedDeck(
+            _builderMainDeck,
+            _builderDigitamaDeck,
+            _catalogService.Catalog);
+
+        _builderMainDeck = completedMain;
+        _builderDigitamaDeck = completedDigitama;
+        _activeDeckTitle = $"🤖 AI 추천 황금비율 완성 덱 ({_builderMainDeck.Count}장)";
+        if (TxtLobbyActiveDeckName != null)
+        {
+            TxtLobbyActiveDeckName.Text = $"🎴 출전 덱: {_activeDeckTitle}";
+        }
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
-        ShowToast(true, "ST-2 코큐토스 블루 공식 프리셋(메인 50장, 디지타마 4장)을 불러왔습니다.");
+        ShowToast(true, guideMsg);
     }
 
     private void BtnSaveCustomDeck_Click(object sender, RoutedEventArgs e)
@@ -3211,6 +4042,11 @@ public partial class MainWindow : Window
         }
         _builderMainDeck = loaded.Value.MainDeck;
         _builderDigitamaDeck = loaded.Value.DigitamaDeck;
+        _activeDeckTitle = $"📂 {loaded.Value.DeckName} (50장)";
+        if (TxtLobbyActiveDeckName != null)
+        {
+            TxtLobbyActiveDeckName.Text = $"🎴 출전 덱: {_activeDeckTitle}";
+        }
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
         ShowToast(true, $"[{loaded.Value.DeckName}] 덱을 불러왔습니다.");
@@ -3222,7 +4058,7 @@ public partial class MainWindow : Window
         _builderDigitamaDeck.Clear();
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
-        ShowToast(true, "덱 구성을 초기화했습니다.");
+        ShowToast(true, "덱 구성을 초기화했습니다. 원하는 카드를 고른 뒤 [🤖 AI 추천 덱 자동 완성]을 누르면 남은 자리를 황금 비율로 채워줍니다!");
     }
 
     private void BtnPlayWithCurrentDeck_Click(object sender, RoutedEventArgs e)
@@ -3230,27 +4066,18 @@ public partial class MainWindow : Window
         var (isValid, errors) = DeckValidator.ValidateDeck(_builderMainDeck, _builderDigitamaDeck);
         if (!isValid)
         {
-            ShowToast(false, "덱 규칙을 만족하지 않아 게임을 시작할 수 없습니다: " + string.Join(" ", errors));
+            ShowToast(false, "덱 규칙을 만족하지 않아 게임을 시작할 수 없습니다 (먼저 [🤖 AI 추천 덱 자동 완성]을 눌러보세요!): " + string.Join(" ", errors));
             return;
         }
 
         _isSecurityPeekEnabled = false;
-        _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: PracticeStage.Stage3_AiBattle);
+        StartGameForStage(PracticeStage.Stage3_AiBattle);
         BtnTabOfficialMatch_Click(sender, e);
-        ShowToast(true, "⚔️ 현재 빌딩된 50장 커스텀 덱으로 [실전 AI 듀얼 아레나] 새 게임을 시작했습니다!");
+        ShowToast(true, "⚔️ 현재 빌딩된 50장 덱으로 [실전 대련 (AI)] 새 게임을 시작했습니다!");
     }
 
     private static SolidColorBrush BrushFromHex(string hex) =>
         (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
 
-    private static SolidColorBrush GetCardColorBrush(CardColor color) => color switch
-    {
-        CardColor.Red => BrushFromHex("#F38BA8"),
-        CardColor.Blue => BrushFromHex("#89B4FA"),
-        CardColor.Yellow => BrushFromHex("#F9E2AF"),
-        CardColor.Green => BrushFromHex("#A6E3A1"),
-        CardColor.Purple => BrushFromHex("#CBA6F7"),
-        CardColor.White => BrushFromHex("#F8FAFC"),
-        _ => BrushFromHex("#9399B2")
-    };
+    private static SolidColorBrush GetCardColorBrush(CardColor color) => Theme.GetCardColorBrush(color);
 }

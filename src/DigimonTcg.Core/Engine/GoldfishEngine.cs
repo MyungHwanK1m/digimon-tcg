@@ -26,13 +26,16 @@ public class GoldfishEngine
     }
 
     /// <summary>
-    /// 덱 및 선택한 스테이지로 새 게임 초기화
+    /// 덱 및 선택한 스테이지/상대방 덱으로 새 게임 초기화
     /// </summary>
     public void StartNewGame(
         IReadOnlyList<CardData> mainDeck,
         IReadOnlyList<CardData> digitamaDeck,
-         int? seed = null,
-        PracticeStage? stage = null)
+        int? seed = null,
+        PracticeStage? stage = null,
+        IReadOnlyList<CardData>? opponentMainDeck = null,
+        IReadOnlyList<CardData>? opponentDigitamaDeck = null,
+        string? opponentDeckName = null)
     {
         var rng = seed.HasValue ? new Random(seed.Value) : _rng;
         if (stage.HasValue)
@@ -42,6 +45,7 @@ public class GoldfishEngine
 
         State.CurrentTurn = 1;
         State.CurrentPhase = Phase.Active;
+        State.PlayerGoesFirst = true;
         State.MemoryGauge = 3;
         State.CanMulligan = true;
         State.BreedingActionTaken = false;
@@ -53,6 +57,7 @@ public class GoldfishEngine
         State.Lv3StartedChains = 0;
         State.Lv6CompletedChains = 0;
         State.SecurityCheckHistory.Clear();
+        State.PlayerSecurityCheckHistory.Clear();
         State.LastRevealedSecurityCard = null;
         State.LastSecurityBattleResult = string.Empty;
         State.LastSecurityBattleWon = true;
@@ -93,14 +98,14 @@ public class GoldfishEngine
             State.Player.MainDeck.RemoveAt(0);
         }
 
-        // 스테이지별 상대방 세팅
-        SetupOpponentForStage(rng);
+        // 스테이지별 상대방 세팅 (기초 덱 또는 사용자 지정 덱)
+        SetupOpponentForStage(rng, opponentMainDeck, opponentDigitamaDeck, opponentDeckName);
 
         string stageTitle = State.CurrentStage switch
         {
             PracticeStage.Stage1_Goldfish => "Stage 1: 기본 타임어택 (골드피시)",
             PracticeStage.Stage2_BlockerDefense => "Stage 2: 블로커 & 수비진 돌파 챌린지",
-            PracticeStage.Stage3_AiBattle => "Stage 3: 실전 AI 대전 (메모리 줄다리기 & 공방전)",
+            PracticeStage.Stage3_AiBattle => $"Stage 3: 실전 AI 대전 (상대 덱: {State.OpponentDeckName})",
             _ => "1인 연습 모드"
         };
 
@@ -111,17 +116,40 @@ public class GoldfishEngine
         Log("육성 페이즈 시작: [부화], [배틀 이동], [패스] 또는 [첫 손패 다시 뽑기(멀리건)]를 선택하세요.");
     }
 
-    private void SetupOpponentForStage(Random rng)
+    private void SetupOpponentForStage(
+        Random rng,
+        IReadOnlyList<CardData>? customOpponentMain = null,
+        IReadOnlyList<CardData>? customOpponentDigitama = null,
+        string? customOpponentDeckName = null)
     {
         var catalog = StarterDecks.GetAllCatalogCards().ToDictionary(c => c.CardId);
 
         if (State.CurrentStage == PracticeStage.Stage3_AiBattle)
         {
-            // 플레이어 주 색상이 Red면 AI는 ST-2 Blue, 아니면 ST-1 Red 사용
-            bool playerIsRed = State.Player.Hand.Concat(State.Player.MainDeck).Count(c => c.Color == CardColor.Red) >= 20;
-            var (aiMain, aiDigitama) = playerIsRed
-                ? StarterDecks.CreateSt2CocytusBluePreset()
-                : StarterDecks.CreateSt1GaiaRedPreset();
+            List<CardData> aiMain;
+            List<CardData> aiDigitama;
+
+            if (customOpponentMain != null && customOpponentMain.Count >= 10)
+            {
+                aiMain = customOpponentMain.ToList();
+                aiDigitama = customOpponentDigitama != null && customOpponentDigitama.Count > 0
+                    ? customOpponentDigitama.ToList()
+                    : StarterDecks.CreateSt1GaiaRedPreset().DigitamaDeck;
+                State.OpponentDeckName = !string.IsNullOrWhiteSpace(customOpponentDeckName)
+                    ? customOpponentDeckName
+                    : "🛠️ 내가 만든 커스텀 덱";
+            }
+            else
+            {
+                // 자동 배정: 플레이어 주 색상이 Red면 AI는 ST-2 Blue, 아니면 ST-1 Red 사용
+                bool playerIsRed = State.Player.Hand.Concat(State.Player.MainDeck).Count(c => c.Color == CardColor.Red) >= 20;
+                (aiMain, aiDigitama) = playerIsRed
+                    ? StarterDecks.CreateSt2CocytusBluePreset()
+                    : StarterDecks.CreateSt1GaiaRedPreset();
+                State.OpponentDeckName = playerIsRed
+                    ? "❄️ [기초 2] 코퀴토스 블루 (자동 배정)"
+                    : "🔥 [기초 1] 가이아 레드 (자동 배정)";
+            }
 
             foreach (var d in aiDigitama.OrderBy(_ => rng.Next()))
                 State.DummyOpponent.DigitamaDeck.Push(d);
@@ -142,11 +170,24 @@ public class GoldfishEngine
                 State.DummyOpponent.MainDeck.RemoveAt(0);
             }
 
-            // AI 초기 필드: 성장기 1체 배치
-            var starterLv3 = catalog[playerIsRed ? "ST2-02" : "ST1-02"];
-            State.DummyOpponent.BattleArea.Add(new CardInstance(starterLv3, 0));
+            // AI 초기 필드: 선택한 상대 덱 내부의 Lv.3 성장기 1체를 우선 찾아 배치 (커스텀 덱/타 색상 덱 완벽 호환!)
+            var deckLv3 = State.DummyOpponent.MainDeck.FirstOrDefault(c => c.Type == CardType.Digimon && c.Level == 3);
+            if (deckLv3 != null)
+            {
+                State.DummyOpponent.MainDeck.Remove(deckLv3);
+                State.DummyOpponent.BattleArea.Add(new CardInstance(deckLv3, 0));
+            }
+            else
+            {
+                var fallbackLv3 = catalog["ST1-02"];
+                State.DummyOpponent.BattleArea.Add(new CardInstance(fallbackLv3, 0));
+            }
             return;
         }
+
+        State.OpponentDeckName = State.CurrentStage == PracticeStage.Stage2_BlockerDefense
+            ? "🛡️ 블로커 돌파 훈련 수비대"
+            : "🐣 5턴 타임어택 더미";
 
         // Stage 1 & Stage 2 공통: 무작위 Lv.3 ~ Lv.6 디지몬 5장으로 시큐리티 구성
         var dummyDigimonPool = catalog.Values
@@ -183,6 +224,8 @@ public class GoldfishEngine
         if (!State.CanMulligan || State.CurrentTurn > 1)
             return ActionResult.Fail("멀리건(손패 다시 뽑기)은 1턴 시작 시 1회만 사용할 수 있습니다.");
 
+        // 후공이면 1턴 드로우까지 끝난 손패(6장)일 수 있으므로 되돌린 매수만큼 다시 뽑는다
+        int handSize = State.Player.Hand.Count;
         State.Player.MainDeck.AddRange(State.Player.Hand);
         State.Player.Hand.Clear();
 
@@ -190,14 +233,14 @@ public class GoldfishEngine
         State.Player.MainDeck.Clear();
         State.Player.MainDeck.AddRange(shuffled);
 
-        for (int i = 0; i < 5 && State.Player.MainDeck.Count > 0; i++)
+        for (int i = 0; i < handSize && State.Player.MainDeck.Count > 0; i++)
         {
             DrawCard();
         }
 
         State.CanMulligan = false;
-        Log("🔄 멀리건 실행: 초기 손패 5장을 덱에 섞고 새로운 5장을 뽑았습니다.");
-        return ActionResult.Success("🔄 멀리건 완료! 새로운 첫 손패 5장을 뽑았습니다.");
+        Log($"🔄 멀리건 실행: 손패 {handSize}장을 덱에 섞고 새로운 {handSize}장을 뽑았습니다.");
+        return ActionResult.Success($"🔄 멀리건 완료! 새로운 손패 {handSize}장을 뽑았습니다.");
     }
 
     /// <summary>
@@ -259,7 +302,7 @@ public class GoldfishEngine
     public CardData? ExecuteDrawPhase()
     {
         State.CurrentPhase = Phase.Draw;
-        if (State.CurrentTurn == 1)
+        if (State.CurrentTurn == 1 && State.PlayerGoesFirst)
         {
             Log("선공 1턴째 드로우 페이즈는 규칙에 따라 스킵합니다.");
             return null;
@@ -416,13 +459,13 @@ public class GoldfishEngine
 
     private string ApplyOptionEffect(CardData optionCard, CardInstance? target)
     {
-        if (optionCard.CardId == "ST1-13") // 섀도우 윙: 아군 디지몬 DP +3000
+        if (optionCard.CardId is "ST1-13" or "ST3-13" or "ST4-13") // 섀도우 윙 / 헤븐즈 게이트 / 일렉트릭 러시: 아군 디지몬 DP +3000
         {
             var ally = target ?? State.Player.BattleArea.FirstOrDefault();
             if (ally != null)
             {
                 ally.TemporaryDpBonus += 3000;
-                ally.ActiveSkillBuffLabels.Add("✨섀도우 윙 (DP +3,000)");
+                ally.ActiveSkillBuffLabels.Add($"✨{optionCard.Name} (DP +3,000)");
                 string msg = $"[{ally.TopCard.Name}]의 DP가 이번 턴 +3000 상승했습니다! (현재 DP: {ally.GetCurrentDP()})";
                 Log("[효과] " + msg);
                 return msg;
@@ -441,7 +484,7 @@ public class GoldfishEngine
                 return msg;
             }
         }
-        else if (optionCard.CardId == "ST1-16") // 가이아 포스: 상대 디지몬 1체 소멸
+        else if (optionCard.CardId is "ST1-16" or "ST3-16" or "ST4-16" or "ST5-16" or "ST6-15" or "ST6-16") // 가이아 포스 / 세븐 헤븐즈 / 기가 블래스터 / 인피니티 캐논 / 데스 클로 / 트럼프 소드
         {
             var enemy = (target != null && State.DummyOpponent.BattleArea.Contains(target))
                 ? target
@@ -450,7 +493,7 @@ public class GoldfishEngine
             if (enemy != null)
             {
                 DeleteOpponentDigimon(enemy);
-                string msg = $"🔥 가이아 포스 발동! 상대 [{enemy.TopCard.Name}(DP {enemy.GetCurrentDP()})]를 즉시 소멸시켰습니다!";
+                string msg = $"🔥 [{optionCard.Name}] 발동! 상대 [{enemy.TopCard.Name}(DP {enemy.GetCurrentDP()})]를 즉시 소멸시켰습니다!";
                 Log("[효과] " + msg);
                 return msg;
             }
@@ -481,7 +524,7 @@ public class GoldfishEngine
             Log("[효과] " + msg);
             return msg;
         }
-        else if (optionCard.CardId == "ST2-14") // 소로우 블루: 상대 디지몬 레스트(방어 무력화)
+        else if (optionCard.CardId is "ST2-14" or "ST4-14" or "ST5-15") // 소로우 블루 / 니들 스프레이 / 레이저 아이: 상대 디지몬 레스트(방어 무력화)
         {
             var enemy = (target != null && State.DummyOpponent.BattleArea.Contains(target))
                 ? target
@@ -490,7 +533,7 @@ public class GoldfishEngine
             if (enemy != null)
             {
                 enemy.IsSuspended = true;
-                string msg = $"❄️ 소로우 블루 발동! 상대 [{enemy.TopCard.Name}]을(를) 강제로 레스트(무력화)시켰습니다!";
+                string msg = $"❄️ [{optionCard.Name}] 발동! 상대 [{enemy.TopCard.Name}]을(를) 강제로 레스트(무력화)시켰습니다!";
                 Log("[효과] " + msg);
                 return msg;
             }
@@ -584,6 +627,36 @@ public class GoldfishEngine
                     trashed++;
                 }
                 Log($"[진화 시 효과] 쥬드몬이 상대 [{enemyWithSources.TopCard.Name}]의 진화원 {trashed}장을 파기했습니다!");
+            }
+        }
+        else if (evoCard.CardId is "BT1-084" or "BT3-112" or "BT5-086") // 오메가몬 / 알터-S / 즈와르트: 상대 최고 DP 디지몬 소멸 & 액티브 재기상!
+        {
+            target.IsSuspended = false;
+            target.ActiveSkillBuffLabels.Add($"👑[{evoCard.Name}] 초진화 각성 (액티브 재기상!)");
+            var topEnemy = State.DummyOpponent.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
+            if (topEnemy != null)
+            {
+                DeleteOpponentDigimon(topEnemy);
+                Log($"👑 [초궁극체 진화 효과] [{evoCard.Name}] 강림! 상대 [{topEnemy.TopCard.Name}]을(를) 즉시 소멸시키고 액티브 상태로 재기상했습니다!");
+            }
+            else
+            {
+                Log($"👑 [초궁극체 진화 효과] [{evoCard.Name}] 강림! 액티브 상태로 재기상했습니다!");
+            }
+        }
+        else if (evoCard.CardId == "BT3-031") // 황제드라몬: 진화 시 액티브 재기상
+        {
+            target.IsSuspended = false;
+            target.ActiveSkillBuffLabels.Add("⚡황제드라몬 [진화 시 액티브]");
+            Log("[진화 시 효과] 황제드라몬(드래곤 모드)이 스스로 액티브 상태로 재기상했습니다!");
+        }
+        else if (evoCard.CardId == "BT2-039") // 슬래쉬엔젤몬: 상대 DP 8000 이하 소멸
+        {
+            var enemy = State.DummyOpponent.BattleArea.Where(d => d.GetCurrentDP() <= 8000).OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
+            if (enemy != null)
+            {
+                DeleteOpponentDigimon(enemy);
+                Log($"⚡ [진화 시 효과] 슬래쉬엔젤몬의 권능으로 상대 [{enemy.TopCard.Name}]을(를) 소멸시켰습니다!");
             }
         }
 
@@ -1056,7 +1129,38 @@ public class GoldfishEngine
         }
     }
 
-    private int ExecuteStage3AiTurn(int aiStartingMemory)
+    /// <summary>
+    /// 코인 토스에서 상대 AI가 선공이 되었을 때 호출 (실전 AI 대전 전용).
+    /// AI가 선공 1턴(드로우 없음)을 진행한 뒤, 후공인 플레이어의 1턴(드로우 있음)을 시작한다.
+    /// </summary>
+    public ActionResult GiveFirstTurnToOpponent()
+    {
+        if (State.CurrentStage != PracticeStage.Stage3_AiBattle)
+            return ActionResult.Fail("상대 선공은 실전 AI 대전에서만 사용할 수 있습니다.");
+        if (State.IsGameOver || State.CurrentTurn != 1 || !State.PlayerGoesFirst)
+            return ActionResult.Fail("게임 시작 직후에만 선공을 넘길 수 있습니다.");
+
+        State.PlayerGoesFirst = false;
+        Log("🎲 코인 토스 결과: 상대 AI 선공 / 플레이어 후공");
+
+        State.CurrentPhase = Phase.TurnEnd;
+        int playerStartingMemory = ExecuteStage3AiTurn(3, isOpeningTurn: true);
+        if (State.IsGameOver)
+            return ActionResult.Success(State.GameOverReason);
+
+        State.MemoryGauge = playerStartingMemory;
+        State.BreedingActionTaken = false;
+        Log($"=== 1턴 시작! (후공 · 내 시작 메모리: +{State.MemoryGauge}) ===");
+        ExecuteActivePhase();
+        ExecuteDrawPhase();
+        if (!State.IsGameOver)
+        {
+            State.CurrentPhase = Phase.Breeding;
+        }
+        return ActionResult.Success($"상대 AI 선공 턴이 끝났습니다. 후공 1턴 시작 (메모리 +{State.MemoryGauge}, 1장 드로우)");
+    }
+
+    private int ExecuteStage3AiTurn(int aiStartingMemory, bool isOpeningTurn = false)
     {
         // [공식 룰] 플레이어가 넘겨준 메모리(예: -1이면 +1, -2이면 +2)로 AI 턴을 시작합니다!
         int aiMemory = aiStartingMemory;
@@ -1077,8 +1181,8 @@ public class GoldfishEngine
             d.HasUsedOncePerTurnEffect = false;
         }
 
-        // 2. AI 드로우 페이즈
-        if (State.DummyOpponent.MainDeck.Count > 0)
+        // 2. AI 드로우 페이즈 (AI가 선공인 게임 첫 턴은 드로우 없음)
+        if (!isOpeningTurn && State.DummyOpponent.MainDeck.Count > 0)
         {
             var drawn = State.DummyOpponent.MainDeck[0];
             State.DummyOpponent.MainDeck.RemoveAt(0);

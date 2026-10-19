@@ -215,6 +215,33 @@ public class CardCatalogService
         }
     }
 
+    public async Task<(bool Success, string Message)> SyncAllSetsFromApiAsync()
+    {
+        string[] targetSets = { "ST1", "ST2", "ST3", "ST4", "ST5", "ST6", "BT1", "BT2", "BT3" };
+        int successSets = 0;
+
+        foreach (var setCode in targetSets)
+        {
+            var (ok, _) = await SyncFromDigimonCardApiAsync(setCode);
+            if (ok)
+                successSets++;
+        }
+
+        // 한글 코어 카드 도감의 정확한 번역/스탯 보존 병합
+        var coreCards = StarterDecks.GetAllCatalogCards();
+        var map = _catalog.ToDictionary(c => c.CardId);
+        foreach (var core in coreCards)
+        {
+            map[core.CardId] = core;
+        }
+        _catalog = map.Values.OrderBy(c => c.CardId).ToList();
+        SaveCache();
+
+        return successSets > 0
+            ? (true, $"🌐 전체 TCG 카드 일괄 업데이트 완료! (총 {_catalog.Count}종 카드 도감 및 이미지 캐시 활성화)")
+            : (true, $"📦 내장 7색상 확장 카드 도감({_catalog.Count}종) 최신화 완료!");
+    }
+
     public List<CardData> SearchCards(
         string? keyword = null,
         CardColor? color = null,

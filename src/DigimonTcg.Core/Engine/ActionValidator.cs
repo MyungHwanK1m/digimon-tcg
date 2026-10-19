@@ -55,7 +55,12 @@ public static class ActionValidator
         if (target.TopCard.Level != evoCard.EvoRequirementLevel)
             return ActionResult.Fail($"Lv.{evoCard.EvoRequirementLevel} 디지몬 위에만 진화할 수 있습니다. (현재 대상: Lv.{target.TopCard.Level})");
 
-        if (target.TopCard.Color != evoCard.EvoRequirementColor)
+        bool colorMatches = target.TopCard.Color == evoCard.EvoRequirementColor
+            || (evoCard.Color == CardColor.White && evoCard.Level == 7 && (
+                (evoCard.CardId is "BT1-084" or "BT3-112" && target.TopCard.Color is CardColor.Red or CardColor.Blue or CardColor.Black) ||
+                (evoCard.CardId == "BT5-086" && target.TopCard.Color is CardColor.Black or CardColor.Purple or CardColor.Blue)));
+
+        if (!colorMatches)
             return ActionResult.Fail($"색상이 일치하지 않습니다. ({evoCard.EvoRequirementColor} 필요)");
 
         string guide = $"진화 코스트 {evoCard.EvoCost} 지불. 진화 성공 시 카드 1장을 추가로 드로우합니다.";

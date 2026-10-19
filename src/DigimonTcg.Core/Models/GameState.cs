@@ -32,6 +32,9 @@ public class GameState
     // 메모리 위치: -10 (상대 우세) ~ +10 (플레이어 우세)
     public int MemoryGauge { get; set; } = 0;
 
+    // 코인 토스 결과: 플레이어 선공 여부 (선공은 1턴째 드로우 없음)
+    public bool PlayerGoesFirst { get; set; } = true;
+
     // 1턴 시작 시 멀리건(손패 1회 다시 뽑기) 가능 여부
     public bool CanMulligan { get; set; } = true;
 
@@ -59,6 +62,7 @@ public class GameState
 
     public PlayerZones Player { get; set; } = new PlayerZones();
     public PlayerZones DummyOpponent { get; set; } = new PlayerZones();
+    public string OpponentDeckName { get; set; } = "🤖 자동 카운터 덱";
 
     public double MemoryEfficiencyPerTurn =>
         CurrentTurn > 0 ? (double)TotalMemorySpent / CurrentTurn : 0.0;
