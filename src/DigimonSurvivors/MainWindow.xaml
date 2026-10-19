@@ -1,0 +1,391 @@
+<Window x:Class="DigimonSurvivors.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:render="clr-namespace:DigimonSurvivors.Rendering"
+        Title="⚔️ DIGIMON SURVIVORS : DIGITAL RUSH"
+        Height="800" Width="1200"
+        MinHeight="680" MinWidth="980"
+        WindowStartupLocation="CenterScreen"
+        Background="#080C14"
+        Focusable="True"
+        PreviewKeyDown="Window_PreviewKeyDown">
+
+    <Grid Focusable="True" x:Name="RootGrid">
+        <!-- 1. 핵심 60 FPS 게임 캔버스 -->
+        <render:GameCanvas x:Name="CanvasGame" />
+
+        <!-- ======================= 2. 타이틀 & 캐릭터 선택 화면 ======================= -->
+        <Grid x:Name="TitleOverlay" Background="#F4080C16" Visibility="Visible">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="1100" Margin="20">
+                <TextBlock Text="DIGITAL MONSTER" FontSize="15" FontWeight="Bold" Foreground="#00E5FF" HorizontalAlignment="Center" Margin="0,0,0,2"/>
+                <TextBlock Text="⚔️ DIGIMON SURVIVORS" FontSize="42" FontWeight="ExtraBold" Foreground="White" HorizontalAlignment="Center">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00B0FF" BlurRadius="25" ShadowDepth="0" />
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock Text="DIGITAL RUSH : 불릿 헤븐 x 디지몬 TCG" FontSize="15" Foreground="#FFD54F" HorizontalAlignment="Center" Margin="0,2,0,18"/>
+
+                <TextBlock Text="파트너 디지몬을 선택하세요 (총 8종)" FontSize="17" FontWeight="SemiBold" Foreground="#ECEFF1" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+
+                <!-- 스타터 8종 선택 카드 뷰 (가로 스크롤 가능) -->
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" MaxWidth="1080" Margin="0,0,0,18">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <!-- 1. 아구몬 -->
+                        <Border x:Name="CardAgumon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#FF5252" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Agumon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgAgumon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="아구몬" FontSize="15" FontWeight="Bold" Foreground="#FF8A80" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[백신 / 화염]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 베이비 플레임&#x0a;• 진화: 그레이몬 계열&#x0a;• 강력한 단일/광역 화력" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 2. 파피몬 -->
+                        <Border x:Name="CardGabumon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#40C4FF" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Gabumon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgGabumon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="파피몬" FontSize="15" FontWeight="Bold" Foreground="#80D8FF" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[데이터 / 냉기]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 쁘띠 파이어&#x0a;• 진화: 가루몬 계열&#x0a;• 회전 방어막 &amp; 고기동" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 3. 피요몬 -->
+                        <Border x:Name="CardPiyomon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#FF80AB" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Piyomon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgPiyomon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="피요몬" FontSize="15" FontWeight="Bold" Foreground="#FF80AB" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[백신 / 질풍]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 섀도우 윙&#x0a;• 진화: 버드라몬 계열&#x0a;• 신속 비행 &amp; 관통 참격" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 4. 피코데블몬 -->
+                        <Border x:Name="CardPicoDevimon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#BA68C8" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_PicoDevimon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgPicoDevimon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="피코데블몬" FontSize="15" FontWeight="Bold" Foreground="#E1BEE7" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[바이러스 / 암흑]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 피코 다트&#x0a;• 진화: 데블몬 계열&#x0a;• 독침 연사 &amp; 흡혈" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 5. 파닥몬 -->
+                        <Border x:Name="CardPatamon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#FFD54F" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Patamon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgPatamon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="파닥몬" FontSize="15" FontWeight="Bold" Foreground="#FFE082" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[백신 / 신성]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 공기팡&#x0a;• 진화: 엔젤몬 계열&#x0a;• 충격파 &amp; 신성 정화" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 6. 텐토몬 -->
+                        <Border x:Name="CardTentomon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#81C784" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Tentomon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgTentomon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="텐토몬" FontSize="15" FontWeight="Bold" Foreground="#A5D6A7" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[백신 / 번개]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 꼬마 벼락&#x0a;• 진화: 카부테리몬 계열&#x0a;• 전격 낙뢰 &amp; 고방어" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 7. 고마몬 -->
+                        <Border x:Name="CardGomamon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#4DD0E1" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Gomamon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgGomamon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="고마몬" FontSize="15" FontWeight="Bold" Foreground="#80DEEA" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[백신 / 해수]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 물고기 행진&#x0a;• 진화: 원뿔몬 계열&#x0a;• 군집 밀치기 &amp; 넉백" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 8. 고블몬 -->
+                        <Border x:Name="CardGoburimon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#B0BEC5" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Goburimon">
+                            <StackPanel Margin="8">
+                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
+                                    <Image x:Name="ImgGoburimon" Stretch="Uniform" Margin="4"/>
+                                </Border>
+                                <TextBlock Text="고블몬" FontSize="15" FontWeight="Bold" Foreground="#CFD8DC" HorizontalAlignment="Center"/>
+                                <TextBlock Text="[바이러스 / 격투]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
+                                <TextBlock Text="• 고유: 고블 스트라이크&#x0a;• 진화: 우가몬 계열&#x0a;• 묵직한 곤봉 파쇄격" FontSize="11" Foreground="#ECEFF1" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 버튼 바 (출격 & 설정) -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,14">
+                    <Button x:Name="BtnStartGame" Content="🚀 디지털 월드 출격 (START GAME)" Width="320" Height="50" FontSize="17" FontWeight="Bold"
+                            Background="#00B0FF" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnStartGame_Click" Margin="0,0,12,0">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="8"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                    <Button x:Name="BtnOpenSettingsTitle" Content="⚙️ 게임 설정" Width="140" Height="50" FontSize="15" FontWeight="SemiBold"
+                            Background="#263238" Foreground="#ECEFF1" BorderBrush="#00B0FF" BorderThickness="1.5" Cursor="Hand" Click="BtnOpenSettings_Click">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="8"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                </StackPanel>
+
+                <!-- 조작법 안내 -->
+                <Border Background="#101826" CornerRadius="8" Padding="16,8" HorizontalAlignment="Center">
+                    <TextBlock Text="조작: [WASD] 이동  |  [SPACE] 디지털 회피 대시  |  [M] BGM/효과음 음소거  |  [ESC] 일시정지"
+                               FontSize="13" Foreground="#90A4AE" HorizontalAlignment="Center"/>
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <!-- ======================= 3. 레벨업 & 카드 선택 오버레이 ======================= -->
+        <Grid x:Name="LevelUpOverlay" Background="#D9080E1A" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="960">
+                <TextBlock Text="LEVEL UP !" FontSize="38" FontWeight="ExtraBold" Foreground="#FFD700" HorizontalAlignment="Center">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#FFB300" BlurRadius="20" ShadowDepth="0" />
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock x:Name="TxtLevelUpSub" Text="데이터를 흡수하여 새로운 무기, 패시브 또는 진화 카드를 선택하세요" FontSize="15" Foreground="#CFD8DC" HorizontalAlignment="Center" Margin="0,4,0,25"/>
+
+                <!-- 3장의 TCG 카드 컨테이너 -->
+                <ItemsControl x:Name="ListCards">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Width="260" Height="380" Margin="12" CornerRadius="12" Background="#141E30" BorderBrush="#00E5FF" BorderThickness="2" Cursor="Hand" MouseDown="CardItem_MouseDown">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="BorderBrush" Value="#FFD700"/>
+                                                <Setter Property="BorderThickness" Value="3"/>
+                                                <Setter Property="Background" Value="#1C2B44"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid Margin="12">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="180"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Text="{Binding Title}" FontSize="15" FontWeight="Bold" Foreground="#FFD54F" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                    <Border Grid.Row="1" CornerRadius="8" Background="#0C121D" Margin="0,0,0,8" ClipToBounds="True">
+                                        <Image Source="{Binding CardImage}" Stretch="Uniform" Margin="2"/>
+                                    </Border>
+                                    <TextBlock Grid.Row="2" Text="{Binding Subtitle}" FontSize="13" FontWeight="SemiBold" Foreground="#40C4FF" Margin="0,0,0,6"/>
+                                    <TextBlock Grid.Row="3" Text="{Binding Description}" FontSize="12" Foreground="#ECEFF1" TextWrapping="Wrap" LineHeight="17"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Grid>
+
+        <!-- ======================= 4. 진화 컷신 오버레이 ======================= -->
+        <Grid x:Name="EvolutionOverlay" Background="#EE040812" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Text="⚡ DIGIVOLUTION ⚡" FontSize="44" FontWeight="ExtraBold" Foreground="#00E5FF" HorizontalAlignment="Center">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00B0FF" BlurRadius="30" ShadowDepth="0" />
+                    </TextBlock.Effect>
+                </TextBlock>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
+                    <Border Width="130" Height="130" CornerRadius="65" Background="#162236" BorderBrush="#607D8B" BorderThickness="3" Margin="15">
+                        <Image x:Name="ImgEvoFrom" Stretch="Uniform" Margin="8"/>
+                    </Border>
+                    <TextBlock Text="➔" FontSize="48" FontWeight="Bold" Foreground="#FFD700" VerticalAlignment="Center"/>
+                    <Border Width="170" Height="170" CornerRadius="85" Background="#1A2D4C" BorderBrush="#00E5FF" BorderThickness="4" Margin="15">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#00E5FF" BlurRadius="30" ShadowDepth="0" />
+                        </Border.Effect>
+                        <Image x:Name="ImgEvoTo" Stretch="Uniform" Margin="8"/>
+                    </Border>
+                </StackPanel>
+
+                <TextBlock x:Name="TxtEvoNames" Text="아구몬 진화! ──────> 그레이몬!" FontSize="26" FontWeight="Bold" Foreground="#FFD54F" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <TextBlock Text="체력 완전 회복! 새로운 진화체의 전용 고유기로 교체되었습니다!" FontSize="16" Foreground="#ECEFF1" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- ======================= 5. 게임 일시정지 (PAUSE) 오버레이 ======================= -->
+        <Grid x:Name="PauseOverlay" Background="#D9080C16" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="360">
+                <TextBlock Text="⏸️ GAME PAUSED" FontSize="36" FontWeight="ExtraBold" Foreground="#00E5FF" HorizontalAlignment="Center" Margin="0,0,0,25">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00B0FF" BlurRadius="20" ShadowDepth="0" />
+                    </TextBlock.Effect>
+                </TextBlock>
+
+                <Button Content="▶️ 계속하기 (RESUME)" Height="46" FontSize="16" FontWeight="Bold" Background="#00B0FF" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnResume_Click" Margin="0,0,0,12">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
+                </Button>
+                <Button Content="⚙️ 게임 설정" Height="46" FontSize="16" FontWeight="Bold" Background="#263238" Foreground="White" BorderBrush="#00B0FF" BorderThickness="1.5" Cursor="Hand" Click="BtnOpenSettings_Click" Margin="0,0,0,12">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
+                </Button>
+                <Button Content="🚪 타이틀로 나가기" Height="46" FontSize="16" FontWeight="Bold" Background="#D32F2F" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnToTitle_Click">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- ======================= 6. 게임 설정 (SETTINGS) 모달 ======================= -->
+        <Grid x:Name="SettingsOverlay" Background="#E6050A14" Visibility="Collapsed">
+            <Border Width="480" Background="#141E30" BorderBrush="#00E5FF" BorderThickness="2" CornerRadius="12" Padding="25" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Text="⚙️ 게임 설정 (SETTINGS)" FontSize="24" FontWeight="Bold" Foreground="#00E5FF" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+
+                    <!-- 1. BGM -->
+                    <Grid Margin="0,6">
+                        <TextBlock Text="🎵 배경음악 (BGM)" FontSize="15" Foreground="White" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnToggleBgm" Content="ON" Width="80" Height="32" HorizontalAlignment="Right" Background="#00E5FF" Foreground="#080C14" FontWeight="Bold" Click="BtnToggleBgm_Click"/>
+                    </Grid>
+
+                    <!-- 2. SFX -->
+                    <Grid Margin="0,6">
+                        <TextBlock Text="🔊 효과음 (SFX)" FontSize="15" Foreground="White" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnToggleSfx" Content="ON" Width="80" Height="32" HorizontalAlignment="Right" Background="#00E5FF" Foreground="#080C14" FontWeight="Bold" Click="BtnToggleSfx_Click"/>
+                    </Grid>
+
+                    <!-- 3. Screen Shake -->
+                    <Grid Margin="0,6">
+                        <TextBlock Text="📳 화면 흔들림 (Screen Shake)" FontSize="15" Foreground="White" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnToggleShake" Content="ON" Width="80" Height="32" HorizontalAlignment="Right" Background="#00E5FF" Foreground="#080C14" FontWeight="Bold" Click="BtnToggleShake_Click"/>
+                    </Grid>
+
+                    <!-- 4. Damage Numbers -->
+                    <Grid Margin="0,6">
+                        <TextBlock Text="💥 데미지 수치 텍스트" FontSize="15" Foreground="White" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnToggleDamageNum" Content="ON" Width="80" Height="32" HorizontalAlignment="Right" Background="#00E5FF" Foreground="#080C14" FontWeight="Bold" Click="BtnToggleDamageNum_Click"/>
+                    </Grid>
+
+                    <!-- 5. Minimap -->
+                    <Grid Margin="0,6">
+                        <TextBlock Text="🗺️ 홀로그램 미니맵 레이더" FontSize="15" Foreground="White" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnToggleMinimap" Content="ON" Width="80" Height="32" HorizontalAlignment="Right" Background="#00E5FF" Foreground="#080C14" FontWeight="Bold" Click="BtnToggleMinimap_Click"/>
+                    </Grid>
+
+                    <!-- 6. Particles -->
+                    <Grid Margin="0,6">
+                        <TextBlock Text="⚡ 타격 &amp; 사망 파티클" FontSize="15" Foreground="White" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnToggleParticles" Content="ON" Width="80" Height="32" HorizontalAlignment="Right" Background="#00E5FF" Foreground="#080C14" FontWeight="Bold" Click="BtnToggleParticles_Click"/>
+                    </Grid>
+
+                    <Button Content="확인 (닫기)" Height="40" FontSize="15" FontWeight="Bold" Background="#00B0FF" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnCloseSettings_Click" Margin="0,20,0,0">
+                        <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ======================= 7. 게임 오버 오버레이 ======================= -->
+        <Grid x:Name="GameOverOverlay" Background="#F0180505" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="700">
+                <TextBlock Text="☠️ 디지몬 소멸 (GAME OVER)" FontSize="40" FontWeight="ExtraBold" Foreground="#FF5252" HorizontalAlignment="Center">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#D50000" BlurRadius="25" ShadowDepth="0" />
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock Text="디지털 에너지가 고갈되어 디지타마로 환원되었습니다." FontSize="15" Foreground="#FFCDD2" HorizontalAlignment="Center" Margin="0,6,0,20"/>
+
+                <Border Background="#280C0C" BorderBrush="#B71C1C" BorderThickness="2" CornerRadius="10" Padding="25,18" HorizontalAlignment="Stretch" Margin="0,0,0,20">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="TxtGameOverTime" Text="생존 시간: 03분 45초" FontSize="16" Foreground="White" Margin="0,2"/>
+                                <TextBlock x:Name="TxtGameOverKills" Text="격파한 적: 142체" FontSize="16" Foreground="White" Margin="0,2"/>
+                                <TextBlock x:Name="TxtGameOverLevel" Text="도달 레벨: Lv.14" FontSize="16" Foreground="#FFD54F" Margin="0,2"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock Text="생존 랭크" FontSize="14" Foreground="#90A4AE" HorizontalAlignment="Center"/>
+                                <TextBlock x:Name="TxtGameOverRank" Text="RANK A" FontSize="36" FontWeight="ExtraBold" Foreground="#FFD700" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Separator Background="#405060" Margin="0,6,0,8"/>
+                        <TextBlock Text="📊 스킬별 피해 기여도" FontSize="14" FontWeight="Bold" Foreground="#FF8A80" Margin="0,0,0,6"/>
+                        <TextBlock x:Name="TxtGameOverDamageReport" Text="• 베이비 플레임: 32,450 (48%)" FontSize="13" Foreground="#ECEFF1" LineHeight="18" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+                <Button Content="🔄 다시 도전하기" Width="230" Height="48" FontSize="16" FontWeight="Bold"
+                        Background="#FF5252" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnRestart_Click">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- ======================= 8. 승리 오버레이 ======================= -->
+        <Grid x:Name="VictoryOverlay" Background="#F0051818" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="700">
+                <TextBlock Text="🏆 디지털 월드 구원 성공! (VICTORY)" FontSize="38" FontWeight="ExtraBold" Foreground="#00E5FF" HorizontalAlignment="Center">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00B0FF" BlurRadius="25" ShadowDepth="0" />
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock Text="어둠의 사천왕 피에몬을 격파하고 디지털 월드에 평화를 되찾았습니다!" FontSize="15" Foreground="#B2EBF2" HorizontalAlignment="Center" Margin="0,6,0,20"/>
+
+                <Border Background="#0C2626" BorderBrush="#00B0FF" BorderThickness="2" CornerRadius="10" Padding="25,18" HorizontalAlignment="Stretch" Margin="0,0,0,20">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="TxtVictoryTime" Text="클리어 시간: 08분 15초" FontSize="16" Foreground="White" Margin="0,2"/>
+                                <TextBlock x:Name="TxtVictoryKills" Text="격파한 적: 650체" FontSize="16" Foreground="White" Margin="0,2"/>
+                                <TextBlock x:Name="TxtVictoryLevel" Text="최종 레벨: Lv.28" FontSize="16" Foreground="#FFD54F" Margin="0,2"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock Text="마스터 랭크" FontSize="14" Foreground="#90A4AE" HorizontalAlignment="Center"/>
+                                <TextBlock Text="RANK S" FontSize="40" FontWeight="ExtraBold" Foreground="#FFD700" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Separator Background="#264653" Margin="0,6,0,8"/>
+                        <TextBlock Text="📊 최종 전투 피해 보고서" FontSize="14" FontWeight="Bold" Foreground="#80D8FF" Margin="0,0,0,6"/>
+                        <TextBlock x:Name="TxtVictoryDamageReport" Text="• 테라 광선: 142,000 (52%)" FontSize="13" Foreground="#ECEFF1" LineHeight="18" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+                <Button Content="✨ 타이틀로 돌아가기" Width="250" Height="50" FontSize="16" FontWeight="Bold"
+                        Background="#00B0FF" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnToTitle_Click">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
