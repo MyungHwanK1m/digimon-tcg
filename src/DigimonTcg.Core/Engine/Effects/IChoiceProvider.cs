@@ -18,4 +18,22 @@ public interface IChoiceProvider
 
     /// <summary>고르는 효과("Activate 1 of the effects below")의 선택지 중 하나 — 반환: 고른 번호</summary>
     int ChooseOption(GameState state, string question, IReadOnlyList<string> options, int recommended);
+
+    /// <summary>
+    /// 디지몬을 min ~ max마리 한 번에 고른다 (효과 대상 N마리). recommended = 추천 답 (AI 평가 순서).
+    /// 기본 구현은 추천 답 그대로 — 구현하지 않은 선택기(테스트 · CLI)는 지금처럼 동작한다.
+    /// </summary>
+    IReadOnlyList<CardInstance> ChooseDigimons(GameState state, string question, IReadOnlyList<CardInstance> options,
+        int min, int max, IReadOnlyList<CardInstance> recommended) => recommended;
+
+    /// <summary>
+    /// 패 · 트래시 · 진화원 등에 있는 카드를 min ~ max장 고른다 (버리기 · 회수 · 패나 트래시에서 등장 · 진화원 아래에 놓기).
+    /// 같은 카드 여러 장은 같은 CardData 객체일 수 있으므로 options의 번호(index)로 주고받는다.
+    /// recommended = 추천하는 번호들. 기본 구현은 추천 답 그대로.
+    /// </summary>
+    IReadOnlyList<int> ChooseCards(GameState state, string question, CardChoiceZone zone, IReadOnlyList<CardData> options,
+        int min, int max, IReadOnlyList<int> recommended) => recommended;
 }
+
+/// <summary>ChooseCards가 고르는 카드가 있는 곳 (창 제목 · 안내 문구용)</summary>
+public enum CardChoiceZone { Hand, Trash, HandOrTrash, DigivolutionCards, Other }

@@ -52,7 +52,7 @@ public sealed class WpfChoiceProvider : IChoiceProvider
                 content.Children.Add(_cardVisual(option.TopCard));
             content.Children.Add(new TextBlock
             {
-                Text = $"{(mine ? "내" : "상대")} {option.TopCard.Name}\nLv.{option.TopCard.Level} · DP {option.GetCurrentDP():N0}{(option.IsSuspended ? " · 레스트" : "")}"
+                Text = $"{(mine ? "내" : "상대")} {option.TopCard.DisplayName}\nLv.{option.TopCard.Level} · DP {option.GetCurrentDP():N0}{(option.IsSuspended ? " · 레스트" : "")}"
                        + (ReferenceEquals(option, recommended) ? "\n★ 추천" : ""),
                 Foreground = Brushes.White,
                 TextAlignment = TextAlignment.Center,
@@ -100,6 +100,48 @@ public sealed class WpfChoiceProvider : IChoiceProvider
         window.ShowDialog();
         return result;
     }
+
+    /// <summary>효과 대상 디지몬 여러 마리를 한 번에 고르는 창</summary>
+    public IReadOnlyList<CardInstance> ChooseDigimons(GameState state, string question, IReadOnlyList<CardInstance> options,
+        int min, int max, IReadOnlyList<CardInstance> recommended)
+    {
+        var items = options.Select(o => new MultiCardPicker.Item(o, o.TopCard,
+            $"{(state.Player.BattleArea.Contains(o) ? "내" : "상대")} {o.TopCard.DisplayName}\nLv.{o.TopCard.Level} · DP {o.GetCurrentDP():N0}{(o.IsSuspended ? " · 레스트" : "")}")).ToList();
+        var picked = MultiCardPicker.Show(_owner, "효과 대상 고르기", question, items, min, max, recommended.Cast<object>().ToList(), _cardVisual);
+        return picked?.Cast<CardInstance>().ToList() ?? recommended;
+    }
+
+    /// <summary>패 · 트래시 · 진화원의 카드를 고르는 창 (같은 카드 여러 장은 번호로 구분)</summary>
+    public IReadOnlyList<int> ChooseCards(GameState state, string question, CardChoiceZone zone, IReadOnlyList<CardData> options,
+        int min, int max, IReadOnlyList<int> recommended)
+    {
+        string where = zone switch
+        {
+            CardChoiceZone.Hand => "패",
+            CardChoiceZone.Trash => "트래시",
+            CardChoiceZone.HandOrTrash => "패 · 트래시",
+            CardChoiceZone.DigivolutionCards => "진화원",
+            _ => "카드"
+        };
+        // 번호마다 새 객체를 키로 써서 같은 카드 여러 장도 따로 고를 수 있게 한다
+        var keys = options.Select((_, i) => (object)new IndexKey(i)).ToList();
+        var items = options.Select((card, i) => new MultiCardPicker.Item(keys[i], card,
+            $"{card.DisplayName}\n{(card.Level > 0 ? $"Lv.{card.Level} · " : "")}{CardTypeKo(card.Type)}{(card.Type == CardType.Digimon ? $" · DP {card.DP:N0}" : "")}")).ToList();
+        var recommendedKeys = recommended.Where(i => i >= 0 && i < keys.Count).Select(i => keys[i]).ToList();
+        var picked = MultiCardPicker.Show(_owner, $"{where}에서 카드 고르기", question, items, min, max, recommendedKeys, _cardVisual);
+        return picked?.Cast<IndexKey>().Select(k => k.Index).ToList() ?? recommended;
+    }
+
+    private sealed record IndexKey(int Index);
+
+    private static string CardTypeKo(CardType type) => type switch
+    {
+        CardType.Digimon => "디지몬",
+        CardType.Tamer => "테이머",
+        CardType.Option => "옵션",
+        CardType.Digitama => "디지타마",
+        _ => type.ToString()
+    };
 
     // =====================================================================
     // 창 · 버튼
