@@ -142,7 +142,7 @@ public class CardCatalogService
     }
 
     // 공식 한글판 카드 이미지 폴더 (저작권 때문에 git에 넣지 않음 — 사용자가 직접 넣는다). 앞의 폴더가 우선.
-    private static readonly string[] KoreanImageFolders = { "images_ko", "tmp" };
+    private static readonly string[] KoreanImageFolders = { "images_ko", "tmp", "images_kr" };   // images_kr = tools/krsite 수집 이미지
     private Dictionary<string, string>? _koreanImageIndex;
 
     /// <summary>

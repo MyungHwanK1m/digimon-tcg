@@ -43,10 +43,24 @@ public class CardData
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasAutoKeywords => !IsEffectImplemented && (IsBlocker || SecurityAttackBonus > 0 || InheritedSecurityAttackBonus > 0);
 
+    // ---- 화면 표시용 (data/kr/cards_ko.json 공식 한글 데이터가 있으면 그것, 없으면 원래 값) ----
+    // 대전 엔진 · 문장 파서는 Name · EffectText · Traits(영어 API 기준)를 그대로 쓴다.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayName => DigimonTcg.Core.Data.KoreanCardData.DisplayName(this);
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayEffectText => DigimonTcg.Core.Data.KoreanCardData.DisplayEffectText(this);
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayInheritedEffectText => DigimonTcg.Core.Data.KoreanCardData.DisplayInheritedEffectText(this);
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string> DisplayTraits => DigimonTcg.Core.Data.KoreanCardData.DisplayTraits(this);
+
     public string DisplaySummary =>
         Type == CardType.Digitama
-            ? $"[{CardId}] {Name} (Lv.{Level} 디지타마)"
+            ? $"[{CardId}] {DisplayName} (Lv.{Level} 디지타마)"
             : Type == CardType.Digimon
-                ? $"[{CardId}] {Name} (Lv.{Level} | DP {DP} | 등장 {PlayCost} / 진화 {EvoCost})"
-                : $"[{CardId}] {Name} ({Type} | 코스트 {PlayCost})";
+                ? $"[{CardId}] {DisplayName} (Lv.{Level} | DP {DP} | 등장 {PlayCost} / 진화 {EvoCost})"
+                : $"[{CardId}] {DisplayName} ({Type} | 코스트 {PlayCost})";
 }
