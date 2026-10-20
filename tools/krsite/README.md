@@ -10,7 +10,11 @@
 .\collect_kr.ps1 -Only 153   # 지정한 세트 카테고리만
 .\collect_kr.ps1 -Refresh    # 이미 받은 세트도 다시 받기
 .\report_kr.ps1              # 영어 캐시와 카드 번호 대조 → data/kr/report.md
+.\collect_qna.ps1            # 카드 Q&A (세트별) → data/kr/qna/{세트}.json + qna_all.json
 ```
+
+- 카드 Q&A는 qna 페이지의 세트 선택(`?mid=qna&category={세트}&page={N}`, 한 페이지 5건)으로 받는다.
+- Q&A는 `tests/DigimonTcg.Core.Tests/OfficialQnaTests*.cs` 시나리오 테스트의 근거로만 쓴다 — **Q&A 문장은 코드에 옮기지 않고** 카드 번호 · Q 번호 · 기대 결과 · 직접 쓴 짧은 요약만 남긴다.
 
 - 요청은 한 번에 하나씩, 요청 사이 1.5초(`-DelayMs`)를 쉰다. 실패하면 10 · 20 · 30초 뒤 다시 시도한다.
 - 세트마다 파일 하나로 저장하므로 중간에 멈춰도 다시 실행하면 받은 세트는 건너뛴다.
