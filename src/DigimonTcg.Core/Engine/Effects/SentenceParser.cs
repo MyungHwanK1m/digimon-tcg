@@ -849,10 +849,12 @@ internal static class SentenceParser
     /// <summary>문장을 처리한다: 조건 확인 → "~할 수 있다"면 효과 주인에게 묻기(추천 = AI 평가) → 동작</summary>
     private static void RunStep(Step s, EffectContext c)
     {
+        c.StepsRan = true;
         if (s.Condition != null && !s.Condition(c)) { c.LastStepResolved = false; return; }
         if (s.Optional && !c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] 이 효과를 발휘할까요?\n{s.Text}", AiEvaluator.EstimateSentenceValue(s.Text) >= 0)) { c.LastStepResolved = false; return; }
         c.LastStepResolved = true;
         s.Act(c);
+        if (c.LastStepResolved) c.AnyStepResolved = true;   // 비용 문장은 비용을 내지 않으면 Act 안에서 false가 된다
     }
 
     /// <summary>

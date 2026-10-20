@@ -61,6 +61,57 @@ public class Phase5EffectTests
     }
 
     [Fact]
+    public void TamerMainAbility_ShouldBeUsableOncePerCopyAndNotCountWhenTheCostIsNotPaid()
+    {
+        var (state, engine, _) = NewMainPhase();
+        var tamer = Api("P5-TAMER-TWO", 0, 0, main: "[Main] By suspending this Tamer, gain 1 memory.", type: CardType.Tamer);
+        state.Player.Tamers.Add(tamer);
+        state.Player.Tamers.Add(tamer);   // 같은 카드 2장 (같은 CardData 참조)
+
+        Assert.True(engine.ActivateMainAbility(null, tamer).CanExecute);
+        Assert.True(engine.ActivateMainAbility(null, tamer).CanExecute);
+        Assert.Equal(5, state.MemoryGauge);
+
+        // 이미 둘 다 레스트 — 비용을 낼 수 없어 아무것도 하지 않으면 사용으로 치지 않는다 (장수만큼 이미 썼으므로 목록에서는 빠진다)
+        Assert.DoesNotContain(engine.GetMainAbilities(state.Player), a => a.Card == tamer);
+    }
+
+    [Fact]
+    public void MainAbilityThatDidNothing_ShouldStayAvailable()
+    {
+        var (state, engine, _) = NewMainPhase();
+        var tamer = Api("P5-TAMER-NOPAY", 0, 0, main: "[Main] By suspending this Tamer, gain 1 memory.", type: CardType.Tamer);
+        state.Player.Tamers.Add(tamer);
+        state.Player.SuspendedTamers.Add(tamer);   // 이미 레스트 — 비용을 낼 수 없다
+
+        engine.ActivateMainAbility(null, tamer);
+
+        Assert.Equal(3, state.MemoryGauge);
+        Assert.Contains(engine.GetMainAbilities(state.Player), a => a.Card == tamer);
+    }
+
+    [Fact]
+    public void Digisorption_ShouldNotReduceBelowTheSpecialEvolutionCost()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 0;
+        var baseCard = Api("P5-DSS-BASE", 3, 3000, color: CardColor.Yellow);
+        baseCard.Name = "Shoutmon";
+        var baseDigimon = new CardInstance(baseCard, 1);
+        var other = new CardInstance(cards["ST1-02"], 1);
+        state.Player.BattleArea.AddRange(new[] { baseDigimon, other });
+        state.Player.MainDeck.Add(cards["ST1-02"]);
+        var evo = Api("P5-DSS", 6, 12000, evoCost: 5,
+            main: "＜Digisorption -3＞\nYour [Shoutmon] can digivolve into this card in your hand for a memory cost of 1, ignoring this card's digivolution requirements.");
+        state.Player.Hand.Add(evo);
+
+        Assert.True(engine.EvolveDigimon(baseDigimon, evo).CanExecute);
+
+        Assert.True(other.IsSuspended);
+        Assert.Equal(0, state.MemoryGauge);   // 코스트 1 - 1 (3이 아니라 실제 코스트만큼만 줄인다)
+    }
+
+    [Fact]
     public void DigiBurst_ShouldTrashSourcesRunTheEffectAndTriggerTheTrashedCard()
     {
         var (state, engine, _) = NewMainPhase();

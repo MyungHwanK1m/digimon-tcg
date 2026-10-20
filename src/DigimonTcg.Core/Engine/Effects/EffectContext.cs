@@ -73,6 +73,10 @@ public sealed class EffectContext
     /// <summary>앞 문장이 실제로 처리되었는지 (조건 불충족 · "~할 수 있다" 거절 · 비용 미지불이면 false) — "If you do, ~"</summary>
     public bool LastStepResolved { get; set; } = true;
 
+    /// <summary>문장 파서의 문장을 하나라도 처리하려 했는지 · 그중 하나라도 실제로 처리했는지 — [메인] 기동 효과가 아무것도 하지 않았으면 사용으로 치지 않는다</summary>
+    public bool StepsRan { get; set; }
+    public bool AnyStepResolved { get; set; }
+
     /// <summary>[시큐리티] 결과를 한 번에 정한다</summary>
     public void SecurityResult(string detail, string summary, bool attackerRemoved = false, bool returnToHand = false)
     {

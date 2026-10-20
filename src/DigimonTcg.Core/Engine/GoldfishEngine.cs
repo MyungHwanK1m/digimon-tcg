@@ -553,7 +553,8 @@ public partial class GoldfishEngine
         string prevName = target.TopCard.Name;
         int prevLevel = target.TopCard.Level;
 
-        int evoCost = ActionValidator.EvolutionCost(target, evoCard) - TryDigisorption(State.Player, target, evoCard, State.MemoryGauge);
+        int baseCost = ActionValidator.EvolutionCost(target, evoCard);
+        int evoCost = baseCost - TryDigisorption(State.Player, target, evoCard, baseCost, State.MemoryGauge);
         State.Player.Hand.Remove(evoCard);
         target.Evolve(evoCard);
         State.MemoryGauge -= evoCost;
@@ -630,7 +631,7 @@ public partial class GoldfishEngine
             string prefix = string.Empty;
             if (blocker != null)
             {
-                Suspend(blocker);
+                SuspendForBlock(blocker);
                 OnAttackBlocked(attacker);
                 prefix = $"🛡️ 상대 ≪블로커≫ [{blocker.TopCard.Name}]가 블록! ";
             }
@@ -692,7 +693,7 @@ public partial class GoldfishEngine
         var blocker = EffectRules.ChooseOpponentBlocker(State, attacker, null);
         if (blocker != null)
         {
-            Suspend(blocker);
+            SuspendForBlock(blocker);
             OnAttackBlocked(attacker);
             RecalculateFieldBuffs();
             var (atkDeleted, blkDeleted, myDp, blkDp) = ResolveDigimonBattle(attacker, blocker);
@@ -1327,7 +1328,7 @@ public partial class GoldfishEngine
 
         if (playerBlocker != null)
         {
-            Suspend(playerBlocker);
+            SuspendForBlock(playerBlocker);
             var blockedEffects = CaptureEffectLogs(() => OnAttackBlocked(aiAttacker));
             AddEffectEvent(aiAttacker.TopCard, blockedEffects);
             RecalculateFieldBuffs();
@@ -1602,7 +1603,8 @@ public partial class GoldfishEngine
     private void AiEvolve(AiTurnContext ctx, CardInstance fieldDigimon, CardData evoCard)
     {
         var opp = State.DummyOpponent;
-        int evoCost = ActionValidator.EvolutionCost(fieldDigimon, evoCard) - TryDigisorption(opp, fieldDigimon, evoCard, ctx.Memory);
+        int baseCost = ActionValidator.EvolutionCost(fieldDigimon, evoCard);
+        int evoCost = baseCost - TryDigisorption(opp, fieldDigimon, evoCard, baseCost, ctx.Memory);
         opp.Hand.Remove(evoCard);
         int beforeMem = ctx.Memory;
         string prev = fieldDigimon.TopCard.Name;

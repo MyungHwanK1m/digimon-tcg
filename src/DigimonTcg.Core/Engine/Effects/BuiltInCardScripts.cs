@@ -437,12 +437,16 @@ internal static class BuiltInCardScripts
                 if (c.Self == null || c.Self.EvolutionSources.Count < 2)
                 {
                     c.Log("[메인] 헤라클레스캅테리몬: 진화원이 2장 미만이라 ≪디지버스트 2≫를 쓸 수 없습니다");
+                    c.StepsRan = true;   // 아무것도 하지 않았으므로 이번 턴 사용으로 치지 않는다
                     return;
                 }
                 var target = c.PickEnemy(d => !d.IsSuspended);
                 if (target == null || !c.Engine.AskYesNo(c.Owner, c.Self, "≪디지버스트 2≫ 진화원 2장을 파기하고 상대 디지몬 1마리를 레스트시킬까요?", recommended: true))
+                {
+                    c.StepsRan = true;
                     return;
-                c.Owner.Trash.AddRange(c.Self.RemoveBottomSources(2));
+                }
+                c.Engine.PayDigiBurst(c.Owner, c.Self, 2);   // 트래시된 진화원 · "디지버스트를 발휘했을 때" 효과까지
                 c.Engine.Suspend(target);
                 c.Log($"[메인] 헤라클레스캅테리몬: ≪디지버스트 2≫ 진화원 2장 파기 → 상대 [{target.TopCard.Name}] 레스트");
             });
@@ -494,7 +498,7 @@ internal static class BuiltInCardScripts
         // 신태일(흑): [상대의 턴] 자신의 디지몬이 ≪블로커≫를 사용하여 레스트했을 때, 이 테이머를 레스트시키는 것으로 자신의 디지몬 1마리 액티브
         b.Card("ST5-14").On(EffectTrigger.AllyDigimonSuspended, c =>
         {
-            if (c.Other == null || !c.Other.HasBlocker || !c.Owner.HasActiveTamer(c.Card))
+            if (c.Other == null || !c.Engine.SuspendingForBlock || !c.Owner.HasActiveTamer(c.Card))   // ≪블로커≫로 블록해서 레스트했을 때만
                 return;
             var target = c.PickOwn(d => d.IsSuspended, c.Other);
             if (target == null || !c.Engine.AskYesNo(c.Owner, null, $"신태일: 이 테이머를 레스트시키고 [{target.TopCard.Name}]을(를) 액티브로 할까요?", recommended: true))

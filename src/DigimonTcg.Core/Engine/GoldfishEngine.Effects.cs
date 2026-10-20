@@ -940,17 +940,18 @@ public partial class GoldfishEngine
     public sealed record MainAbility(CardInstance? Digimon, CardData Card);
 
     // 이번 턴에 쓴 기동 효과 (같은 효과를 한 턴에 여러 번 쓰지 않도록 — 비용이 없는 효과의 무한 반복 방지)
-    private readonly HashSet<object> _usedMainAbilities = new();
+    // 테이머는 같은 카드가 여러 장일 수 있어(같은 CardData 참조) 쓴 횟수를 센다 — 장수만큼 쓸 수 있다
+    private readonly Dictionary<object, int> _usedMainAbilities = new();
 
     /// <summary>owner가 지금 쓸 수 있는 [메인] 기동 효과 목록 (이번 턴에 이미 쓴 것 제외)</summary>
     public IReadOnlyList<MainAbility> GetMainAbilities(PlayerZones owner)
     {
         var list = new List<MainAbility>();
         foreach (var d in owner.BattleArea)
-            if (HasMainAbility(d.TopCard) && !_usedMainAbilities.Contains(d))
+            if (HasMainAbility(d.TopCard) && !_usedMainAbilities.ContainsKey(d))
                 list.Add(new MainAbility(d, d.TopCard));
         foreach (var t in owner.Tamers.Distinct())
-            if (HasMainAbility(t) && !_usedMainAbilities.Contains(t))
+            if (HasMainAbility(t) && _usedMainAbilities.GetValueOrDefault(t) < owner.Tamers.Count(x => ReferenceEquals(x, t)))
                 list.Add(new MainAbility(null, t));
         return list;
     }
@@ -972,9 +973,14 @@ public partial class GoldfishEngine
 
     private void UseMainAbility(PlayerZones owner, CardInstance? digimon, CardData card)
     {
-        _usedMainAbilities.Add((object?)digimon ?? card);
         EffectLog(owner, $"[메인] {card.Name}의 효과 사용");
-        RunEffects(EffectTrigger.ActivateMain, owner, digimon, card, includeInherited: false);
+        var ctx = RunEffects(EffectTrigger.ActivateMain, owner, digimon, card, includeInherited: false);
+        // 비용을 내지 않았거나 조건이 맞지 않아 아무 문장도 처리하지 않았으면 사용으로 치지 않는다
+        if (!(ctx.StepsRan && !ctx.AnyStepResolved))
+        {
+            object key = (object?)digimon ?? card;
+            _usedMainAbilities[key] = _usedMainAbilities.GetValueOrDefault(key) + 1;
+        }
         RecalculateFieldBuffs();
     }
 
@@ -988,6 +994,17 @@ public partial class GoldfishEngine
             if (AiEvaluator.EstimateSentenceValue(text) <= 0) continue;
             AddEffectEvent(ability.Card, CaptureEffectLogs(() => UseMainAbility(State.DummyOpponent, ability.Digimon, ability.Card)));
         }
+    }
+
+    /// <summary>지금 레스트가 ≪블로커≫ 블록 때문인지 (레스트 효과 처리 중에만 의미가 있다 — 신태일 ST5-14)</summary>
+    internal bool SuspendingForBlock { get; private set; }
+
+    /// <summary>≪블로커≫로 블록하며 레스트</summary>
+    internal void SuspendForBlock(CardInstance blocker)
+    {
+        SuspendingForBlock = true;
+        try { Suspend(blocker); }
+        finally { SuspendingForBlock = false; }
     }
 
     /// <summary>디지몬을 레스트시킨다 + "이 디지몬이 레스트 상태가 되었을 때" 효과</summary>
@@ -1032,20 +1049,20 @@ public partial class GoldfishEngine
     /// ≪디지섭션 -N≫: 패에서 이 카드로 진화할 때 자신의 다른 액티브 디지몬 1마리를 레스트시켜 진화 코스트 -N.
     /// 추천(AI)은 그대로 내면 메모리가 상대 쪽으로 넘어갈 때만 쓴다. 반환: 줄인 코스트
     /// </summary>
-    private int TryDigisorption(PlayerZones owner, CardInstance target, CardData evoCard, int memoryBefore)
+    private int TryDigisorption(PlayerZones owner, CardInstance target, CardData evoCard, int baseCost, int memoryBefore)
     {
         int n = CardScripts.For(evoCard)?.DigisorptionReduction ?? 0;
-        if (n <= 0 || evoCard.EvoCost <= 0 || !CanReduceEvoCost(owner))
+        if (n <= 0 || baseCost <= 0 || !CanReduceEvoCost(owner))
             return 0;
         var pool = owner.BattleArea.Where(d => !ReferenceEquals(d, target) && !d.IsSuspended).OrderBy(d => d.GetCurrentDP()).ToList();
         if (pool.Count == 0)
             return 0;
-        bool recommended = memoryBefore - evoCard.EvoCost < 0;
+        bool recommended = memoryBefore - baseCost < 0;
         var pick = AskDigimon(owner, $"≪디지섭션 -{n}≫ [{evoCard.Name}] 진화 코스트를 줄이려면 레스트시킬 디지몬을 고르세요.", pool, recommended ? pool[0] : null, optional: true);
         if (pick == null)
             return 0;
         Suspend(pick);
-        int reduced = Math.Min(n, evoCard.EvoCost);
+        int reduced = Math.Min(n, baseCost);   // 실제 진화 코스트(카드 효과 진화 포함)보다 많이 줄이지 않는다
         EffectLog(owner, $"[≪디지섭션 -{n}≫] [{pick.TopCard.Name}]을(를) 레스트시켜 [{evoCard.Name}] 진화 코스트 -{reduced}");
         return reduced;
     }
