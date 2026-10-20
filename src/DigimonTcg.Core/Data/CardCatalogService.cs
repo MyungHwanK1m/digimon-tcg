@@ -495,6 +495,18 @@ public class CardCatalogService
     /// <summary>앱 시작 시 카드 뒷면 이미지 등을 찾기 위한 data/images 경로 (카탈로그를 읽지 않음)</summary>
     public static string ResolveImagesDirectory() => Path.Combine(FindDataDirectory(), "images");
 
+    /// <summary>화면에 보이는 공식 한글(data/kr/cards_ko.json)의 이름 · 효과 문구 · 특징으로도 찾는다</summary>
+    private static bool MatchesKoreanDisplay(CardData card, string keyword)
+    {
+        var ko = KoreanCardData.Get(card.CardId);
+        if (ko == null)
+            return false;
+        return ko.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+            || (ko.MainText?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (ko.SourceText?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+            || ko.Traits.Any(t => t.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
     public List<CardData> SearchCards(
         string? keyword = null,
         CardColor? color = null,
@@ -511,7 +523,8 @@ public class CardCatalogService
                 c.Name.Contains(kw, StringComparison.OrdinalIgnoreCase) ||
                 c.CardId.Contains(kw, StringComparison.OrdinalIgnoreCase) ||
                 c.EffectText.Contains(kw, StringComparison.OrdinalIgnoreCase) ||
-                c.InheritedEffectText.Contains(kw, StringComparison.OrdinalIgnoreCase));
+                c.InheritedEffectText.Contains(kw, StringComparison.OrdinalIgnoreCase) ||
+                MatchesKoreanDisplay(c, kw));
         }
 
         if (color.HasValue)
