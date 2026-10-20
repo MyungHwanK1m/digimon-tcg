@@ -56,6 +56,12 @@ public static class KeywordDictionary
         ["Alliance"] = Keyword.Alliance, ["연계"] = Keyword.Alliance,
         ["Barrier"] = Keyword.Barrier, ["방벽"] = Keyword.Barrier,
         ["Evade"] = Keyword.Evade, ["회피"] = Keyword.Evade,
+        ["Armor Purge"] = Keyword.ArmorPurge, ["아머 퍼지"] = Keyword.ArmorPurge,
+        ["Fortitude"] = Keyword.Fortitude, ["불굴"] = Keyword.Fortitude,
+        ["Collision"] = Keyword.Collision, ["충돌"] = Keyword.Collision,
+        ["Scapegoat"] = Keyword.Scapegoat, ["스케이프고트"] = Keyword.Scapegoat,
+        ["Iceclad"] = Keyword.Iceclad, ["빙장"] = Keyword.Iceclad,
+        ["Progress"] = Keyword.Progress, ["프로그레스"] = Keyword.Progress,
     };
 
     private static readonly Dictionary<string, EffectTrigger> Triggers = new(StringComparer.OrdinalIgnoreCase)

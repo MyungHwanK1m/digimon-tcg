@@ -71,6 +71,16 @@ public class CardInstance
         return removed;
     }
 
+    /// <summary>≪아머 퍼지≫: 맨 위 카드를 버리고 바로 아래 진화원을 맨 위로 올린다 (레벨 제한 없음, 진화원이 없으면 null)</summary>
+    public CardData? TrashTopCard()
+    {
+        if (EvolutionSources.Count == 0)
+            return null;
+        var removed = TopCard;
+        TopCard = EvolutionSources.Pop();
+        return removed;
+    }
+
     /// <summary>진화원을 아래(가장 먼저 깔린 카드)에서부터 최대 count장 제거해 반환한다</summary>
     public List<CardData> RemoveBottomSources(int count)
     {

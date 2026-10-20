@@ -68,7 +68,9 @@ internal static class BuiltInCardScripts
         card.Inherited(EffectTrigger.WhenAttacking, c =>
         {
             var drawn = c.Draw();
-            var discard = c.Owner.Hand.Where(h => h != drawn).OrderBy(h => h.Type == CardType.Digimon ? 0 : 1).ThenBy(h => h.Level).FirstOrDefault() ?? drawn;
+            var ranked = c.Owner.Hand.Where(h => h != drawn).OrderBy(h => h.Type == CardType.Digimon ? 0 : 1).ThenBy(h => h.Level).ToList();
+            if (drawn != null) ranked.Add(drawn);   // 방금 뽑은 카드는 마지막 추천
+            var discard = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, ranked, 1, upTo: false, "≪1 드로우≫ 후 버릴 패 1장을 고르세요.").FirstOrDefault();
             if (discard != null)
             {
                 c.Owner.Hand.Remove(discard);
@@ -584,7 +586,8 @@ internal static class BuiltInCardScripts
         // 드라큐몬: [등장 시] 트래시의 퍼플 옵션(코스트 1 또는 7) 1장 패로
         b.Card("ST6-04").OnPlay(c =>
         {
-            var opt = c.Owner.Trash.LastOrDefault(x => x.Type == CardType.Option && x.Color == CardColor.Purple && x.PlayCost is 1 or 7);
+            var opt = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(x => x.Type == CardType.Option && x.Color == CardColor.Purple && x.PlayCost is 1 or 7).Reverse().ToList(),
+                1, upTo: false, "드라큐몬: 트래시에서 패로 되돌릴 옵션 카드를 고르세요.").FirstOrDefault();
             if (opt == null) return;
             c.Owner.Trash.Remove(opt);
             c.Owner.Hand.Add(opt);
@@ -608,7 +611,8 @@ internal static class BuiltInCardScripts
         // 스컬사탄몬: [진화 시] 트래시의 퍼플 디지몬 1장 패로
         b.Card("ST6-10").WhenDigivolving(c =>
         {
-            var card = c.Owner.Trash.Where(x => IsDigimon(x) && x.Color == CardColor.Purple).OrderByDescending(x => x.Level).FirstOrDefault();
+            var card = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(x => IsDigimon(x) && x.Color == CardColor.Purple).OrderByDescending(x => x.Level).ToList(),
+                1, upTo: false, "스컬사탄몬: 트래시에서 패로 되돌릴 퍼플 디지몬을 고르세요.").FirstOrDefault();
             if (card == null) return;
             c.Owner.Trash.Remove(card);
             c.Owner.Hand.Add(card);
@@ -799,7 +803,8 @@ internal static class BuiltInCardScripts
             }, when: c => c.Owner.SecurityStack.Count <= 3)
             .WhenAttacking(c =>   // 패의 옐로 Lv.3 디지몬 1장을 코스트 없이 등장
             {
-                var lv3 = c.Owner.Hand.FirstOrDefault(x => IsDigimon(x) && x.Color == CardColor.Yellow && x.Level == 3);
+                var lv3 = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, c.Owner.Hand.Where(x => IsDigimon(x) && x.Color == CardColor.Yellow && x.Level == 3).ToList(),
+                    1, upTo: false, "홀리드라몬: 코스트 없이 등장시킬 옐로 Lv.3 디지몬을 고르세요.").FirstOrDefault();
                 if (lv3 == null || c.Owner.BattleArea.Count >= 8) return;
                 c.Owner.Hand.Remove(lv3);
                 var inst = c.PlayWithoutCost(lv3);

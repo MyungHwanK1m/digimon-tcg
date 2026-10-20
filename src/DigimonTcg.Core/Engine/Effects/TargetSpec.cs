@@ -211,6 +211,8 @@ public sealed class TargetSpec
         ["Blocker"] = Keyword.Blocker, ["Jamming"] = Keyword.Jamming, ["Piercing"] = Keyword.Piercing, ["Retaliation"] = Keyword.Retaliation,
         ["Reboot"] = Keyword.Reboot, ["Rush"] = Keyword.Rush, ["Raid"] = Keyword.Raid, ["Alliance"] = Keyword.Alliance,
         ["Barrier"] = Keyword.Barrier, ["Evade"] = Keyword.Evade,
+        ["Armor Purge"] = Keyword.ArmorPurge, ["Fortitude"] = Keyword.Fortitude, ["Collision"] = Keyword.Collision, ["Scapegoat"] = Keyword.Scapegoat,
+        ["Iceclad"] = Keyword.Iceclad, ["Progress"] = Keyword.Progress,
     };
 
     /// <summary>"[A]" · "[A] or [B]" · "[A], [B] or [C]" · "[A] and/or [B]" — 이름 / 특징 목록</summary>
@@ -232,7 +234,10 @@ public sealed class TargetSpec
     /// 대상 고르기. harmful = 상대에게 불리한 효과(소멸 · DP − · 레스트 …)면 DP가 높은 것부터, 아니면 자신의 이 디지몬 → DP 높은 순.
     /// preferred = UI가 고른 대상 / 어택 중인 디지몬 (조건에 맞으면 먼저)
     /// </summary>
-    public List<CardInstance> Resolve(EffectContext c, CardInstance? preferred)
+    public List<CardInstance> Resolve(EffectContext c, CardInstance? preferred) =>
+        ResolveCore(c, preferred).Where(d => !c.Engine.IsUnaffectedBy(c.Owner, d)).ToList();   // ≪프로그레스≫: 어택 중이면 상대 효과를 받지 않는다
+
+    private List<CardInstance> ResolveCore(EffectContext c, CardInstance? preferred)
     {
         if (IsThat && c.LastTargets.Count > 0)
             return c.LastTargets.Where(d => c.Owner.BattleArea.Contains(d) || c.Enemy.BattleArea.Contains(d)).ToList();

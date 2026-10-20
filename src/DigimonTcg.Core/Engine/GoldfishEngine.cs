@@ -1267,8 +1267,10 @@ public partial class GoldfishEngine
         var pending = State.PendingBlock;
         if (pending == null || _aiTurn == null)
             return ActionResult.Fail("지금은 블록을 선택할 차례가 아닙니다.");
-        if (blocker != null && (!pending.Candidates.Contains(blocker) || !EffectRules.CanBlock(State, blocker)))
+        if (blocker != null && (!pending.Candidates.Contains(blocker) || !EffectRules.CanBlockAgainst(State, blocker, pending.Attacker)))
             return ActionResult.Fail($"[{blocker.TopCard.Name}]은(는) 이 어택을 블록할 수 없습니다.");
+        if (blocker == null && EffectRules.ForcesBlock(pending.Attacker) && pending.Candidates.Count > 0)
+            return ActionResult.Fail($"≪충돌≫: [{pending.Attacker.TopCard.Name}]의 어택은 블록할 수 있으면 반드시 블록해야 합니다.");
 
         State.PendingBlock = null;
         string attackerName = pending.Attacker.TopCard.Name;

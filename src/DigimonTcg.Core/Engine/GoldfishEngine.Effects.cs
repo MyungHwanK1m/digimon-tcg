@@ -30,9 +30,16 @@ public static class EffectRules
     /// <summary>attacker의 어택을 블록할 수 있는 블로커 전부 (DP 높은 순) — 이 중 어느 것으로 막을지(막지 않을지)는 방어 측이 고른다</summary>
     public static List<CardInstance> BlockCandidates(GameState state, IEnumerable<CardInstance> defenders, CardInstance attacker) =>
         defenders
-            .Where(d => CanBlock(state, d) && !IsUnblockableBy(state, attacker, d))
+            .Where(d => CanBlockAgainst(state, d, attacker) && !IsUnblockableBy(state, attacker, d))
             .OrderByDescending(d => d.GetCurrentDP())
             .ToList();
+
+    /// <summary>≪충돌≫: 이 디지몬이 어택하는 동안 상대 디지몬 전부가 ≪블로커≫를 얻고, 상대는 가능하면 블록해야 한다</summary>
+    public static bool ForcesBlock(CardInstance attacker) => CardScripts.HasKeyword(attacker, Keyword.Collision);
+
+    /// <summary>blocker가 attacker의 어택을 블록할 수 있는지 (≪충돌≫이면 ≪블로커≫가 없어도)</summary>
+    public static bool CanBlockAgainst(GameState state, CardInstance blocker, CardInstance attacker) =>
+        (blocker.HasBlocker || ForcesBlock(attacker)) && !blocker.IsSuspended && !IsActive(blocker.CannotBlockUntil, state);
 
     /// <summary>
     /// 상대(AI · 연습 더미)가 내 어택을 블록할 블로커. null = 블록하지 않음.
@@ -66,7 +73,8 @@ public static class EffectRules
                     return trade;
             }
         }
-        return null;
+        // ≪충돌≫: 막을 수 있으면 반드시 막는다 (가장 DP가 낮은 것으로)
+        return ForcesBlock(attacker) ? candidates.OrderBy(b => b.GetCurrentDP()).First() : null;
     }
 
     /// <summary>
@@ -438,7 +446,48 @@ public partial class GoldfishEngine
             EffectLog(zones, $"[≪회피≫] [{name}]: 레스트 상태가 되어 소멸하지 않습니다.");
             return true;
         }
+
+        // ≪아머 퍼지≫: 이 디지몬에 겹쳐진 카드를 위에서부터 1장 파기하는 것으로 소멸하지 않는다
+        if (CardScripts.HasKeyword(inst, Keyword.ArmorPurge) && inst.EvolutionSources.Count > 0
+            && AskYesNo(zones, inst, $"≪아머 퍼지≫ [{name}]이(가) 소멸합니다. 맨 위 카드를 파기하고 소멸을 막을까요?", recommended: true))
+        {
+            var top = inst.TrashTopCard()!;
+            ApplyOverflow(zones, new[] { top });
+            zones.Trash.Add(top);
+            RecalculateFieldBuffs();
+            EffectLog(zones, $"[≪아머 퍼지≫] [{top.Name}]을(를) 파기하고 [{inst.TopCard.Name}](으)로 남습니다.");
+            return true;
+        }
+
+        // ≪스케이프고트≫: 자신의 효과 이외로 소멸할 때, 다른 자신의 디지몬 1마리를 소멸시키는 것으로 소멸하지 않는다
+        if ((cause == DeletionCause.Battle || _deletingByOpponentEffect) && CardScripts.HasKeyword(inst, Keyword.Scapegoat))
+        {
+            var others = zones.BattleArea.Where(d => !ReferenceEquals(d, inst)).OrderBy(d => d.TopCard.Level).ThenBy(d => d.GetCurrentDP()).ToList();
+            if (others.Count > 0)
+            {
+                var victim = AskDigimon(zones, $"≪스케이프고트≫ [{name}]의 소멸을 막으려면 대신 소멸시킬 자신의 디지몬을 고르세요.", others,
+                    others[0].TopCard.Level < inst.TopCard.Level ? others[0] : null, optional: true);
+                if (victim != null)
+                {
+                    EffectLog(zones, $"[≪스케이프고트≫] [{victim.TopCard.Name}]을(를) 소멸시키고 [{name}]은(는) 소멸하지 않습니다.");
+                    DeleteFrom(zones, victim, DeletionCause.Cost);
+                    return true;
+                }
+            }
+        }
         return false;
+    }
+
+    // 지금 처리 중인 소멸이 상대 효과에 의한 것인지 (≪스케이프고트≫ — 자신의 효과 이외)
+    private bool _deletingByOpponentEffect;
+
+    /// <summary>상대의 효과로 소멸 (EffectContext.DeleteEnemy)</summary>
+    internal bool DeleteByOpponentEffect(PlayerZones zones, CardInstance instance)
+    {
+        bool outer = _deletingByOpponentEffect;
+        _deletingByOpponentEffect = true;
+        try { return DeleteFrom(zones, instance); }
+        finally { _deletingByOpponentEffect = outer; }
     }
 
     /// <summary>소멸 처리 (막을 수 있는지는 이미 정해졌을 때)</summary>
@@ -450,6 +499,11 @@ public partial class GoldfishEngine
         CurrentDeletionCause = cause;   // [소멸 시] · "소멸했을 때" 효과가 볼 수 있게 ("deleted by an effect" · "by dropping to 0 DP")
 
         var stack = instance.GetEvolutionStackBottomUp();
+        // ≪불굴≫: 진화원을 가진 이 디지몬이 소멸했을 때, 이 카드(≪불굴≫이 적힌 카드)를 코스트 없이 등장
+        CardData? fortitude = null;
+        if (stack.Count > 0 && CardScripts.HasKeyword(instance, Keyword.Fortitude))
+            fortitude = stack.LastOrDefault(s => CardScripts.For(s)?.InheritedKeywords.Contains(Keyword.Fortitude) == true
+                                              && CardScripts.For(instance.TopCard)?.Keywords.Contains(Keyword.Fortitude) != true) ?? instance.TopCard;
         ApplyOverflow(zones, stack.Append(instance.TopCard));
         zones.Trash.Add(instance.TopCard);
         while (instance.EvolutionSources.Count > 0)
@@ -460,6 +514,12 @@ public partial class GoldfishEngine
         FireForSide(EffectTrigger.AllyDigimonDeleted, zones, instance);
         FireForSide(EffectTrigger.OpponentDigimonDeleted, EnemyOf(zones), instance);
         CurrentDeletionCause = outerCause;
+
+        if (fortitude != null && zones.Trash.Remove(fortitude))
+        {
+            EffectLog(zones, $"[≪불굴≫] [{fortitude.Name}]이(가) 코스트 없이 다시 등장합니다.");
+            PlayWithoutCost(zones, fortitude);
+        }
     }
 
     // =====================================================================
@@ -497,21 +557,12 @@ public partial class GoldfishEngine
         if (count == 1 && preselected != null && ranked.Contains(preselected))
             return new List<CardInstance> { preselected };
 
-        var picked = new List<CardInstance>();
-        var remaining = ranked.ToList();
-        for (int i = 0; i < count && remaining.Count > 0; i++)
-        {
-            string q = count > 1 ? $"{question} ({i + 1}/{count})" : question;
-            var p = PlayerChoices!.ChooseDigimon(State, q, remaining, remaining[0], optional || i > 0);
-            if (p == null || !remaining.Contains(p))
-            {
-                if (optional || i > 0) break;
-                p = remaining[0];
-            }
-            picked.Add(p);
-            remaining.Remove(p);
-        }
-        return picked;
+        if (count > 1)
+            return AskDigimons(owner, ranked, count, upTo: optional, question);   // 여러 마리는 한 번에 고르는 창
+        var p = PlayerChoices!.ChooseDigimon(State, question, ranked, ranked[0], optional);
+        if (p == null || !ranked.Contains(p))
+            return optional ? new List<CardInstance>() : new List<CardInstance> { ranked[0] };
+        return new List<CardInstance> { p };
     }
 
     /// <summary>고르는 효과의 선택지 — 플레이어면 묻고, 아니면 추천(AI 평가 점수가 가장 높은 것)</summary>
@@ -584,6 +635,7 @@ public partial class GoldfishEngine
     /// <summary>어택이 끝났을 때: "이 어택 동안" 효과(≪연계≫)를 지우고 [어택 종료 시] 효과</summary>
     private void EndAttack(CardInstance attacker)
     {
+        if (ReferenceEquals(CurrentAttacker, attacker)) CurrentAttacker = null;
         attacker.AttackDpBonus = 0;
         attacker.AttackSecurityAttackBonus = 0;
         RecalculateFieldBuffs();
@@ -910,7 +962,8 @@ public partial class GoldfishEngine
     /// <summary>패에서 count장 파기 (낮은 레벨 · 옵션 아닌 카드부터 — 사람에게 묻는 화면은 4단계). 반환: 버린 매수</summary>
     internal int DiscardFromHand(PlayerZones zones, int count)
     {
-        var picks = zones.Hand.OrderBy(c => c.Type == CardType.Option ? 1 : 0).ThenBy(c => c.Level).ThenBy(c => c.PlayCost).Take(count).ToList();
+        var ranked = zones.Hand.OrderBy(c => c.Type == CardType.Option ? 1 : 0).ThenBy(c => c.Level).ThenBy(c => c.PlayCost).ToList();
+        var picks = ChooseCards(zones, CardChoiceZone.Hand, ranked, count, upTo: false, $"버릴 패 {count}장을 고르세요.");
         foreach (var c in picks)
         {
             zones.Hand.Remove(c);
@@ -1119,9 +1172,9 @@ public partial class GoldfishEngine
     /// <summary>트래시에서 조건에 맞는 디지몬을 코스트 없이 등장시킨다 ([등장 시] 효과는 발휘하지 않음)</summary>
     internal List<CardData> PlayFromTrash(PlayerZones zones, Func<CardData, bool> match, int maxCount)
     {
-        var picks = zones.Trash.Where(c => c.Type == CardType.Digimon && match(c))
-            .OrderByDescending(c => c.Level).ThenByDescending(c => c.DP)
-            .Take(maxCount).ToList();
+        var ranked = zones.Trash.Where(c => c.Type == CardType.Digimon && match(c))
+            .OrderByDescending(c => c.Level).ThenByDescending(c => c.DP).ToList();
+        var picks = ChooseCards(zones, CardChoiceZone.Trash, ranked, maxCount, upTo: false, $"트래시에서 등장시킬 디지몬 {maxCount}장을 고르세요.");
         foreach (var c in picks)
         {
             zones.Trash.Remove(c);
@@ -1174,8 +1227,14 @@ public partial class GoldfishEngine
         int atkDp = attacker.GetCurrentDP() + BattleDpBonus(attacker, defender.EvolutionSources.Count > 0);
         int defDp = defender.GetCurrentDP() + BattleDpBonus(defender, attacker.EvolutionSources.Count > 0);
 
-        bool attackerLoses = atkDp <= defDp;
-        bool defenderLoses = atkDp >= defDp;
+        // ≪빙장≫: 시큐리티 디지몬 이외와의 배틀에서는 DP가 아니라 진화원 매수를 비교한다
+        bool iceclad = CardScripts.HasKeyword(attacker, Keyword.Iceclad) || CardScripts.HasKeyword(defender, Keyword.Iceclad);
+        int atkValue = iceclad ? attacker.EvolutionSources.Count : atkDp;
+        int defValue = iceclad ? defender.EvolutionSources.Count : defDp;
+        if (iceclad)
+            Log($"[≪빙장≫] 진화원 매수로 비교: [{attacker.TopCard.Name}] {atkValue}장 vs [{defender.TopCard.Name}] {defValue}장");
+        bool attackerLoses = atkValue <= defValue;
+        bool defenderLoses = atkValue >= defValue;
 
         // 진 쪽이 ≪방벽≫ · ≪회피≫로 소멸을 막는지 먼저 정한다 (막으면 ≪길동무≫도 발동하지 않는다)
         bool attackerDeleted = attackerLoses && !TryPreventDeletion(atkZones, attacker, DeletionCause.Battle);
@@ -1184,12 +1243,16 @@ public partial class GoldfishEngine
         if (attackerDeleted && !defenderLoses && HasRetaliation(attacker))
         {
             Log($"[≪길동무≫] 배틀에서 진 [{attacker.TopCard.Name}]이(가) [{defender.TopCard.Name}]을(를) 함께 소멸시킵니다!");
+            _deletingByOpponentEffect = true;   // ≪길동무≫는 상대 디지몬의 효과 (≪스케이프고트≫ 판단)
             defenderDeleted = !TryPreventDeletion(defZones, defender, DeletionCause.Effect);
+            _deletingByOpponentEffect = false;
         }
         else if (defenderDeleted && !attackerLoses && HasRetaliation(defender))
         {
             Log($"[≪길동무≫] 배틀에서 진 [{defender.TopCard.Name}]이(가) [{attacker.TopCard.Name}]을(를) 함께 소멸시킵니다!");
+            _deletingByOpponentEffect = true;
             attackerDeleted = !TryPreventDeletion(atkZones, attacker, DeletionCause.Effect);
+            _deletingByOpponentEffect = false;
         }
 
         if (defenderDeleted) RemoveDeleted(defZones, defender);
@@ -1234,8 +1297,16 @@ public partial class GoldfishEngine
     }
 
     /// <summary>[어택 시] 효과 (자신 + 진화원). defender = 어택 대상 디지몬 (시큐리티 어택이면 null)</summary>
+    /// <summary>지금 어택 중인 디지몬 (어택 선언부터 어택 종료까지)</summary>
+    internal CardInstance? CurrentAttacker { get; private set; }
+
+    /// <summary>≪프로그레스≫: 어택 중인 이 디지몬은 상대의 효과를 받지 않는다 (effectOwner = 효과 주인)</summary>
+    internal bool IsUnaffectedBy(PlayerZones effectOwner, CardInstance target) =>
+        ReferenceEquals(CurrentAttacker, target) && !OwnerOf(target).Equals(effectOwner) && CardScripts.HasKeyword(target, Keyword.Progress);
+
     private void TriggerWhenAttackingEffects(CardInstance attacker, CardInstance? defender)
     {
+        CurrentAttacker = attacker;   // 어택 종료(EndAttack)까지 — ≪프로그레스≫ 판단
         RunEffects(EffectTrigger.WhenAttacking, OwnerOf(attacker), attacker, attacker.TopCard, other: defender);
         RecalculateFieldBuffs();
     }
