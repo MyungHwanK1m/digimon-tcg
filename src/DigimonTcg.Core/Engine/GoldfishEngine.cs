@@ -28,6 +28,8 @@ public partial class GoldfishEngine
         public int EndOfTurnMemoryLoss;
         public bool IsOpeningTurn;
         public readonly Queue<CardInstance> Attackers = new();
+        public CardInstance? AttackTarget;    // 지금 어택의 대상 (≪돌진≫으로 바꾼 내 디지몬, 없으면 시큐리티)
+        public CardInstance? BlitzAttacker;   // ≪진격≫으로 메모리가 상대 쪽이어도 어택할 수 있는 AI 디지몬
     }
 
     private AiTurnContext? _aiTurn;
@@ -83,6 +85,7 @@ public partial class GoldfishEngine
         State.ActionLogs.Clear();
         State.OpponentTurnEvents.Clear();
         State.PendingBlock = null;
+        State.BlitzAttacker = null;
         _aiTurn = null;
         State.TurnSequence = 0;
         State.PendingEndOfTurnMemoryLoss = 0;
@@ -368,6 +371,7 @@ public partial class GoldfishEngine
         PruneExpiredBuffs();
         SetTurnOwner(playerTurn: true);
         Log($"액티브 페이즈 완료 (기상한 디지몬: {awakened}체)");
+        TriggerStartOfTurn(State.Player);
     }
 
     /// <summary>
@@ -575,8 +579,20 @@ public partial class GoldfishEngine
 
         State.CanMulligan = false;
         attacker.IsSuspended = true;
+        State.BlitzAttacker = null;
         TriggerWhenAttackingEffects(attacker, defender);
+        defender = ApplyAttackKeywords(attacker, defender) ?? defender;
 
+        string resultMsg = ResolvePlayerAttackOnDigimon(attacker, defender);
+        Log(resultMsg);
+        EndAttack(attacker);
+        EndTurnIfMemoryNegative();
+        return ActionResult.Success(resultMsg);
+    }
+
+    /// <summary>내 디지몬이 상대 디지몬을 어택한 뒤의 처리: 상대 ≪블로커≫의 블록 → 배틀 → ≪관통≫. 반환: 결과 메시지</summary>
+    private string ResolvePlayerAttackOnDigimon(CardInstance attacker, CardInstance defender)
+    {
         string resultMsg;
         if (!State.Player.BattleArea.Contains(attacker))
         {
@@ -607,10 +623,7 @@ public partial class GoldfishEngine
             if (defDeleted && !atkDeleted && HasPiercing(attacker))
                 resultMsg += " / ≪관통≫ " + RunSecurityChecks(attacker);
         }
-
-        Log(resultMsg);
-        EndTurnIfMemoryNegative();
-        return ActionResult.Success(resultMsg);
+        return resultMsg;
     }
 
     /// <summary>
@@ -624,9 +637,21 @@ public partial class GoldfishEngine
 
         State.CanMulligan = false;
         attacker.IsSuspended = true;
+        State.BlitzAttacker = null;
         TriggerWhenAttackingEffects(attacker, null);
 
-        var result = ResolveSecurityAttack(attacker);
+        ActionResult result;
+        if (ApplyAttackKeywords(attacker, null) is { } raidTarget)
+        {
+            string msg = ResolvePlayerAttackOnDigimon(attacker, raidTarget);
+            Log(msg);
+            result = ActionResult.Success(msg);
+        }
+        else
+        {
+            result = ResolveSecurityAttack(attacker);
+        }
+        EndAttack(attacker);
         EndTurnIfMemoryNegative();
         return result;
     }
@@ -781,6 +806,15 @@ public partial class GoldfishEngine
 
             // [공식 룰 C] 디지몬 → 시큐리티 디지몬과 DP 배틀 후 트래시
             opp.Trash.Add(securityCard);
+            string secEffect = ResolveSecurityDigimonEffect(securityCard, opp, attacker);
+            if (secEffect.Length > 0)
+            {
+                battleSummaries.Add(secEffect);
+                if (!State.Player.BattleArea.Contains(attacker))
+                    break;
+                RecalculateFieldBuffs();
+                attackerDp = attacker.GetCurrentDP();
+            }
             attackerDp += BattleDpBonus(attacker, opponentHasSources: false);
             int securityDp = securityCard.DP + SecurityDigimonDpBonus(opp, ownersTurn: false);
 
@@ -813,8 +847,8 @@ public partial class GoldfishEngine
                     securityCard, attacker.TopCard.Name, attackerDp, IsBattleWon: false, OutcomeSummary: $"💀 내 디지몬 소멸 (DP {attackerDp} <= {securityDp})"));
                 battleSummaries.Add(msg);
                 Log(msg);
-                DeleteDigimon(attacker);
-                break;
+                if (DeleteDigimon(attacker))   // ≪방벽≫ 등으로 소멸을 막으면 남은 체크를 계속한다
+                    break;
             }
         }
 
@@ -854,7 +888,10 @@ public partial class GoldfishEngine
             return ActionResult.Fail("지금은 내 턴이 아닙니다.");
 
         State.CanMulligan = false;
-        State.MemoryGauge = -3;
+        if (State.BlitzAttacker != null && State.MemoryGauge < 0)
+            State.BlitzAttacker = null;   // ≪진격≫ 어택을 하지 않고 끝냄 — 메모리는 이미 상대 쪽
+        else
+            State.MemoryGauge = -3;
         Log("플레이어가 턴 종료(Pass)를 선언했습니다.");
         CheckTurnEndAndAutoReset();
         return State.PendingBlock != null
@@ -870,6 +907,17 @@ public partial class GoldfishEngine
     {
         if (State.IsGameOver || State.MemoryGauge >= 0)
             return false;
+
+        // ≪진격≫: 메모리가 상대 쪽이어도 그 디지몬의 어택 1번이 끝날 때까지 턴이 이어진다
+        if (State.BlitzAttacker is { } blitz)
+        {
+            if (State.Player.BattleArea.Contains(blitz) && CanAttackThisTurn(blitz))
+            {
+                Log($"[≪진격≫] [{blitz.TopCard.Name}]으로 어택할 수 있습니다. (어택하거나 턴 종료를 선택하면 턴이 끝납니다)");
+                return false;
+            }
+            State.BlitzAttacker = null;
+        }
 
         State.CurrentPhase = Phase.TurnEnd;
         Log($"메모리가 {State.MemoryGauge}(0 미만)이 되어 플레이어 턴이 종료됩니다.");
@@ -1013,6 +1061,8 @@ public partial class GoldfishEngine
         }
         PruneExpiredBuffs();
         SetTurnOwner(playerTurn: false);
+        AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },
+            CaptureEffectLogs(() => TriggerStartOfTurn(State.DummyOpponent)));
 
         // 2. AI 드로우 페이즈 (AI가 선공인 게임 첫 턴은 드로우 없음)
         //    공식 룰: 드로우 페이즈에 덱이 0장이라 드로우할 수 없으면 그 플레이어가 패배한다 (AI도 동일)
@@ -1079,7 +1129,7 @@ public partial class GoldfishEngine
         if (!isOpeningTurn)
         {
             foreach (var d in State.DummyOpponent.BattleArea
-                         .Where(d => !d.IsSuspended && d.TurnPlayed < State.CurrentTurn && !EffectRules.IsAttackLocked(State, d) && (!d.HasBlocker || State.DummyOpponent.BattleArea.Count >= 2))
+                         .Where(d => CanAttackThisTurn(d) && (!d.HasBlocker || State.DummyOpponent.BattleArea.Count >= 2))
                          .OrderByDescending(d => d.GetCurrentDP()))
                 ctx.Attackers.Enqueue(d);
         }
@@ -1099,8 +1149,8 @@ public partial class GoldfishEngine
 
         while (ctx.Attackers.Count > 0)
         {
-            // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료!
-            if (ctx.Memory < 0)
+            // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료! (≪진격≫ 어택은 예외)
+            if (ctx.Memory < 0 && !ReferenceEquals(ctx.Attackers.Peek(), ctx.BlitzAttacker))
             {
                 Log($"⚡ AI 메모리가 {ctx.Memory}(0 미만)이 되어 AI의 추가 공격 및 메인 페이즈가 즉시 종료됩니다!");
                 ctx.Attackers.Clear();
@@ -1108,19 +1158,28 @@ public partial class GoldfishEngine
             }
 
             var aiAttacker = ctx.Attackers.Dequeue();
+            if (ReferenceEquals(aiAttacker, ctx.BlitzAttacker))
+                ctx.BlitzAttacker = null;
             if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || aiAttacker.IsSuspended || EffectRules.IsAttackLocked(State, aiAttacker))
                 continue;
 
             aiAttacker.IsSuspended = true;
             State.OpponentAttackedThisTurn = true;
 
-            // AI 디지몬의 [어택 시] 효과 (플레이어와 같은 카드 스크립트)
-            var attackEffects = CaptureEffectLogs(() => TriggerWhenAttackingEffects(aiAttacker, null));
+            // AI 디지몬의 [어택 시] 효과 (플레이어와 같은 카드 스크립트) → ≪연계≫ · ≪돌진≫
+            var attackEffects = CaptureEffectLogs(() =>
+            {
+                TriggerWhenAttackingEffects(aiAttacker, null);
+                ctx.AttackTarget = ApplyAttackKeywords(aiAttacker, null);
+            });
 
             RecalculateFieldBuffs();
             int aiDp = aiAttacker.GetCurrentDP();
             int aiChecks = aiAttacker.GetSecurityAttackCount();
-            AddOpponentEvent(OpponentActionKind.Attack, "공격 선언", $"{aiAttacker.TopCard.Name} (DP {aiDp:N0}) → 내 시큐리티 {aiChecks}장", aiAttacker.TopCard);
+            AddOpponentEvent(OpponentActionKind.Attack, "공격 선언",
+                ctx.AttackTarget is { } raided
+                    ? $"{aiAttacker.TopCard.Name} (DP {aiDp:N0}) → 내 {raided.TopCard.Name} (DP {raided.GetCurrentDP():N0})"
+                    : $"{aiAttacker.TopCard.Name} (DP {aiDp:N0}) → 내 시큐리티 {aiChecks}장", aiAttacker.TopCard, ctx.AttackTarget?.TopCard);
             AddEffectEvent(aiAttacker.TopCard, attackEffects);
             if (State.IsGameOver)
             {
@@ -1128,10 +1187,13 @@ public partial class GoldfishEngine
                 return;
             }
             if (!State.DummyOpponent.BattleArea.Contains(aiAttacker))
+            {
+                EndAiAttack(ctx, aiAttacker);
                 continue;
+            }
 
-            // [공식 룰] ≪블로커≫로 막을지는 방어하는 플레이어가 고른다
-            var candidates = EffectRules.BlockCandidates(State, State.Player.BattleArea, aiAttacker);
+            // [공식 룰] ≪블로커≫로 막을지는 방어하는 플레이어가 고른다 (어택 대상인 디지몬은 블록할 수 없다)
+            var candidates = EffectRules.BlockCandidates(State, State.Player.BattleArea.Where(d => !ReferenceEquals(d, ctx.AttackTarget)), aiAttacker);
             if (candidates.Count > 0 && PlayerChoosesBlocks)
             {
                 State.PendingBlock = new PendingBlockDecision(aiAttacker, candidates, aiDp, aiChecks);
@@ -1140,6 +1202,7 @@ public partial class GoldfishEngine
             }
 
             ResolveAiAttack(aiAttacker, candidates.FirstOrDefault());
+            EndAiAttack(ctx, aiAttacker);
             if (State.IsGameOver)
             {
                 _aiTurn = null;
@@ -1148,6 +1211,12 @@ public partial class GoldfishEngine
         }
 
         FinishAiTurn(ctx);
+    }
+
+    private void EndAiAttack(AiTurnContext ctx, CardInstance aiAttacker)
+    {
+        ctx.AttackTarget = null;
+        AddEffectEvent(aiAttacker.TopCard, CaptureEffectLogs(() => EndAttack(aiAttacker)));
     }
 
     /// <summary>
@@ -1168,6 +1237,7 @@ public partial class GoldfishEngine
             : $"블록하지 않음: AI [{attackerName}]의 어택을 그대로 받습니다.");
 
         ResolveAiAttack(pending.Attacker, blocker);
+        EndAiAttack(_aiTurn, pending.Attacker);
         if (State.IsGameOver)
         {
             _aiTurn = null;
@@ -1194,6 +1264,27 @@ public partial class GoldfishEngine
         RecalculateFieldBuffs();
         int aiDp = aiAttacker.GetCurrentDP();
         int aiChecks = aiAttacker.GetSecurityAttackCount();
+
+        // ≪돌진≫으로 내 디지몬을 어택 중 (블록하지 않았을 때)
+        if (playerBlocker == null && ctx.AttackTarget is { } raidTarget)
+        {
+            string ai = aiAttacker.TopCard.Name, mine = raidTarget.TopCard.Name;
+            if (!State.Player.BattleArea.Contains(raidTarget))
+            {
+                Log($"🤖 AI [{ai}]의 어택 대상 [{mine}]이(가) 필드를 떠나 어택이 끝났습니다.");
+                return;
+            }
+            var (aiLost, mineLost, aiBattleDp, myDp) = ResolveDigimonBattle(aiAttacker, raidTarget);
+            string result = mineLost && !aiLost ? $"내 [{mine}] 소멸" : aiLost && !mineLost ? $"AI [{ai}] 소멸" : aiLost ? "양쪽 소멸" : "양쪽 생존";
+            Log($"⚔️ [≪돌진≫ 배틀] AI [{ai}(DP {aiBattleDp})] vs 내 [{mine}(DP {myDp})] → {result}");
+            AddOpponentEvent(OpponentActionKind.Block, "≪돌진≫ 배틀", $"{ai} (DP {aiBattleDp:N0}) vs 내 {mine} (DP {myDp:N0}) → {result}", aiAttacker.TopCard, raidTarget.TopCard);
+            if (mineLost && !aiLost && HasPiercing(aiAttacker) && aiAttacker.GetSecurityAttackCount() > 0)
+            {
+                Log($"🤖 [≪관통≫] AI [{ai}]이(가) 내 디지몬을 쓰러뜨리고 내 시큐리티를 체크합니다!");
+                RunAiSecurityChecks(aiAttacker, aiAttacker.GetSecurityAttackCount());
+            }
+            return;
+        }
 
         if (playerBlocker != null)
         {
@@ -1316,17 +1407,25 @@ public partial class GoldfishEngine
 
             // 3) 내 시큐리티에서 [디지몬]이 나온 경우 -> 공식 룰: 시큐리티 DP 배틀 후 트래시행!
             State.Player.Trash.Add(mySec);
+            var mySecEffect = CaptureEffectLogs(() => ResolveSecurityDigimonEffect(mySec, State.Player, aiAttacker));
+            AddEffectEvent(mySec, mySecEffect);
+            if (!State.DummyOpponent.BattleArea.Contains(aiAttacker))
+                break;
+            RecalculateFieldBuffs();
+            aiDp = aiAttacker.GetCurrentDP();
             aiDp += BattleDpBonus(aiAttacker, opponentHasSources: false);
             int mySecDp = mySec.DP + SecurityDigimonDpBonus(State.Player, ownersTurn: false);
             if (mySecDp >= aiDp && !HasJamming(aiAttacker))
             {
-                DeleteOpponentDigimon(aiAttacker);
+                bool aiRemoved = DeleteOpponentDigimon(aiAttacker);
                 string winMsg = $"🛡️💥 [내 시큐리티 역격파!] AI [{aiAttacker.TopCard.Name}(DP {aiDp})]가 내 시큐리티 디지몬 [{mySec.Name}(DP {mySecDp})]와 배틀하여 역으로 소멸했습니다! (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
                 State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
                     mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: true, OutcomeSummary: $"💥 AI [{aiAttacker.TopCard.Name}] 역격파!"));
                 Log(winMsg);
                 AddOpponentEvent(OpponentActionKind.SecurityResult, "내 시큐리티 역격파!", $"내 {mySec.Name} (DP {mySecDp:N0}) ≥ {aiAttacker.TopCard.Name} (DP {aiDp:N0}) · 남은 시큐리티 {State.Player.SecurityStack.Count}장", aiAttacker.TopCard, mySec);
-                break;
+                if (aiRemoved)   // ≪방벽≫ 등으로 소멸을 막으면 남은 체크를 계속한다
+                    break;
+                continue;
             }
             else
             {
@@ -1400,6 +1499,19 @@ public partial class GoldfishEngine
         {
             _aiTurn = null;
             return;
+        }
+
+        // ≪진격≫: 메모리가 상대 쪽이 되었어도 그 디지몬으로 어택한다 → 어택이 끝나면 RunAiTurn이 다시 여기로 온다
+        if (ctx.BlitzAttacker is { } blitz)
+        {
+            if (CanAttackThisTurn(blitz) && State.DummyOpponent.BattleArea.Contains(blitz))
+            {
+                Log($"🤖 [≪진격≫] AI [{blitz.TopCard.Name}]이(가) 메모리가 상대 쪽이지만 어택합니다!");
+                ctx.Attackers.Enqueue(blitz);
+                RunAiTurn();
+                return;
+            }
+            ctx.BlitzAttacker = null;
         }
 
         int aiMemory = ctx.Memory;

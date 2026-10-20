@@ -18,6 +18,8 @@ public enum EffectTrigger
     OpponentDigimonDeletedByZeroDp, // 상대 디지몬이 DP 0이 되어 소멸했을 때
     AllySameNamePlayed,             // 같은 명칭의 다른 자신의 디지몬이 등장했을 때
     OpponentTurnEndWithoutAttack,   // [상대의 턴 종료 시] 이 턴에 상대가 어택하지 않았다면
+    StartOfYourTurn,                // [자신의 턴 개시 시]
+    EndOfAttack,                    // [어택 종료 시]
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>
@@ -33,6 +35,11 @@ public enum Keyword
     Reboot,                  // ≪재기동≫: 상대의 액티브 페이즈에도 액티브
     UnblockableBySourceless, // 진화원을 갖지 않은 상대 디지몬에게는 블록당하지 않는다 (원뿔몬 BT1-034)
     NegateSecurityOptions,   // 체크한 옵션 카드의 [시큐리티] 효과는 발휘하지 않는다 (워그레이몬 BT1-025)
+    Rush,                    // ≪속공≫: 등장한 턴에도 어택할 수 있다
+    Raid,                    // ≪돌진≫: 어택했을 때 어택 대상을 가장 DP가 높은 액티브 상태의 상대 디지몬 1마리로 바꿀 수 있다
+    Alliance,                // ≪연계≫: 어택했을 때 다른 자신의 디지몬 1마리를 레스트시켜, 이 어택 동안 그 DP를 더하고 ≪시큐리티 어택 +1≫
+    Barrier,                 // ≪방벽≫: 배틀에서 소멸할 때 자신의 시큐리티 위에서 1장 파기하는 것으로 소멸하지 않는다
+    Evade,                   // ≪회피≫: 소멸할 때 레스트시키는 것으로 소멸하지 않는다
 }
 
 /// <summary>지속 효과가 바꾸는 수치</summary>

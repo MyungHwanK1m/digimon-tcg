@@ -27,8 +27,20 @@ public static class ActionValidator
         if (state.CurrentPhase != Phase.Main)
             return ActionResult.Fail("메인 페이즈에만 카드를 등장시킬 수 있습니다.");
 
+        if (state.BlitzAttacker != null && state.MemoryGauge < 0)
+            return ActionResult.Fail("지금은 ≪진격≫ 어택이나 턴 종료만 할 수 있습니다.");
+
         if (card.Type == CardType.Digitama)
             return ActionResult.Fail("디지타마 카드는 패에서 등장시킬 수 없으며 육성 페이즈에 부화해야 합니다.");
+
+        // 공식 룰: 옵션 카드는 자신의 배틀 에어리어 · 육성 에어리어의 디지몬 또는 테이머 중
+        // 그 옵션의 색(여러 색이면 모든 색)을 가진 카드가 있어야 [메인]으로 사용할 수 있다. ([시큐리티] 발휘에는 조건 없음)
+        if (card.Type == CardType.Option)
+        {
+            var missing = MissingOptionColors(state.Player, card);
+            if (missing.Count > 0)
+                return ActionResult.Fail($"[{card.Name}]을(를) 사용하려면 내 필드에 {string.Join(" · ", missing.Select(ColorName))} 디지몬 또는 테이머가 있어야 합니다.");
+        }
 
         // 공식 룰: 10을 넘는 코스트도 지불할 수 있다 (메모리는 상대 쪽 10에서 멈춘다)
         int projectedMemory = Math.Max(state.MemoryGauge - card.PlayCost, -10);
@@ -42,6 +54,36 @@ public static class ActionValidator
 
         return ActionResult.Success(guide);
     }
+
+    /// <summary>옵션 카드의 색 중 자신의 필드(배틀 · 육성 에어리어의 디지몬, 테이머)에 없는 색</summary>
+    public static List<CardColor> MissingOptionColors(PlayerZones zones, CardData option)
+    {
+        var fieldColors = new HashSet<CardColor>(zones.BattleArea.Select(d => d.TopCard.Color));
+        if (zones.BreedingArea != null)
+            fieldColors.Add(zones.BreedingArea.TopCard.Color);
+        foreach (var t in zones.Tamers)
+            fieldColors.Add(t.Color);
+        // 여러 색 카드는 두 번째 색도 그 카드의 색으로 친다
+        foreach (var c in zones.BattleArea.Select(d => d.TopCard).Concat(zones.Tamers).Append(zones.BreedingArea?.TopCard))
+        {
+            if (c?.SecondaryColor is CardColor second)
+                fieldColors.Add(second);
+        }
+
+        return option.AllColors.Where(c => !fieldColors.Contains(c)).ToList();
+    }
+
+    private static string ColorName(CardColor color) => color switch
+    {
+        CardColor.Red => "레드",
+        CardColor.Blue => "블루",
+        CardColor.Yellow => "옐로",
+        CardColor.Green => "그린",
+        CardColor.Black => "블랙",
+        CardColor.Purple => "퍼플",
+        CardColor.White => "화이트",
+        _ => color.ToString()
+    };
 
     // 2. 진화 유효성 검사 (명세서 기본 시그니처 유지)
     public static ActionResult ValidateEvolution(CardInstance? target, CardData evoCard)
@@ -73,6 +115,9 @@ public static class ActionValidator
 
         if (state.CurrentPhase != Phase.Main)
             return ActionResult.Fail("메인 페이즈에만 진화할 수 있습니다.");
+
+        if (state.BlitzAttacker != null && state.MemoryGauge < 0)
+            return ActionResult.Fail("지금은 ≪진격≫ 어택이나 턴 종료만 할 수 있습니다.");
 
         if (target != null && !state.Player.BattleArea.Contains(target) && !ReferenceEquals(state.Player.BreedingArea, target))
             return ActionResult.Fail("필드에 없는 디지몬은 진화시킬 수 없습니다.");
@@ -108,11 +153,14 @@ public static class ActionValidator
         if (attacker.IsSuspended)
             return ActionResult.Fail("이미 레스트(Rest) 상태인 디지몬은 공격할 수 없습니다.");
 
-        if (attacker.TurnPlayed == state.CurrentTurn)
+        if (attacker.TurnPlayed == state.CurrentTurn && !CardScripts.HasKeyword(attacker, Keyword.Rush))
             return ActionResult.Fail("이번 턴에 등장한 디지몬은 소환 멀미로 인해 공격할 수 없습니다. (진화한 경우에도 등장 턴에는 공격 불가)");
 
         if (EffectRules.IsAttackLocked(state, attacker))
             return ActionResult.Fail("이 디지몬은 카드 효과로 지금은 어택할 수 없습니다.");
+
+        if (state.BlitzAttacker != null && !ReferenceEquals(state.BlitzAttacker, attacker))
+            return ActionResult.Fail($"≪진격≫으로는 [{state.BlitzAttacker.TopCard.Name}]만 어택할 수 있습니다.");
 
         if (defenderTarget != null && !defenderTarget.IsSuspended)
             return ActionResult.Fail("상대의 스탠드(Active) 상태 디지몬은 공격할 수 없습니다.");

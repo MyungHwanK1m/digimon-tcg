@@ -108,6 +108,9 @@ public class GameState
     // AI 턴이 플레이어의 블록 선택을 기다리며 멈춰 있는 상태 (null = 대기 없음)
     public PendingBlockDecision? PendingBlock { get; set; }
 
+    // ≪진격≫으로 어택할 수 있게 된 내 디지몬 — 메모리가 상대 쪽이어도 턴이 끝나지 않고 이 디지몬의 어택 1번만 할 수 있다
+    public CardInstance? BlitzAttacker { get; set; }
+
     public PlayerZones Player { get; set; } = new PlayerZones();
     public PlayerZones DummyOpponent { get; set; } = new PlayerZones();
     public string OpponentDeckName { get; set; } = "🤖 자동 카운터 덱";

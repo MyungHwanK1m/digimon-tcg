@@ -63,6 +63,7 @@ public partial class MainWindow : Window
         _catalogService = new CardCatalogService();
         _gameState = new GameState();
         _engine = new GoldfishEngine(_gameState) { PlayerChoosesBlocks = true };
+        _engine.PlayerChoices = new WpfChoiceProvider(this);   // ≪방벽≫ · ≪회피≫ · ≪돌진≫ · ≪연계≫ 같은 "~할 수 있다" 선택
 
         // 기본 추천 1번 덱(ST-1 가이아 레드 + 오메가몬) 로드 및 백그라운드 대련 상태 준비
         var (st1Main, st1Digitama) = StarterDecks.CreateSt1GaiaRedPreset();

@@ -6,6 +6,12 @@ public class CardData
     public string Name { get; set; } = string.Empty;                // 예: "아구몬"
     public CardType Type { get; set; }
     public CardColor Color { get; set; }
+    public CardColor? SecondaryColor { get; set; }                  // 여러 색 카드의 두 번째 색 (없으면 null)
+
+    /// <summary>카드의 모든 색 (여러 색 카드면 2개)</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<CardColor> AllColors =>
+        SecondaryColor is CardColor second && second != Color ? new[] { Color, second } : new[] { Color };
     public int Level { get; set; }                                  // Lv.2 ~ Lv.7 ( 테이머/옵션은 0 )
     public int PlayCost { get; set; }                               // 등장 코스트
     public int EvoCost { get; set; }                                // 진화 코스트

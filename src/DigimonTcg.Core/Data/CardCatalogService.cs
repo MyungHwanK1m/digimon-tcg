@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
 namespace DigimonTcg.Core.Data;
@@ -84,6 +85,10 @@ public class CardCatalogService
                     var merged = loaded
                         .Where(c => !c.CardId.EndsWith("B", StringComparison.Ordinal))
                         .ToDictionary(c => c.CardId);
+
+                    // 저장된 API 카드의 키워드 수치를 현재 키워드 사전으로 다시 계산 (사전이 바뀌어도 다시 받지 않아도 되도록)
+                    foreach (var c in merged.Values)
+                        KeywordDictionary.ApplyDataKeywords(c);
 
                     foreach (var def in defaultCards)
                     {
@@ -396,7 +401,7 @@ public class CardCatalogService
         string sourceEffect = Str(e, "source_effect") ?? Str(e, "soureeffect") ?? string.Empty;
         var color = ParseCardColor(Str(e, "color"));
 
-        return new CardData
+        var card = new CardData
         {
             CardId = id,
             Name = name,
@@ -407,16 +412,16 @@ public class CardCatalogService
             EvoCost = Int(e, "evolution_cost") ?? 0,
             EvoRequirementLevel = Int(e, "evolution_level") ?? Math.Max(2, level - 1),
             EvoRequirementColor = Str(e, "evolution_color") is { } evoColor ? ParseCardColor(evoColor) : color,
+            SecondaryColor = Str(e, "color2") is { } color2 && !string.IsNullOrWhiteSpace(color2) ? ParseCardColor(color2) : null,
             DP = Int(e, "dp") ?? 0,
             EffectText = mainEffect,
             InheritedEffectText = sourceEffect,
-            // 효과 텍스트 맨 앞에 붙은 기본 키워드만 자동 인식 (조건부로 얻는 키워드는 제외)
-            IsBlocker = StartsWithKeyword(mainEffect, "Blocker"),
-            SecurityAttackBonus = LeadingSecurityAttack(mainEffect),
-            InheritedSecurityAttackBonus = LeadingSecurityAttack(sourceEffect),
             ImageUrl = $"https://images.digimoncard.io/images/cards/{id}.jpg",
             Rarity = NormalizeRarity(Str(e, "rarity"))
         };
+        // 키워드만 있는 절의 ≪블로커≫ · ≪시큐리티 어택 ±N≫ (조건부로 얻는 키워드는 제외) — 효과 엔진의 키워드 사전 기준
+        KeywordDictionary.ApplyDataKeywords(card);
+        return card;
     }
 
     /// <summary>API 등급 표기(c, u, r, sr, sec, p, 대소문자 혼용)를 C / U / R / SR / SEC / P 로 통일</summary>
@@ -431,17 +436,6 @@ public class CardCatalogService
     private static int? Int(JsonElement e, string key) =>
         e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int n) ? n : null;
 
-    private static bool StartsWithKeyword(string text, string keyword)
-    {
-        string t = text.TrimStart();
-        return t.StartsWith($"<{keyword}>", StringComparison.OrdinalIgnoreCase) || t.StartsWith($"＜{keyword}＞", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static int LeadingSecurityAttack(string text)
-    {
-        var m = System.Text.RegularExpressions.Regex.Match(text.TrimStart(), @"^[<＜]Security A(?:ttack|\.)\s*\+(\d)[>＞]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        return m.Success ? int.Parse(m.Groups[1].Value) : 0;
-    }
 
 
     /// <summary>앱 시작 시 카드 뒷면 이미지 등을 찾기 위한 data/images 경로 (카탈로그를 읽지 않음)</summary>

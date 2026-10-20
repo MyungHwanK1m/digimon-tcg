@@ -545,6 +545,7 @@ public class RuleEngineTests
         state.DummyOpponent.BattleArea.Add(enemyBlocker);
         state.DummyOpponent.SecurityStack.Add(cards["ST1-02"]);
         state.Player.Hand.Add(cards["ST2-14"]);
+        state.Player.Tamers.Add(cards["ST2-12"]);                                // 옵션 색 조건: 블루 테이머
 
         engine.PlayCard(cards["ST2-14"], enemyBlocker);   // 소로 블루 (코스트 2) → 메모리 1
         Assert.False(EffectRules.CanBlock(state, enemyBlocker));
@@ -561,6 +562,7 @@ public class RuleEngineTests
         state.MemoryGauge = 7;
         var enemy = new CardInstance(cards["ST2-08"], currentTurn: 1);    // DP 7000
         state.DummyOpponent.BattleArea.Add(enemy);
+        state.Player.Tamers.Add(cards["ST3-12"]);                         // 옵션 색 조건: 옐로 테이머
         state.Player.Hand.Add(cards["ST3-16"]);
 
         engine.PlayCard(cards["ST3-16"], enemy);
@@ -580,6 +582,7 @@ public class RuleEngineTests
         var lv3 = new CardInstance(cards["ST2-02"], currentTurn: 1);      // 진화원 없음 → 퇴화 불가
         state.DummyOpponent.BattleArea.Add(lv3);
         state.Player.Hand.Add(cards["ST5-15"]);
+        state.Player.Tamers.Add(cards["ST5-14"]);                         // 옵션 색 조건: 블랙 테이머
 
         engine.PlayCard(cards["ST5-15"]);
 

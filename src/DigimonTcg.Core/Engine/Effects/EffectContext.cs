@@ -105,8 +105,10 @@ public sealed class EffectContext
         return inst;
     }
 
-    public void DeleteEnemy(CardInstance target) => Engine.DeleteFrom(Enemy, target);
-    public void DeleteOwn(CardInstance target) => Engine.DeleteFrom(Owner, target);
+    /// <summary>상대 디지몬을 효과로 소멸시킨다 (≪회피≫로 막으면 false)</summary>
+    public bool DeleteEnemy(CardInstance target) => Engine.DeleteFrom(Enemy, target);
+    /// <summary>자신의 디지몬을 소멸시킨다 (코스트 — ≪회피≫ 등으로 막을 수 없음)</summary>
+    public void DeleteOwn(CardInstance target) => Engine.DeleteFrom(Owner, target, GoldfishEngine.DeletionCause.Cost);
 
     /// <summary>상대 디지몬을 패로 되돌린다 (진화원은 트래시)</summary>
     public void BounceEnemy(CardInstance target) => Engine.ReturnToHand(Enemy, target);

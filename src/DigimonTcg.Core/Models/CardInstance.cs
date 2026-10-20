@@ -14,6 +14,8 @@ public class CardInstance
     public int TurnPlayed { get; set; }            // 등장한 턴 (소환 멀미 체크용)
     public int TemporaryDpBonus { get; set; }      // 이번 턴 스킬/옵션 임시 DP 버프
     public int TemporarySecurityAttackBonus { get; set; } // 이번 턴 스킬/옵션 임시 시큐리티 어택 버프
+    public int AttackDpBonus { get; set; }         // "이 어택 동안" DP (≪연계≫) — 어택이 끝나면 0
+    public int AttackSecurityAttackBonus { get; set; } // "이 어택 동안" 시큐리티 어택 (≪연계≫)
     public int TamerDpBonus { get; set; }          // 필드 테이머 지속 DP 버프
     public int TamerSecurityAttackBonus { get; set; } // 필드 테이머 지속 시큐리티 어택 버프
     public int EffectDpBonus { get; set; }         // 카드 지속 효과(진화원 조건부 DP 등) — 엔진이 매번 다시 계산
@@ -89,7 +91,7 @@ public class CardInstance
         IsOwnersTurn ? EvolutionSources.Sum(s => s.InheritedDpBonus) : 0;
 
     public int GetTotalBonusDP() =>
-        GetInheritedDpBonus() + TamerDpBonus + TemporaryDpBonus + EffectDpBonus;
+        GetInheritedDpBonus() + TamerDpBonus + TemporaryDpBonus + EffectDpBonus + AttackDpBonus;
 
     public int GetCurrentDP() =>
         Math.Max(0, TopCard.DP + GetTotalBonusDP());
@@ -98,7 +100,7 @@ public class CardInstance
         EvolutionSources.Sum(s => s.InheritedSecurityAttackBonus);
 
     public int GetTotalBonusSecurityAttack() =>
-        TopCard.SecurityAttackBonus + GetInheritedSecurityAttackBonus() + TamerSecurityAttackBonus + TemporarySecurityAttackBonus + EffectSecurityAttackBonus;
+        TopCard.SecurityAttackBonus + GetInheritedSecurityAttackBonus() + TamerSecurityAttackBonus + TemporarySecurityAttackBonus + EffectSecurityAttackBonus + AttackSecurityAttackBonus;
 
     public int GetSecurityAttackCount() =>
         Math.Max(0, 1 + GetTotalBonusSecurityAttack());

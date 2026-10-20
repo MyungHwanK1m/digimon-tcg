@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using DigimonTcg.Core.Data;
 using DigimonTcg.Core.Models;
 
 namespace DigimonTcg.Core.Engine.Effects;
@@ -19,22 +21,36 @@ public static class CardScripts
         return builder.Scripts;
     });
 
+    // API 카드(내장 카드가 아닌 카드)의 자동 스크립트 — 키워드 사전이 효과 문장에서 만든다
+    private static readonly ConcurrentDictionary<string, CardScript?> Generated = new(StringComparer.Ordinal);
+
+    /// <summary>사람이 쓴 스크립트 (내장 카드)</summary>
     public static CardScript? Get(string cardId) =>
         Registry.Value.TryGetValue(cardId, out var script) ? script : null;
+
+    /// <summary>카드의 효과 정의: 사람이 쓴 스크립트 → (내장 카드가 아니면) 키워드 사전이 만든 스크립트</summary>
+    public static CardScript? For(CardData card)
+    {
+        if (Registry.Value.TryGetValue(card.CardId, out var script))
+            return script;
+        if (StarterDecks.IsBuiltInCard(card.CardId))
+            return null;
+        return Generated.GetOrAdd(card.CardId, _ => KeywordDictionary.GenerateScript(card));
+    }
 
     public static IReadOnlyCollection<CardScript> All => Registry.Value.Values;
 
     /// <summary>디지몬이 키워드를 가졌는지 (맨 위 카드의 키워드 + 진화원 효과로 얻는 키워드)</summary>
     public static bool HasKeyword(CardInstance digimon, Keyword keyword) =>
-        (Get(digimon.TopCard.CardId)?.Keywords.Contains(keyword) ?? false)
-        || digimon.EvolutionSources.Any(s => Get(s.CardId)?.InheritedKeywords.Contains(keyword) ?? false);
+        (For(digimon.TopCard)?.Keywords.Contains(keyword) ?? false)
+        || digimon.EvolutionSources.Any(s => For(s)?.InheritedKeywords.Contains(keyword) ?? false);
 
     /// <summary>옵션 [메인] 효과를 쓸 때 고를 대상 종류</summary>
-    public static TargetKind MainTargetOf(CardData card) => Get(card.CardId)?.MainTarget ?? TargetKind.None;
+    public static TargetKind MainTargetOf(CardData card) => For(card)?.MainTarget ?? TargetKind.None;
 
     /// <summary>카드에 적힌 다른 진화 조건을 만족하는지 (예: 오메가몬은 Lv.6 레드 · 블루 디지몬에서 진화)</summary>
     public static bool MeetsAlternativeEvolution(CardData evoCard, CardInstance target) =>
-        Get(evoCard.CardId)?.AlternativeEvolution?.Invoke(target) ?? false;
+        For(evoCard)?.AlternativeEvolution?.Invoke(target) ?? false;
 }
 
 /// <summary>카드 스크립트를 읽기 쉽게 등록하는 도구</summary>

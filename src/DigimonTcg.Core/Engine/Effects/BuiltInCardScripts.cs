@@ -814,13 +814,16 @@ internal static class BuiltInCardScripts
                 c.Log($"👑 [어택 시] 오메가몬 Alter-S: 진화원 [{lv6.Name}]을(를) 패로 되돌려 이 턴 동안 블록당하지 않습니다!");
             });
 
-        // 오메가몬(BT5): Lv.6 레드 · 블루에서 진화 / [진화 시] 이 디지몬을 액티브로
+        // 오메가몬(BT5): Lv.6 레드 · 블루에서 진화 / [진화 시] 이 디지몬을 액티브로 → [진화 시] ≪진격≫
+        // (액티브가 된 뒤에 ≪진격≫을 처리해야 어택할 수 있다. 상대 효과에서 지키는 [서로의 턴] 효과는 아직 문장만)
         b.Card("BT5-086")
             .EvolvesFrom(t => t.TopCard.Color is CardColor.Red or CardColor.Blue)
             .WhenDigivolving(c =>
             {
                 c.Self!.IsSuspended = false;
                 c.Log("👑 [진화 시] 오메가몬: 액티브 상태가 됩니다");
+                if (c.Engine.TryGrantBlitz(c.Owner, c.Self))
+                    c.Log("👑 [진화 시] 오메가몬: ≪진격≫ — 상대 쪽 메모리가 1 이상이어서 이 디지몬으로 어택할 수 있습니다");
             });
     }
 }
