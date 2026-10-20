@@ -44,6 +44,9 @@ public sealed class EffectContext
     /// <summary>플레이어가 UI에서 고른 대상 (옵션 [메인])</summary>
     public CardInstance? ChosenTarget { get; }
 
+    /// <summary>시점을 일으킨 카드 (예: 레스트한 테이머 — AllyTamerSuspended)</summary>
+    public CardData? TriggerCard { get; internal set; }
+
     /// <summary>GameState.TurnSequence — "다음 상대의 턴 종료 시까지" = TurnSequence + 1</summary>
     public int TurnSequence => State.TurnSequence;
 
@@ -66,6 +69,9 @@ public sealed class EffectContext
 
     /// <summary>앞 문장에서 고른 대상 ("that Digimon" · "it"이 가리키는 디지몬)</summary>
     public List<CardInstance> LastTargets { get; set; } = new();
+
+    /// <summary>앞 문장이 실제로 처리되었는지 (조건 불충족 · "~할 수 있다" 거절 · 비용 미지불이면 false) — "If you do, ~"</summary>
+    public bool LastStepResolved { get; set; } = true;
 
     /// <summary>[시큐리티] 결과를 한 번에 정한다</summary>
     public void SecurityResult(string detail, string summary, bool attackerRemoved = false, bool returnToHand = false)

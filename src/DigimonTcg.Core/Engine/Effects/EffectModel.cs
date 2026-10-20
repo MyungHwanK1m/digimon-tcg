@@ -34,6 +34,17 @@ public enum EffectTrigger
     OpponentDigimonSuspended,       // 상대의 디지몬이 레스트 상태가 되었을 때 (Other)
     WonBattle,                      // 이 디지몬이 배틀에서 이겼을 때 (상대만 소멸, 어택 · 블록 모두)
     WhenMoving,                     // [이동 시] 육성 에어리어에서 배틀 에어리어로 이동했을 때
+    ActivateMain,                   // 테이머 · 디지몬의 [메인] 기동 효과 (플레이어가 메인 페이즈에 사용 — ≪디지버스트≫ 포함)
+    AllyTamerSuspended,             // 자신의 테이머가 레스트 상태가 되었을 때 (EffectContext.TriggerCard = 그 테이머)
+    ThisDigimonUnsuspendedInMain,   // 이 디지몬이 (자신의) 메인 페이즈에 액티브 상태가 되었을 때
+    ThisDigimonUnsuspendedInUnsuspendPhase, // 이 디지몬이 (자신의) 액티브 페이즈에 액티브 상태가 되었을 때
+    OpponentDigimonPlayed,          // 상대의 디지몬이 등장했을 때 (Other = 등장한 디지몬)
+    AllyOptionUsed,                 // 자신이 옵션 카드를 사용했을 때 (TriggerCard = 그 옵션)
+    OpponentOptionUsed,             // 상대가 옵션 카드를 사용했을 때 (TriggerCard = 그 옵션)
+    DigiBurstTrashedThis,           // ≪디지버스트≫ 비용으로 이 카드(진화원)가 트래시로 갔을 때 (진화원 효과)
+    AllyDigiBurst,                  // 자신의 디지몬이 ≪디지버스트≫를 발휘했을 때 (Other = 그 디지몬)
+    OpponentTamerPlayed,            // 상대가 테이머를 등장시켰을 때 (TriggerCard = 그 테이머)
+    OpponentTamerSuspended,         // 상대의 테이머가 레스트 상태가 되었을 때 (TriggerCard = 그 테이머)
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>
@@ -48,6 +59,10 @@ public enum Keyword
     Retaliation,             // ≪길동무≫: 배틀에서 소멸하면 상대 디지몬도 소멸
     Reboot,                  // ≪재기동≫: 상대의 액티브 페이즈에도 액티브
     UnblockableBySourceless, // 진화원을 갖지 않은 상대 디지몬에게는 블록당하지 않는다 (원뿔몬 BT1-034)
+    CannotAttack,            // 이 디지몬은 어택할 수 없다 (지속 효과 "[Your Turn] This Digimon can't attack")
+    Unblockable,             // 이 디지몬은 블록당하지 않는다
+    BlockOpponentEvoCostReduction, // 상대는 진화 코스트를 줄일 수 없다 ("Your opponent can't reduce digivolution costs")
+    CannotBeAttacked,        // 이 디지몬은 어택당하지 않는다
     NegateSecurityOptions,   // 체크한 옵션 카드의 [시큐리티] 효과는 발휘하지 않는다 (워그레이몬 BT1-025)
     Rush,                    // ≪속공≫: 등장한 턴에도 어택할 수 있다
     Raid,                    // ≪돌진≫: 어택했을 때 어택 대상을 가장 DP가 높은 액티브 상태의 상대 디지몬 1마리로 바꿀 수 있다
@@ -65,6 +80,10 @@ public enum StaticStat
     AllyDigimonDp,      // 테이머: 자신의 디지몬 전부의 DP
     SecurityDigimonDp,  // 테이머: 자신의 시큐리티 디지몬의 DP
     Keyword,            // 이 디지몬이 키워드를 얻는다 (StaticEffect.Keyword, 값이 0이 아니면 얻은 상태 — 조건부 키워드)
+    EnemySecurityDigimonDp, // 상대의 시큐리티 디지몬의 DP (예: "All of your opponent's Security Digimon get -1000 DP")
+    AllyKeyword,        // 자신의 디지몬 전부(Subject 조건)가 키워드를 얻는다 (StaticEffect.Keyword) — "All of your level 4 or lower Digimon gain ＜Jamming＞"
+    AllySecurityAttack, // 자신의 디지몬 전부(Subject 조건)의 ≪시큐리티 어택 ±N≫
+    EnemySecurityAttack, // 상대의 디지몬 전부(Subject 조건)의 ≪시큐리티 어택 ±N≫
 }
 
 /// <summary>옵션 [메인] 효과를 쓸 때 UI가 고르게 할 대상</summary>
@@ -81,6 +100,9 @@ public sealed record CardEffect(EffectTrigger Trigger, EffectSource Source, Acti
 
     /// <summary>[턴에 1회] — 효과를 가진 디지몬마다 카드 번호 기준으로 기록 (CardInstance.UsedOncePerTurn)</summary>
     public bool OncePerTurn { get; init; }
+
+    /// <summary>[턴에 2회]</summary>
+    public bool TwicePerTurn { get; init; }
 }
 
 /// <summary>지속 효과 한 절 — 필드 상태가 바뀔 때마다 엔진이 다시 계산한다</summary>
@@ -88,6 +110,9 @@ public sealed record StaticEffect(StaticStat Stat, EffectSource Source, Func<Sta
 {
     /// <summary>Stat == Keyword일 때 얻는 키워드</summary>
     public Keyword? Keyword { get; init; }
+
+    /// <summary>AllyDigimonDp: 효과를 받는 디지몬 조건 (예: "All of your black Digimon") — null이면 전부</summary>
+    public Func<CardInstance, bool>? Subject { get; init; }
 }
 
 /// <summary>지속 효과 계산에 필요한 정보</summary>
@@ -127,10 +152,16 @@ public sealed class CardScript
     /// <summary>카드에 적힌 다른 진화 조건 (예: 오메가몬 "Lv.6 레드 · 블루에서 진화") — 진화 대상 디지몬을 받아 진화할 수 있는지</summary>
     public Func<CardInstance, bool>? AlternativeEvolution { get; set; }
 
+    /// <summary>"Your [Shoutmon] can digivolve into this card in your hand for a memory cost of 4, ignoring this card's digivolution requirements" — 진화 조건을 무시하는 다른 진화 (대상 조건, 코스트)</summary>
+    public List<(Func<CardInstance, bool> From, int Cost)> SpecialEvolutions { get; } = new();
+
     public StartOfTurnMemoryEffect? StartOfTurnMemory { get; set; }
 
     /// <summary>ACE ≪오버플로우 -N≫ — 이 카드가 배틀 에어리어 · 진화원에서 다른 곳으로 가면 주인의 메모리 -N (0이면 없음)</summary>
     public int OverflowMemory { get; set; }
+
+    /// <summary>≪디지섭션 -N≫ — 패에서 이 카드로 진화할 때 자신의 다른 디지몬 1마리를 레스트시켜 진화 코스트 -N (0이면 없음)</summary>
+    public int DigisorptionReduction { get; set; }
 
     /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
     public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }

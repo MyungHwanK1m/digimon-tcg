@@ -117,14 +117,23 @@ public class RuleEngineTests
     [Fact]
     public void CardCatalogService_ShouldFilterByColorLevelAndKeyword()
     {
-        var catalog = new CardCatalogService();
-        var redLv6 = catalog.SearchCards(color: CardColor.Red, level: 6);
-        Assert.NotEmpty(redLv6);
-        Assert.Contains(redLv6, c => c.CardId == "ST1-11" && c.Name == "워그레이몬");
+        // 실제 data/cards_cache.json을 열거나 다시 쓰지 않도록 임시 폴더 (내장 카드만으로 검색)
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dtcg_test_" + System.Guid.NewGuid().ToString("N"));
+        try
+        {
+            var catalog = new CardCatalogService(dir);
+            var redLv6 = catalog.SearchCards(color: CardColor.Red, level: 6);
+            Assert.NotEmpty(redLv6);
+            Assert.Contains(redLv6, c => c.CardId == "ST1-11" && c.Name == "워그레이몬");
 
-        var blueCards = catalog.SearchCards(color: CardColor.Blue);
-        Assert.NotEmpty(blueCards);
-        Assert.All(blueCards, c => Assert.Equal(CardColor.Blue, c.Color));
+            var blueCards = catalog.SearchCards(color: CardColor.Blue);
+            Assert.NotEmpty(blueCards);
+            Assert.All(blueCards, c => Assert.Equal(CardColor.Blue, c.Color));
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, true); } catch { }
+        }
     }
 
     [Fact]

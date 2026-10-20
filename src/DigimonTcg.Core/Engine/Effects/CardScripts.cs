@@ -56,6 +56,10 @@ public static class CardScripts
     /// <summary>카드에 적힌 다른 진화 조건을 만족하는지 (예: 오메가몬은 Lv.6 레드 · 블루 디지몬에서 진화)</summary>
     public static bool MeetsAlternativeEvolution(CardData evoCard, CardInstance target) =>
         For(evoCard)?.AlternativeEvolution?.Invoke(target) ?? false;
+
+    /// <summary>진화 조건을 무시하는 다른 진화로 target에서 evoCard로 진화할 수 있으면 그 코스트 (여럿이면 가장 싼 것), 없으면 null</summary>
+    public static int? SpecialEvolutionCost(CardData evoCard, CardInstance target) =>
+        For(evoCard)?.SpecialEvolutions.Where(s => s.From(target)).Select(s => (int?)s.Cost).Min();
 }
 
 /// <summary>카드 스크립트를 읽기 쉽게 등록하는 도구</summary>
@@ -76,16 +80,16 @@ public sealed class CardScriptDefinition
     private readonly CardScript _script;
     internal CardScriptDefinition(CardScript script) => _script = script;
 
-    public CardScriptDefinition On(EffectTrigger trigger, Action<EffectContext> resolve, Func<EffectContext, bool>? when = null, bool oncePerTurn = false)
+    public CardScriptDefinition On(EffectTrigger trigger, Action<EffectContext> resolve, Func<EffectContext, bool>? when = null, bool oncePerTurn = false, bool twicePerTurn = false)
     {
-        _script.Effects.Add(new CardEffect(trigger, EffectSource.Main, resolve) { Condition = when, OncePerTurn = oncePerTurn });
+        _script.Effects.Add(new CardEffect(trigger, EffectSource.Main, resolve) { Condition = when, OncePerTurn = oncePerTurn, TwicePerTurn = twicePerTurn });
         return this;
     }
 
     /// <summary>진화원 효과</summary>
-    public CardScriptDefinition Inherited(EffectTrigger trigger, Action<EffectContext> resolve, Func<EffectContext, bool>? when = null, bool oncePerTurn = false)
+    public CardScriptDefinition Inherited(EffectTrigger trigger, Action<EffectContext> resolve, Func<EffectContext, bool>? when = null, bool oncePerTurn = false, bool twicePerTurn = false)
     {
-        _script.Effects.Add(new CardEffect(trigger, EffectSource.Inherited, resolve) { Condition = when, OncePerTurn = oncePerTurn });
+        _script.Effects.Add(new CardEffect(trigger, EffectSource.Inherited, resolve) { Condition = when, OncePerTurn = oncePerTurn, TwicePerTurn = twicePerTurn });
         return this;
     }
 
@@ -102,9 +106,9 @@ public sealed class CardScriptDefinition
         return On(EffectTrigger.Main, resolve);
     }
 
-    public CardScriptDefinition Static(StaticStat stat, EffectSource source, Func<StaticContext, int> value, Keyword? keyword = null)
+    public CardScriptDefinition Static(StaticStat stat, EffectSource source, Func<StaticContext, int> value, Keyword? keyword = null, Func<CardInstance, bool>? subject = null)
     {
-        _script.Statics.Add(new StaticEffect(stat, source, value) { Keyword = keyword });
+        _script.Statics.Add(new StaticEffect(stat, source, value) { Keyword = keyword, Subject = subject });
         return this;
     }
 
@@ -137,9 +141,21 @@ public sealed class CardScriptDefinition
         return this;
     }
 
+    public CardScriptDefinition SpecialEvolution(Func<CardInstance, bool> from, int cost)
+    {
+        _script.SpecialEvolutions.Add((from, cost));
+        return this;
+    }
+
     public CardScriptDefinition Overflow(int memory)
     {
         _script.OverflowMemory = memory;
+        return this;
+    }
+
+    public CardScriptDefinition Digisorption(int reduction)
+    {
+        _script.DigisorptionReduction = reduction;
         return this;
     }
 

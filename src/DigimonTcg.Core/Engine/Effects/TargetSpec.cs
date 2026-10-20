@@ -28,7 +28,7 @@ public sealed class TargetSpec
     public bool UpTo { get; private init; }
 
     private static readonly Regex Head = new(
-        @"^(?:(?<count>\d+|all|up to \d+) of )?(?<side>your opponent's|your|their|its owner's)\s+(?<adj>(?:(?:unsuspended|suspended|(?:lowest|highest) (?:level|DP|play cost)|level \d+(?: or (?:lower|higher|more|less))?|\[[^\]]+\](?: trait)?)\s+)*)(?<kind>Digimon or Tamers|Digimon|Security Digimon)(?<rest>.*)$",
+        @"^(?:(?<count>\d+|all|up to \d+) of )?(?<side>your opponent's|your|their|its owner's)\s+(?<other>other\s+)?(?<adj>(?:(?:unsuspended|suspended|(?:lowest|highest) (?:level|DP|play cost)|level \d+(?: or (?:lower|higher|more|less))?|\[[^\]]+\](?: trait)?|(?:red|blue|yellow|green|black|purple|white)(?: (?:or|and/or) (?:red|blue|yellow|green|black|purple|white))*)\s+)*)(?<kind>Digimon or Tamers|Digimon|Security Digimon)(?<rest>.*)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>대상 구절을 읽는다. 읽지 못하면 null</summary>
@@ -37,7 +37,7 @@ public sealed class TargetSpec
         phrase = phrase.Trim().TrimEnd('.').Trim();
         if (Regex.IsMatch(phrase, @"^this Digimon$", RegexOptions.IgnoreCase))
             return new TargetSpec { IsThis = true, Text = phrase };
-        if (Regex.IsMatch(phrase, @"^(?:it|that Digimon|those Digimon|them|that card)$", RegexOptions.IgnoreCase))
+        if (Regex.IsMatch(phrase, @"^(?:it|they|that Digimon|those Digimon|them|that card|the Digimon)$", RegexOptions.IgnoreCase))
             return new TargetSpec { IsThat = true, Count = 0, Text = phrase };
 
         var m = Head.Match(phrase);
@@ -53,6 +53,8 @@ public sealed class TargetSpec
             UpTo = count.StartsWith("up to", StringComparison.Ordinal),
             Text = phrase,
         };
+        if (m.Groups["other"].Success)
+            spec.ContextFilters.Add((c, d) => !ReferenceEquals(d, c.Self));   // "your other Digimon"
         // "your Digimon" (수 없음) = 자신의 디지몬 전부
         if (!countGiven && side is "its owner's")
             return null;
@@ -77,6 +79,11 @@ public sealed class TargetSpec
                 spec.Filters.Add(word.EndsWith("trait") ? d => HasTrait(d.TopCard, x) : d => NameHas(d.TopCard, x) || HasTrait(d.TopCard, x));
             }
         }
+        // 색: "your blue Digimon" · "red or black Digimon"
+        var colors = Regex.Matches(Regex.Replace(m.Groups["adj"].Value, @"\[[^\]]*\]", ""), @"\b(red|blue|yellow|green|black|purple|white)\b", RegexOptions.IgnoreCase)
+            .Select(x => Enum.Parse<CardColor>(x.Value, ignoreCase: true)).ToList();
+        if (colors.Count > 0)
+            spec.Filters.Add(d => d.TopCard.AllColors.Any(colors.Contains));
 
         string rest = m.Groups["rest"].Value.Trim();
         if (!ParseFilters(rest, spec))
@@ -161,11 +168,25 @@ public sealed class TargetSpec
             {
                 spec.ContextFilters.Add((c, d) => c.Self != null && d.GetCurrentDP() <= c.Self.GetCurrentDP());
             }
-            else if ((m = Regex.Match(rest, @"^(?<neg>with|without|that (?:has|have)|that (?:doesn't|don't) have) ＜(?<k>[A-Za-z .]+?)\s*＞", RegexOptions.IgnoreCase)).Success
+            else if ((m = Regex.Match(rest, @"^(?<neg>with|without|that (?:has|have)|that (?:doesn't|don't) have) ＜(?<k>[A-Za-z .]+?)\s*＞(?!\s*or\s*＜)", RegexOptions.IgnoreCase)).Success
                      && KeywordNames.TryGetValue(m.Groups["k"].Value.Trim(), out var kw))
             {
                 bool without = m.Groups["neg"].Value.StartsWith("without", StringComparison.OrdinalIgnoreCase) || m.Groups["neg"].Value.Contains("n't");
                 spec.Filters.Add(d => (kw == Keyword.Blocker ? d.HasBlocker : CardScripts.HasKeyword(d, kw)) != without);
+            }
+            else if ((m = Regex.Match(rest, @"^(?<neg>with|without|that (?:has|have)|that (?:doesn't|don't) have) ＜(?<k>[A-Za-z .\-]+?)\s*＞(?:\s*or\s*＜(?<k2>[A-Za-z .\-]+?)\s*＞)?", RegexOptions.IgnoreCase)).Success)
+            {
+                // 동작 키워드(≪디지버스트≫ · ≪블리츠≫ …)나 "＜A＞ or ＜B＞": 맨 위 카드 · 진화원 효과 문장에 그 키워드가 있는지
+                bool without = m.Groups["neg"].Value.StartsWith("without", StringComparison.OrdinalIgnoreCase) || m.Groups["neg"].Value.Contains("n't");
+                var ks = new[] { m.Groups["k"].Value.Trim(), m.Groups["k2"].Value.Trim() }.Where(k => k.Length > 0).ToList();
+                spec.Filters.Add(d => ks.Any(k => KeywordNames.TryGetValue(k, out var kk)
+                    ? (kk == Keyword.Blocker ? d.HasBlocker : CardScripts.HasKeyword(d, kk))
+                    : d.GetEvolutionStackBottomUp().Append(d.TopCard).Any(x => x.EffectText.Contains($"＜{k}", StringComparison.OrdinalIgnoreCase))) != without);
+            }
+            else if ((m = Regex.Match(rest, @"^with an? \[(?<t>On Play|On Deletion|When Digivolving|When Attacking|Security|Main)\] effect", RegexOptions.IgnoreCase)).Success)
+            {
+                string t = m.Groups["t"].Value;
+                spec.Filters.Add(d => d.TopCard.EffectText.Contains($"[{t}]", StringComparison.OrdinalIgnoreCase));
             }
             else if ((m = Regex.Match(rest, @"^with (?:as much or less|less than or equal to|DP less than or equal to) (?:DP )?(?:as|to) this Digimon(?:'s DP)?", RegexOptions.IgnoreCase)).Success)
             {

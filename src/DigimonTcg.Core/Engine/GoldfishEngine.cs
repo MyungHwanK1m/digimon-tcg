@@ -359,19 +359,23 @@ public partial class GoldfishEngine
         State.CurrentPhase = Phase.Active;
         State.TurnSequence++;
         State.Player.SuspendedTamers.Clear();
+        _usedMainAbilities.Clear();
         int awakened = 0;
+        var woke = new List<CardInstance>();
         foreach (var instance in AllInstances(State.Player))
         {
-            if (instance.IsSuspended)
+            if (instance.IsSuspended && !EffectRules.IsActive(instance.SkipUnsuspendUntil, State))   // "doesn't unsuspend during the next unsuspend phase"
             {
                 instance.IsSuspended = false;
                 awakened++;
+                woke.Add(instance);
             }
             ResetTurnScopedState(instance);
         }
         PruneExpiredBuffs();
         SetTurnOwner(playerTurn: true);
         Log($"액티브 페이즈 완료 (기상한 디지몬: {awakened}체)");
+        FireUnsuspendPhase(State.Player, woke);
         TriggerStartOfTurn(State.Player);
     }
 
@@ -522,6 +526,7 @@ public partial class GoldfishEngine
                 : $" [🎖️테이머 효과: {card.EffectText.Split('\n')[0]}]";
             Log($"테이머 등장: [{card.Name}] (코스트 {cost} 지불){effectSummary}");
             RunEffects(EffectTrigger.OnPlay, State.Player, null, card, includeInherited: false);
+            FireForSide(EffectTrigger.OpponentTamerPlayed, State.DummyOpponent, null, triggerCard: card);
             RecalculateFieldBuffs();
         }
         else if (card.Type == CardType.Option)
@@ -548,10 +553,11 @@ public partial class GoldfishEngine
         string prevName = target.TopCard.Name;
         int prevLevel = target.TopCard.Level;
 
+        int evoCost = ActionValidator.EvolutionCost(target, evoCard) - TryDigisorption(State.Player, target, evoCard, State.MemoryGauge);
         State.Player.Hand.Remove(evoCard);
         target.Evolve(evoCard);
-        State.MemoryGauge -= evoCard.EvoCost;
-        State.TotalMemorySpent += evoCard.EvoCost;
+        State.MemoryGauge -= evoCost;
+        State.TotalMemorySpent += evoCost;
         State.TotalEvolutionsCount++;
         RecalculateFieldBuffs();
 
@@ -572,7 +578,7 @@ public partial class GoldfishEngine
 
         var drawn = DrawCard();
         string drawText = drawn != null ? $"진화 보너스 드로우: [{drawn.Name}]" : "덱이 비어 진화 보너스 드로우 없음";
-        Log($"디지몬 진화: [{prevName}(Lv.{prevLevel})] -> [{evoCard.Name}(Lv.{evoCard.Level})] (코스트 {evoCard.EvoCost}, {drawText})");
+        Log($"디지몬 진화: [{prevName}(Lv.{prevLevel})] -> [{evoCard.Name}(Lv.{evoCard.Level})] (코스트 {evoCost}, {drawText})");
 
         CheckTurnEndAndAutoReset();
         return validation;
@@ -592,8 +598,8 @@ public partial class GoldfishEngine
         State.BlitzAttacker = null;
         _playerAttackRedirect = null;
         TriggerWhenAttackingEffects(attacker, defender);
-        FireForSide(EffectTrigger.OpponentDigimonAttacks, State.DummyOpponent, attacker);
-        FireForSide(EffectTrigger.AllyDigimonAttacks, State.Player, attacker);
+        FireForSide(EffectTrigger.OpponentDigimonAttacks, State.DummyOpponent, attacker, triggerCard: defender.TopCard);   // TriggerCard = 어택 대상 (플레이어면 null)
+        FireForSide(EffectTrigger.AllyDigimonAttacks, State.Player, attacker, triggerCard: defender.TopCard);
         if (_playerAttackRedirect is { } redirected && State.DummyOpponent.BattleArea.Contains(redirected)) defender = redirected;   // 상대 효과로 어택 대상 변경
         _playerAttackRedirect = null;
         defender = ApplyAttackKeywords(attacker, defender) ?? defender;
@@ -1066,9 +1072,11 @@ public partial class GoldfishEngine
         State.TurnSequence++;
         State.OpponentAttackedThisTurn = false;
         State.DummyOpponent.SuspendedTamers.Clear();
+        _usedMainAbilities.Clear();
+        var aiWoke = new List<CardInstance>();
         foreach (var d in AllInstances(State.DummyOpponent))
         {
-            d.IsSuspended = false;
+            if (d.IsSuspended && !EffectRules.IsActive(d.SkipUnsuspendUntil, State)) { d.IsSuspended = false; aiWoke.Add(d); }
             ResetTurnScopedState(d);
         }
         // 내 디지몬의 "이 턴 동안" 효과는 내 턴이 끝나면 사라진다
@@ -1079,7 +1087,7 @@ public partial class GoldfishEngine
             d.ActiveSkillBuffLabels.Clear();
         }
         // ≪재기동≫: 상대의 액티브 페이즈에 내 디지몬도 액티브가 된다
-        foreach (var d in State.Player.BattleArea.Where(d => d.IsSuspended && HasReboot(d)))
+        foreach (var d in State.Player.BattleArea.Where(d => d.IsSuspended && HasReboot(d) && !EffectRules.IsActive(d.SkipUnsuspendUntil, State)))
         {
             d.IsSuspended = false;
             Log($"[≪재기동≫] 내 [{d.TopCard.Name}]이(가) 상대의 액티브 페이즈에 액티브 상태가 되었습니다.");
@@ -1087,7 +1095,7 @@ public partial class GoldfishEngine
         PruneExpiredBuffs();
         SetTurnOwner(playerTurn: false);
         AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },
-            CaptureEffectLogs(() => TriggerStartOfTurn(State.DummyOpponent)));
+            CaptureEffectLogs(() => { FireUnsuspendPhase(State.DummyOpponent, aiWoke); TriggerStartOfTurn(State.DummyOpponent); }));
 
         // 2. AI 드로우 페이즈 (AI가 선공인 게임 첫 턴은 드로우 없음)
         //    공식 룰: 드로우 페이즈에 덱이 0장이라 드로우할 수 없으면 그 플레이어가 패배한다 (AI도 동일)
@@ -1142,7 +1150,7 @@ public partial class GoldfishEngine
             foreach (var fieldDigimon in AiEvolutionBases())
             {
                 var safeEvo = State.DummyOpponent.Hand
-                    .FirstOrDefault(c => c.EvoCost <= ctx.Memory && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
+                    .FirstOrDefault(c => ActionValidator.EvolutionCost(fieldDigimon, c) <= ctx.Memory && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
 
                 if (safeEvo != null)
                 {
@@ -1199,8 +1207,8 @@ public partial class GoldfishEngine
             var attackEffects = CaptureEffectLogs(() =>
             {
                 TriggerWhenAttackingEffects(aiAttacker, null);
-                FireForSide(EffectTrigger.OpponentDigimonAttacks, State.Player, aiAttacker);
-                FireForSide(EffectTrigger.AllyDigimonAttacks, State.DummyOpponent, aiAttacker);
+                FireForSide(EffectTrigger.OpponentDigimonAttacks, State.Player, aiAttacker, triggerCard: ctx.AttackTarget?.TopCard);
+                FireForSide(EffectTrigger.AllyDigimonAttacks, State.DummyOpponent, aiAttacker, triggerCard: ctx.AttackTarget?.TopCard);
                 ctx.AttackTarget = ApplyAttackKeywords(aiAttacker, ctx.AttackTarget) ?? ctx.AttackTarget;   // 상대(나) 효과로 바뀐 대상 유지
             });
 
@@ -1479,6 +1487,7 @@ public partial class GoldfishEngine
     private void FinishAiTurn(AiTurnContext ctx)
     {
         // 3-C. [어택 후 메인 페이즈] AI가 남은 메모리를 사용하여 진화/등장 (메모리가 마이너스(-)로 넘어가면 그 절대값이 플레이어의 다음 턴 메모리가 됨!)
+        AiUseMainAbilities();   // 테이머 · 디지몬의 [메인] 기동 효과
         bool acted = true;
         while (ctx.Memory >= 0 && acted && !State.IsGameOver)
         {
@@ -1488,7 +1497,7 @@ public partial class GoldfishEngine
             foreach (var fieldDigimon in AiEvolutionBases())
             {
                 var evoCandidate = State.DummyOpponent.Hand
-                    .FirstOrDefault(c => c.EvoCost <= ctx.Memory + MaxAiMemoryHandOver && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
+                    .FirstOrDefault(c => ActionValidator.EvolutionCost(fieldDigimon, c) <= ctx.Memory + MaxAiMemoryHandOver && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
 
                 if (evoCandidate != null)
                 {
@@ -1511,7 +1520,11 @@ public partial class GoldfishEngine
                 RecalculateFieldBuffs();
                 Log($"🤖 [AI 테이머 등장] [{tamerCandidate.Name}(코스트 {tamerCandidate.PlayCost})] 배치! (AI 메모리: +{beforeMem} → {ctx.Memory})");
                 AddOpponentEvent(OpponentActionKind.Tamer, "테이머 등장", $"{tamerCandidate.Name} · 메모리 {beforeMem} → {ctx.Memory}", tamerCandidate);
-                AddEffectEvent(tamerCandidate, CaptureEffectLogs(() => RunEffects(EffectTrigger.OnPlay, State.DummyOpponent, null, tamerCandidate, includeInherited: false)));
+                AddEffectEvent(tamerCandidate, CaptureEffectLogs(() =>
+                {
+                    RunEffects(EffectTrigger.OnPlay, State.DummyOpponent, null, tamerCandidate, includeInherited: false);
+                    FireForSide(EffectTrigger.OpponentTamerPlayed, State.Player, null, triggerCard: tamerCandidate);
+                }));
                 acted = true;
                 if (ctx.Memory < 0) break;
             }
@@ -1589,14 +1602,15 @@ public partial class GoldfishEngine
     private void AiEvolve(AiTurnContext ctx, CardInstance fieldDigimon, CardData evoCard)
     {
         var opp = State.DummyOpponent;
+        int evoCost = ActionValidator.EvolutionCost(fieldDigimon, evoCard) - TryDigisorption(opp, fieldDigimon, evoCard, ctx.Memory);
         opp.Hand.Remove(evoCard);
         int beforeMem = ctx.Memory;
         string prev = fieldDigimon.TopCard.Name;
         fieldDigimon.Evolve(evoCard);
-        ctx.Memory -= evoCard.EvoCost;
+        ctx.Memory -= evoCost;
         DrawFor(opp);
         RecalculateFieldBuffs();
-        Log($"🤖 [AI 진화] [{prev}] -> [{evoCard.Name}(Lv.{evoCard.Level}, 코스트 {evoCard.EvoCost})] (AI 메모리: +{beforeMem} → {ctx.Memory})");
+        Log($"🤖 [AI 진화] [{prev}] -> [{evoCard.Name}(Lv.{evoCard.Level}, 코스트 {evoCost})] (AI 메모리: +{beforeMem} → {ctx.Memory})");
         AddOpponentEvent(OpponentActionKind.Evolve, "진화", $"{prev} → {evoCard.Name} (Lv.{evoCard.Level}) · 메모리 {beforeMem} → {ctx.Memory}", evoCard);
 
         if (opp.BattleArea.Contains(fieldDigimon))

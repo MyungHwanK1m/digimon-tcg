@@ -188,24 +188,21 @@ public static class KeywordDictionary
     {
         var script = new CardScript(card.CardId);
         var def = new CardScriptDefinition(script);
-        foreach (var (inherited, text) in new[] { (false, card.EffectText), (true, card.InheritedEffectText) })
+        foreach (var (inherited, clause, options) in ClausesOf(card))
         {
-            foreach (var (clause, options) in GroupChoices(SplitClauses(text)))
+            if (options != null)
             {
-                if (options != null)
-                {
-                    SentenceParser.TryParseChoice(clause, options, inherited, card, def);   // "Activate 1 of the effects below:" + "・~"
-                    continue;
-                }
-                var parsed = Parse(clause);
-                if (parsed.Unsupported == null)
-                    AddParsed(script, new[] { parsed }, inherited);
-                else
-                    SentenceParser.TryParse(clause, inherited, card, def);   // 키워드 절이 아니면 문장 파서 (읽지 못하면 등록하지 않음)
+                SentenceParser.TryParseChoice(clause, options, inherited, card, def);   // "Activate 1 of the effects below:" + "・~"
+                continue;
             }
+            var parsed = Parse(StripLabel(clause));
+            if (parsed.Unsupported == null)
+                AddParsed(script, new[] { parsed }, inherited);
+            else
+                SentenceParser.TryParse(clause, inherited, card, def);   // 키워드 절이 아니면 문장 파서 (읽지 못하면 등록하지 않음)
         }
         bool any = script.Keywords.Count + script.InheritedKeywords.Count + script.Effects.Count + script.Statics.Count > 0
-                   || script.OverflowMemory > 0 || script.IgnoreColorRequirement != null || script.PlayCostReduction != null;
+                   || script.OverflowMemory > 0 || script.DigisorptionReduction > 0 || script.SpecialEvolutions.Count > 0 || script.IgnoreColorRequirement != null || script.PlayCostReduction != null;
         return any ? script : null;
     }
 
@@ -215,7 +212,9 @@ public static class KeywordDictionary
         var list = clauses.ToList();
         for (int i = 0; i < list.Count; i++)
         {
-            if (Regex.IsMatch(list[i], @"(?:effects below|following effects)s*[:.]?s*$", RegexOptions.IgnoreCase) && i + 1 < list.Count && list[i + 1].StartsWith("・"))
+            bool header = Regex.IsMatch(list[i], @"(?:effects? below|following effects?)(?: twice| \d+ times| instead)?\s*[:.]?\s*$", RegexOptions.IgnoreCase)
+                          || list[i].Contains("＜Digi-Burst", StringComparison.OrdinalIgnoreCase);   // ≪디지버스트 N≫ (설명문 뒤에 ・효과)
+            if (header && i + 1 < list.Count && list[i + 1].StartsWith("・"))
             {
                 var options = new List<string>();
                 int j = i + 1;
@@ -316,36 +315,55 @@ public static class KeywordDictionary
     public static List<EffectClause> Analyze(CardData card)
     {
         var result = new List<EffectClause>();
-        foreach (var (inherited, text) in new[] { (false, card.EffectText), (true, card.InheritedEffectText) })
+        foreach (var (inherited, clause, options) in ClausesOf(card))
         {
-            foreach (var (clause, options) in GroupChoices(SplitClauses(text)))
+            if (options != null)
             {
-                if (options != null)
-                {
-                    string? choiceError = SentenceParser.TryParseChoice(clause, options, inherited, card, def: null);
-                    foreach (var line in options.Prepend(clause))
-                        result.Add(new EffectClause(inherited, line, choiceError == null ? ClauseSupport.Supported : ClauseSupport.Unsupported, choiceError ?? "고르는 효과"));
-                    continue;
-                }
-                if (IsRuleHandledClause(card, clause))
-                {
-                    result.Add(new EffectClause(inherited, clause, ClauseSupport.Supported, "규칙으로 처리"));
-                    continue;
-                }
-                var parsed = Parse(clause);
-                if (parsed.Unsupported == null)
-                {
-                    result.Add(new EffectClause(inherited, clause, ClauseSupport.Supported, "키워드"));
-                    continue;
-                }
-                string? sentenceError = SentenceParser.TryParse(clause, inherited, card, def: null);
-                result.Add(sentenceError == null
-                    ? new EffectClause(inherited, clause, ClauseSupport.Supported, "문장")
-                    : new EffectClause(inherited, clause, ClauseSupport.Unsupported, IsKeywordShapedClause(clause) ? parsed.Unsupported : sentenceError));
+                string? choiceError = SentenceParser.TryParseChoice(clause, options, inherited, card, def: null);
+                foreach (var line in options.Prepend(clause))
+                    result.Add(new EffectClause(inherited, line, choiceError == null ? ClauseSupport.Supported : ClauseSupport.Unsupported, choiceError ?? "고르는 효과"));
+                continue;
             }
+            if (IsRuleHandledClause(card, StripLabel(clause)))
+            {
+                result.Add(new EffectClause(inherited, clause, ClauseSupport.Supported, "규칙으로 처리"));
+                continue;
+            }
+            var parsed = Parse(StripLabel(clause));
+            if (parsed.Unsupported == null)
+            {
+                result.Add(new EffectClause(inherited, clause, ClauseSupport.Supported, "키워드"));
+                continue;
+            }
+            string? sentenceError = SentenceParser.TryParse(clause, inherited, card, def: null);
+            result.Add(sentenceError == null
+                ? new EffectClause(inherited, clause, ClauseSupport.Supported, "문장")
+                : new EffectClause(inherited, clause, ClauseSupport.Unsupported, IsKeywordShapedClause(StripLabel(clause)) ? parsed.Unsupported : sentenceError));
         }
         return result;
     }
+
+    /// <summary>
+    /// 카드의 절 목록 (메인 효과 칸 → 진화원 효과 칸). API 데이터는 칸과 실제 종류가 어긋날 때가 있어 머리말로 고친다:
+    /// 메인 칸의 "Inherited Effect ~"는 진화원 효과, 진화원 칸의 "Security Effect ~"(옵션 · 테이머)는 이 카드 자신의 [시큐리티] 효과.
+    /// </summary>
+    private static IEnumerable<(bool Inherited, string Clause, List<string>? Options)> ClausesOf(CardData card)
+    {
+        foreach (var (field, text) in new[] { (false, card.EffectText), (true, card.InheritedEffectText) })
+        {
+            foreach (var (clause, options) in GroupChoices(SplitClauses(text)))
+            {
+                bool inherited = field;
+                if (Regex.IsMatch(clause, @"^Inherited Effect\b", RegexOptions.IgnoreCase)) inherited = true;
+                else if (Regex.IsMatch(clause, @"^Security Effect\b", RegexOptions.IgnoreCase)) inherited = false;
+                yield return (inherited, clause, options);
+            }
+        }
+    }
+
+    /// <summary>절 머리말("Inherited Effect" · "Security Effect") 제거</summary>
+    private static string StripLabel(string clause) =>
+        Regex.Replace(clause, @"^(?:Inherited|Security) Effect\s*", "", RegexOptions.IgnoreCase);
 
     /// <summary>
     /// 키워드가 들어 있는 절인지 (2단계 완료 기준 "키워드 절"의 범위 판단용):

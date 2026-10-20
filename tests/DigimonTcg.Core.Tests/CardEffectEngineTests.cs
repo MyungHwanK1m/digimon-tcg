@@ -48,8 +48,8 @@ public class CardEffectEngineTests
     {
         // 카드 데이터 수치만으로 동작 (InheritedDpBonus · InheritedSecurityAttackBonus · IsBlocker)
         var dataOnly = new HashSet<string> { "ST1-03", "ST1-07", "BT1-015", "ST5-03" };
-        // 아직 문장만 있는 효과 (테이머 레스트 상태 · 메인 페이즈 액티브 시점이 필요) — docs/card_effect_engine_plan.md
-        var textOnly = new HashSet<string> { "ST4-14", "ST5-14", "ST6-14", "BT2-021", "BT2-032" };
+        // 아직 문장만 있는 효과 — docs/card_effect_engine_plan.md
+        var textOnly = new HashSet<string>();   // 5단계에서 ST4-14 · ST5-14 · ST6-14 · BT2-021 · BT2-032 모두 구현
 
         var missing = Cards().Values
             .Where(c => (c.EffectText + c.InheritedEffectText).Trim().Length > 0)

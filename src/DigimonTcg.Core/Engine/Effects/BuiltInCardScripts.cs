@@ -226,7 +226,7 @@ internal static class BuiltInCardScripts
         // 메탈가루몬: [어택 시] [턴에 1회] 이 디지몬을 액티브로
         b.Card("ST2-11").WhenAttacking(c =>
         {
-            c.Self!.IsSuspended = false;
+            c.Engine.Unsuspend(c.Self!);
             c.Log("❄️ [어택 시] 메탈가루몬: 액티브 상태로 전환 — 이번 턴 한 번 더 어택할 수 있습니다!");
         }, oncePerTurn: true);
 
@@ -429,7 +429,33 @@ internal static class BuiltInCardScripts
             c.Log($"[진화 시] 로제몬: 상대 [{enemy.TopCard.Name}]은(는) 다음 상대 턴 종료 시까지 어택 · 블록 불가");
         });
 
-        b.Card("ST4-13").Keyword(Keyword.Piercing);   // 헤라클레스캅테리몬 ≪관통≫
+        // 헤라클레스캅테리몬: ≪관통≫ / [메인] ≪디지버스트 2≫ 상대 디지몬 1마리 레스트
+        b.Card("ST4-13")
+            .Keyword(Keyword.Piercing)
+            .On(EffectTrigger.ActivateMain, c =>
+            {
+                if (c.Self == null || c.Self.EvolutionSources.Count < 2)
+                {
+                    c.Log("[메인] 헤라클레스캅테리몬: 진화원이 2장 미만이라 ≪디지버스트 2≫를 쓸 수 없습니다");
+                    return;
+                }
+                var target = c.PickEnemy(d => !d.IsSuspended);
+                if (target == null || !c.Engine.AskYesNo(c.Owner, c.Self, "≪디지버스트 2≫ 진화원 2장을 파기하고 상대 디지몬 1마리를 레스트시킬까요?", recommended: true))
+                    return;
+                c.Owner.Trash.AddRange(c.Self.RemoveBottomSources(2));
+                c.Engine.Suspend(target);
+                c.Log($"[메인] 헤라클레스캅테리몬: ≪디지버스트 2≫ 진화원 2장 파기 → 상대 [{target.TopCard.Name}] 레스트");
+            });
+
+        // 장한솔: [자신의 턴] 상대의 디지몬이 레스트했을 때, 이 테이머를 레스트시키는 것으로 메모리 +1
+        b.Card("ST4-14").On(EffectTrigger.OpponentDigimonSuspended, c =>
+        {
+            if (!c.Owner.HasActiveTamer(c.Card) || !c.Engine.AskYesNo(c.Owner, null, "장한솔: 이 테이머를 레스트시키고 메모리 +1 할까요?", recommended: true))
+                return;
+            c.Engine.SuspendTamer(c.Owner, c.Card);
+            c.AddMemory(1);
+            c.Log($"[테이머] 장한솔: 레스트 → 메모리 +1 (현재 {c.OwnerMemory})");
+        }, when: c => c.Engine.IsTurnOf(c.Owner));
 
         // 전기 충격: 레스트 상태 상대 디지몬 1마리를 패로
         b.Card("ST4-16")
@@ -464,6 +490,19 @@ internal static class BuiltInCardScripts
 
         DrawIfOpponentDidNotAttack(b.Card("ST5-04"));   // 토이아구몬
         DrawIfOpponentDidNotAttack(b.Card("ST5-06"));   // 그레이몬(흑)
+
+        // 신태일(흑): [상대의 턴] 자신의 디지몬이 ≪블로커≫를 사용하여 레스트했을 때, 이 테이머를 레스트시키는 것으로 자신의 디지몬 1마리 액티브
+        b.Card("ST5-14").On(EffectTrigger.AllyDigimonSuspended, c =>
+        {
+            if (c.Other == null || !c.Other.HasBlocker || !c.Owner.HasActiveTamer(c.Card))
+                return;
+            var target = c.PickOwn(d => d.IsSuspended, c.Other);
+            if (target == null || !c.Engine.AskYesNo(c.Owner, null, $"신태일: 이 테이머를 레스트시키고 [{target.TopCard.Name}]을(를) 액티브로 할까요?", recommended: true))
+                return;
+            c.Engine.SuspendTamer(c.Owner, c.Card);
+            c.Engine.Unsuspend(target);
+            c.Log($"[테이머] 신태일: 레스트 → [{target.TopCard.Name}] 액티브");
+        }, when: c => !c.Engine.IsTurnOf(c.Owner));
 
         LoseTwoMemoryWhenAttacking(b.Card("ST5-08"));   // 다크티라노몬
 
@@ -551,6 +590,16 @@ internal static class BuiltInCardScripts
         DrawThenDiscardWhenAttacking(b.Card("ST6-06"));   // 가루몬(퍼플)
 
         LoseTwoMemoryWhenAttacking(b.Card("ST6-08"));   // 데블몬
+
+        // 매튜(퍼플): [자신의 턴] 자신의 디지몬이 소멸했을 때, 이 테이머를 레스트시키는 것으로 메모리 +1
+        b.Card("ST6-14").On(EffectTrigger.AllyDigimonDeleted, c =>
+        {
+            if (!c.Owner.HasActiveTamer(c.Card) || !c.Engine.AskYesNo(c.Owner, null, "매튜: 이 테이머를 레스트시키고 메모리 +1 할까요?", recommended: true))
+                return;
+            c.Engine.SuspendTamer(c.Owner, c.Card);
+            c.AddMemory(1);
+            c.Log($"[테이머] 매튜: 레스트 → 메모리 +1 (현재 {c.OwnerMemory})");
+        }, when: c => c.Engine.IsTurnOf(c.Owner));
 
         // 스컬사탄몬: [진화 시] 트래시의 퍼플 디지몬 1장 패로
         b.Card("ST6-10").WhenDigivolving(c =>
@@ -703,7 +752,7 @@ internal static class BuiltInCardScripts
                 var lv6 = c.Self!.TakeSource(s => IsDigimon(s) && s.Level == 6);
                 if (lv6 == null) return;
                 c.Owner.Hand.Add(lv6);
-                c.Self.IsSuspended = false;
+                c.Engine.Unsuspend(c.Self);
                 c.Log($"👑 [어택 시] 오메가몬: 진화원 [{lv6.Name}]을(를) 패로 되돌리고 액티브!");
             }, oncePerTurn: true);
     }
@@ -763,6 +812,27 @@ internal static class BuiltInCardScripts
 
         b.Card("BT2-065").Keyword(Keyword.Reboot);   // 워그레이몬(BT2) ≪재기동≫
 
+        // 브이몬: [진화원] [자신의 턴] [턴에 1회] 이 디지몬이 메인 페이즈에 액티브가 되었을 때 ≪1 드로우≫
+        b.Card("BT2-021").Inherited(EffectTrigger.ThisDigimonUnsuspendedInMain, c =>
+        {
+            var drawn = c.Draw();
+            if (drawn != null) c.Log($"[진화원 효과] 브이몬: 메인 페이즈에 액티브 → ≪1 드로우≫ [{drawn.Name}]");
+        }, when: c => c.Engine.IsTurnOf(c.Owner), oncePerTurn: true);
+
+        // 알포스브이드라몬: [자신의 턴] 블루 테이머가 레스트했을 때 이 디지몬 액티브 / [턴에 1회] 메인 페이즈에 액티브가 되었을 때 메모리 +1
+        b.Card("BT2-032")
+            .On(EffectTrigger.AllyTamerSuspended, c =>
+            {
+                if (c.Self == null || !c.Self.IsSuspended) return;
+                c.Engine.Unsuspend(c.Self);
+                c.Log("[자신의 턴] 알포스브이드라몬: 블루 테이머가 레스트 → 액티브");
+            }, when: c => c.Engine.IsTurnOf(c.Owner) && (c.TriggerCard?.AllColors.Contains(CardColor.Blue) ?? false))
+            .On(EffectTrigger.ThisDigimonUnsuspendedInMain, c =>
+            {
+                c.AddMemory(1);
+                c.Log($"[자신의 턴] 알포스브이드라몬: 메인 페이즈에 액티브 → 메모리 +1 (현재 {c.OwnerMemory})");
+            }, when: c => c.Engine.IsTurnOf(c.Owner), oncePerTurn: true);
+
         // 임프몬: [소멸 시] 자신의 덱 위에서 3장 파기
         b.Card("BT2-068").OnDeletion(c => c.Mill(3, "임프몬 [소멸 시]"));
 
@@ -789,7 +859,7 @@ internal static class BuiltInCardScripts
             .Keyword(Keyword.Jamming)
             .WhenDigivolving(c =>
             {
-                foreach (var d in c.Owner.BattleArea.Where(d => CardScripts.HasKeyword(d, Keyword.Jamming))) d.IsSuspended = false;
+                foreach (var d in c.Owner.BattleArea.Where(d => CardScripts.HasKeyword(d, Keyword.Jamming))) c.Engine.Unsuspend(d);
                 c.Log("[진화 시] 황제드라몬: ≪재밍≫을 가진 자신의 디지몬 전부 액티브");
             });
 
@@ -820,7 +890,7 @@ internal static class BuiltInCardScripts
             .EvolvesFrom(t => t.TopCard.Color is CardColor.Red or CardColor.Blue)
             .WhenDigivolving(c =>
             {
-                c.Self!.IsSuspended = false;
+                c.Engine.Unsuspend(c.Self!);
                 c.Log("👑 [진화 시] 오메가몬: 액티브 상태가 됩니다");
                 if (c.Engine.TryGrantBlitz(c.Owner, c.Self))
                     c.Log("👑 [진화 시] 오메가몬: ≪진격≫ — 상대 쪽 메모리가 1 이상이어서 이 디지몬으로 어택할 수 있습니다");

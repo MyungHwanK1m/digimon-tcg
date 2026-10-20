@@ -32,9 +32,9 @@ public static class StarterDecks
     public static bool IsBuiltInCard(string cardId) => BuiltInCardIds.Value.Contains(cardId);
 
     // 내장 카드 중 효과 문장의 전부 또는 일부가 대전에서 아직 동작하지 않는 카드 (도감 · 상세에 "일부 미구현" 표시)
-    // - 문장만 있음: ST4-14 · ST5-14 · ST6-14 (테이머 레스트 상태 필요), BT2-021 · BT2-032 (메인 페이즈 액티브 시점 필요) — CardEffectEngineTests의 textOnly 목록과 같게 유지
-    // - 일부만 동작: ST4-13 ≪디지버스트≫, BT5-086 ≪진격≫
-    private static readonly HashSet<string> TextOnlyEffectCardIds = new(StringComparer.Ordinal) { "ST4-14", "ST5-14", "ST6-14", "BT2-021", "BT2-032", "ST4-13", "BT5-086" };
+    // - 일부만 동작: BT5-086 (≪진격≫은 동작, 상대 효과에서 지키는 [서로의 턴] 효과는 아직 문장만)
+    // (ST4-13 · ST4-14 · ST5-14 · ST6-14 · BT2-021 · BT2-032는 효과 엔진 5단계에서 구현)
+    private static readonly HashSet<string> TextOnlyEffectCardIds = new(StringComparer.Ordinal) { "BT5-086" };
 
     public static bool IsTextOnlyEffectCard(string cardId) => TextOnlyEffectCardIds.Contains(cardId);
 

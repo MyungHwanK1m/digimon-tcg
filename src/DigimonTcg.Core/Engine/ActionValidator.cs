@@ -90,6 +90,18 @@ public static class ActionValidator
         _ => color.ToString()
     };
 
+    private static bool MeetsNormalEvolution(CardInstance target, CardData evoCard) =>
+        target.TopCard.Level == evoCard.EvoRequirementLevel
+        && (target.TopCard.Color == evoCard.EvoRequirementColor || CardScripts.MeetsAlternativeEvolution(evoCard, target));
+
+    /// <summary>target에서 evoCard로 진화하는 코스트 — 보통 진화와 카드 효과의 진화 중 싼 쪽 (진화할 수 없으면 카드의 진화 코스트)</summary>
+    public static int EvolutionCost(CardInstance target, CardData evoCard)
+    {
+        int? special = CardScripts.SpecialEvolutionCost(evoCard, target);
+        if (special == null) return evoCard.EvoCost;
+        return MeetsNormalEvolution(target, evoCard) ? Math.Min(evoCard.EvoCost, special.Value) : special.Value;
+    }
+
     // 2. 진화 유효성 검사 (명세서 기본 시그니처 유지)
     public static ActionResult ValidateEvolution(CardInstance? target, CardData evoCard)
     {
@@ -98,6 +110,10 @@ public static class ActionValidator
 
         if (evoCard.Type != CardType.Digimon)
             return ActionResult.Fail("디지몬 카드만 진화에 사용할 수 있습니다.");
+
+        // 진화 조건을 무시하는 다른 진화 ("Your [Shoutmon] can digivolve into this card ~ for a memory cost of 4")
+        if (!MeetsNormalEvolution(target, evoCard) && CardScripts.SpecialEvolutionCost(evoCard, target) is int special)
+            return ActionResult.Success($"진화 코스트 {special} 지불 (카드 효과의 진화). 진화 성공 시 카드 1장을 추가로 드로우합니다.");
 
         if (target.TopCard.Level != evoCard.EvoRequirementLevel)
             return ActionResult.Fail($"Lv.{evoCard.EvoRequirementLevel} 디지몬 위에만 진화할 수 있습니다. (현재 대상: Lv.{target.TopCard.Level})");
@@ -131,7 +147,7 @@ public static class ActionValidator
         if (!baseCheck.CanExecute)
             return baseCheck;
 
-        int projectedMemory = Math.Max(state.MemoryGauge - evoCard.EvoCost, -10);
+        int projectedMemory = Math.Max(state.MemoryGauge - EvolutionCost(target!, evoCard), -10);
 
         string guide = baseCheck.GuideMessage;
         if (projectedMemory < 0)
@@ -169,6 +185,9 @@ public static class ActionValidator
 
         if (defenderTarget != null && !defenderTarget.IsSuspended)
             return ActionResult.Fail("상대의 스탠드(Active) 상태 디지몬은 공격할 수 없습니다.");
+
+        if (defenderTarget != null && CardScripts.HasKeyword(defenderTarget, Keyword.CannotBeAttacked))
+            return ActionResult.Fail("이 디지몬은 카드 효과로 어택당하지 않습니다.");
 
         string guide;
         if (defenderTarget == null)

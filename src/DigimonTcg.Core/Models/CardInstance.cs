@@ -36,6 +36,7 @@ public class CardInstance
 
     public int CannotAttackUntil { get; set; }     // 어택할 수 없음 (소로 블루 · 로제몬 등)
     public int CannotBlockUntil { get; set; }      // 블록할 수 없음
+    public int SkipUnsuspendUntil { get; set; }   // 다음 액티브 페이즈에 액티브가 되지 않음 ("doesn't unsuspend during ~ next unsuspend phase")
     public int GrantedBlockerUntil { get; set; }   // ≪블로커≫를 얻음 (메탈그레이몬 ST5-09)
     public int GrantedRebootUntil { get; set; }    // ≪재기동≫을 얻음 (파워드라몬 ST5-12)
     public int UnblockableUntil { get; set; }      // 블록당하지 않음 (오메가몬 Alter-S BT3-112)
@@ -78,6 +79,14 @@ public class CardInstance
         var rest = bottomUp.Skip(removed.Count).ToList();
         EvolutionSources = new Stack<CardData>(rest);
         return removed;
+    }
+
+    /// <summary>진화원 맨 아래에 카드를 넣는다</summary>
+    public void AddBottomSource(CardData card)
+    {
+        var bottomUp = EvolutionSources.Reverse().ToList();
+        bottomUp.Insert(0, card);
+        EvolutionSources = new Stack<CardData>(bottomUp);
     }
 
     /// <summary>진화원에서 조건에 맞는 카드 1장을 꺼낸다 (순서 유지)</summary>

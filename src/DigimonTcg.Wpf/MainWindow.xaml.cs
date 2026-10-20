@@ -2646,7 +2646,11 @@ public partial class MainWindow : Window
                 {
                     UpdateCardInspector(tamer);
                     UpdateTamerBreakdownOnSidebar(tamer, count);
-                    ShowToast(true, $"🎖️ 테이머 [{tamer.Name}] x{count}장 활성 중: {auraDesc}");
+                    // [메인] 기동 효과가 있고 지금 쓸 수 있으면 사용, 아니면 지속 효과 안내
+                    if (_engine.GetMainAbilities(_gameState.Player).Any(a => a.Digimon == null && ReferenceEquals(a.Card, tamer)))
+                        TryActivateMainAbility(null, tamer);
+                    else
+                        ShowToast(true, $"🎖️ 테이머 [{tamer.Name}] x{count}장 활성 중: {auraDesc}");
                 };
                 TamerZonePanel.Children.Add(tamerChip);
             }
@@ -3160,6 +3164,15 @@ public partial class MainWindow : Window
                     _potentialDragBreedingDigimon = null;
                 }
             }
+        };
+
+        // 우클릭: 이 디지몬의 [메인] 기동 효과 사용 (≪디지버스트≫ 등)
+        fieldCardBorder.MouseRightButtonUp += (_, e) =>
+        {
+            if (isBreedingArea || isPendingAllyTargetMode)
+                return;
+            e.Handled = true;
+            TryActivateMainAbility(instance, instance.TopCard);
         };
 
         // 클릭 시: 대상 지정 모드면 즉시 진화/버프 실행, 일반 모드면 우측 DP 증가치 인스펙터 고정/해제!
@@ -4049,6 +4062,28 @@ public partial class MainWindow : Window
     private void BtnPassTurn_Click(object sender, RoutedEventArgs e)
     {
         ApplyActionResult(_engine.PassTurn());
+    }
+
+    /// <summary>
+    /// 테이머 · 디지몬의 [메인] 기동 효과 사용 (테이머 칩 클릭 · 필드 디지몬 우클릭). 내 메인 페이즈이고
+    /// 블록 선택 · 멀리건 · 상대 턴 리플레이 화면이 없을 때만 열린다.
+    /// </summary>
+    private void TryActivateMainAbility(CardInstance? digimon, CardData card)
+    {
+        if (_gameState.IsGameOver || _gameState.CurrentPhase != Phase.Main || _gameState.PendingBlock != null || IsReplayRunning)
+        {
+            ShowToast(false, "[메인] 효과는 내 메인 페이즈에만 쓸 수 있습니다.");
+            return;
+        }
+        if (!_engine.GetMainAbilities(_gameState.Player).Any(a => ReferenceEquals(a.Digimon, digimon) && ReferenceEquals(a.Card, card)))
+        {
+            ShowToast(false, $"[{card.Name}]은(는) 지금 쓸 수 있는 [메인] 효과가 없습니다. (효과가 없거나 이번 턴에 이미 썼습니다)");
+            return;
+        }
+        string effectText = string.Join("\n", card.EffectText.Split('\n').Where(l => l.Contains("[Main]") || l.Contains("[메인]") || l.Contains("Digi-Burst")));
+        bool go = _engine.PlayerChoices?.Confirm(_gameState, digimon, $"[{card.Name}]의 [메인] 효과를 쓸까요?\n\n{effectText}", true) ?? true;
+        if (go)
+            ApplyActionResult(_engine.ActivateMainAbility(digimon, card));
     }
 
     private void BtnStartSt1_Click(object sender, RoutedEventArgs e)
