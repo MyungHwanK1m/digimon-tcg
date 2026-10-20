@@ -2161,6 +2161,7 @@ public partial class MainWindow : Window
               + (_gameState.DummyOpponent.OptionsInPlay.Count > 0
                   ? $" | ⏳ AI 딜레이 옵션: {string.Join(", ", _gameState.DummyOpponent.OptionsInPlay.Select(p => p.Card.DisplayName))}"
                   : "")
+              + (_gameState.DummyOpponent.UnderTamers.Count > 0 ? $" | 📥 AI 테이머 아래 {_gameState.DummyOpponent.UnderTamers.Count}장" : "")
               + $" | AI 손패: {_gameState.DummyOpponent.Hand.Count}장 | AI 덱: {_gameState.DummyOpponent.MainDeck.Count}장"
             : $"상대 필드: {_gameState.DummyOpponent.BattleArea.Count}체 | 상대 트래시: {_gameState.DummyOpponent.Trash.Count}장";
 
@@ -2689,6 +2690,34 @@ public partial class MainWindow : Window
                     ShowToast(false, $"⏳ [{option.DisplayName}]은(는) 놓은 턴에는 쓸 수 없습니다. 다음 내 턴부터 클릭해서 쓰세요.");
             };
             TamerZonePanel.Children.Add(optionChip);
+        }
+
+        // 테이머 아래에 놓인 카드 (≪세이브≫ · ≪머티리얼 세이브≫ 등 — 효과는 엔진이 처리, 여기서는 장수와 카드만 보여 준다)
+        var underTamers = _gameState.Player.UnderTamers;
+        if (underTamers.Count > 0)
+        {
+            string names = string.Join(", ", underTamers.Select(c => c.DisplayName));
+            var underChip = new Border
+            {
+                Background = BrushFromHex("#33CBA6F7"),
+                BorderBrush = BrushFromHex("#CBA6F7"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 2, 8, 2),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = $"테이머 아래에 놓인 카드 {underTamers.Count}장: {names}",
+                Child = new TextBlock
+                {
+                    Text = $"📥 테이머 아래 {underTamers.Count}장",
+                    Foreground = BrushFromHex("#CBA6F7"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 11
+                }
+            };
+            underChip.MouseEnter += (_, _) => UpdateCardInspector(underTamers[^1]);
+            underChip.MouseLeftButtonUp += (_, _) => ShowToast(true, $"📥 테이머 아래에 놓인 카드 {underTamers.Count}장: {names}");
+            TamerZonePanel.Children.Add(underChip);
         }
 
         string myLastSecInfo = _gameState.PlayerSecurityCheckHistory.Count > 0
