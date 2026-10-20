@@ -1,3 +1,4 @@
+using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
 namespace DigimonTcg.Core.Engine;
@@ -55,9 +56,7 @@ public static class ActionValidator
             return ActionResult.Fail($"Lv.{evoCard.EvoRequirementLevel} 디지몬 위에만 진화할 수 있습니다. (현재 대상: Lv.{target.TopCard.Level})");
 
         bool colorMatches = target.TopCard.Color == evoCard.EvoRequirementColor
-            || (evoCard.Color == CardColor.White && evoCard.Level == 7 && (
-                (evoCard.CardId is "BT1-084" or "BT5-086" && target.TopCard.Color is CardColor.Red or CardColor.Blue) ||   // 오메가몬: Lv.6 레드 · 블루에서
-                (evoCard.CardId == "BT3-112" && target.TopCard.Color is CardColor.Red or CardColor.Black)));
+            || CardScripts.MeetsAlternativeEvolution(evoCard, target);   // 카드에 적힌 다른 진화 조건 (예: 오메가몬 = Lv.6 레드 · 블루에서)
 
         if (!colorMatches)
             return ActionResult.Fail($"색상이 일치하지 않습니다. ({evoCard.EvoRequirementColor} 필요)");

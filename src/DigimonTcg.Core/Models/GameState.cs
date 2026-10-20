@@ -11,7 +11,7 @@ public record SecurityCheckHistoryItem(
 );
 
 /// <summary>상대(AI) 턴에 일어난 행동 1건 — UI가 상대 턴을 한 장면씩 다시 보여 주는 데 사용한다.</summary>
-public enum OpponentActionKind { TurnStart, Breeding, Evolve, Play, Tamer, Attack, Block, SecurityResult, DirectAttack, TurnEnd }
+public enum OpponentActionKind { TurnStart, Breeding, Evolve, Play, Tamer, Attack, Block, SecurityResult, DirectAttack, TurnEnd, Effect }
 
 public record OpponentActionEvent(
     OpponentActionKind Kind,

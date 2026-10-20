@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using DigimonTcg.Core.Data;
 using DigimonTcg.Core.DeckBuilder;
 using DigimonTcg.Core.Engine;
+using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 using DigimonTcg.Wpf.Themes;
 
@@ -46,13 +47,14 @@ public partial class MainWindow : Window
     private Border? _dragGhostBadgeBorder;
     private TextBlock? _dragGhostBadgeText;
 
+    // 옵션 [메인] 효과의 대상 종류는 카드 스크립트(CardScripts)에 적혀 있다
     private static bool IsAllyTargetedOption(CardData card) =>
         card.Type == CardType.Option &&
-        card.CardId is "ST1-13" or "ST2-15" or "ST3-13";   // 자신의 디지몬 1마리 대상
+        CardScripts.MainTargetOf(card) is TargetKind.OwnDigimon or TargetKind.OwnDigimonWithDigimonSource;   // 자신의 디지몬 1마리 대상
 
     private static bool IsEnemyTargetedOption(CardData card) =>
         card.Type == CardType.Option &&
-        card.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16" or "ST3-16" or "ST4-16" or "ST5-15" or "ST5-16" or "ST6-15";   // 상대 디지몬 대상
+        CardScripts.MainTargetOf(card) == TargetKind.OpponentDigimon;   // 상대 디지몬 대상
 
     public MainWindow()
     {
@@ -231,8 +233,12 @@ public partial class MainWindow : Window
         TxtInspectorInherited.Text = string.IsNullOrWhiteSpace(card.InheritedEffectText) ? "없음" : card.InheritedEffectText;
 
         // 대전 엔진이 효과를 구현하지 않은 카드 안내
-        InspectorImplNote.Visibility = card.IsEffectImplemented ? Visibility.Collapsed : Visibility.Visible;
-        if (!card.IsEffectImplemented)
+        InspectorImplNote.Visibility = card.IsEffectImplemented && !card.HasUnimplementedBuiltInEffect ? Visibility.Collapsed : Visibility.Visible;
+        if (card.HasUnimplementedBuiltInEffect)
+        {
+            TxtInspectorImplNote.Text = "⚠️ 일부 효과 미구현 — 이 카드의 효과 문장은 아직 대전에서 동작하지 않습니다. (DP · 코스트 · 진화 조건은 정상 적용)";
+        }
+        else if (!card.IsEffectImplemented)
         {
             var keywords = new List<string>();
             if (card.IsBlocker) keywords.Add("블로커");
@@ -1442,6 +1448,7 @@ public partial class MainWindow : Window
             OpponentActionKind.Block => ("BLOCK", "Neo.Brush.Green"),
             OpponentActionKind.DirectAttack => ("DIRECT ATTACK", "Neo.Brush.Rose"),
             OpponentActionKind.TurnEnd => ("TURN END", "Neo.Brush.Cyan"),
+            OpponentActionKind.Effect => ("EFFECT", "Neo.Brush.Gold"),
             _ => ev.Title.Contains("역격파") || ev.Title.Contains("테이머") ? ("SECURITY CHECK", "Neo.Brush.Green") : ("SECURITY CHECK", "Neo.Brush.Rose")
         };
         var accent = Theme.GetBrush(accentKey);
@@ -2755,10 +2762,10 @@ public partial class MainWindow : Window
                     isValidPendingTarget = false;
                     invalidTargetReason = "육성 에어리어의 디지몬은 옵션 효과의 대상으로 지정할 수 없습니다.";
                 }
-                else if (_pendingHandCard.CardId == "ST2-15" && instance.EvolutionSources.Count == 0)
+                else if (CardScripts.MainTargetOf(_pendingHandCard) == TargetKind.OwnDigimonWithDigimonSource && !instance.EvolutionSources.Any(s => s.Type == CardType.Digimon))
                 {
                     isValidPendingTarget = false;
-                    invalidTargetReason = "카이저 네일은 진화원이 1장 이상 있는 디지몬에게만 사용할 수 있습니다.";
+                    invalidTargetReason = $"{_pendingHandCard.Name}은(는) 진화원에 디지몬 카드가 있는 디지몬에게만 사용할 수 있습니다.";
                 }
                 else
                 {
@@ -4189,9 +4196,9 @@ public partial class MainWindow : Window
             IsHitTestVisible = false
         });
 
-        if (!card.IsEffectImplemented)
+        if (!card.IsEffectImplemented || card.HasUnimplementedBuiltInEffect)
         {
-            // 대전 엔진이 효과를 구현하지 않은 카드 (API로 받은 카드)
+            // 대전 엔진이 효과를 구현하지 않은 카드 (API로 받은 카드 · 효과 문장만 있는 내장 카드)
             cardGrid.Children.Add(new Border
             {
                 Background = BrushFromHex("#E6301A0A"),
@@ -4205,7 +4212,7 @@ public partial class MainWindow : Window
                 IsHitTestVisible = false,
                 Child = new TextBlock
                 {
-                    Text = card.HasAutoKeywords ? "⚠ 키워드만" : "⚠ 효과 미구현",
+                    Text = card.HasUnimplementedBuiltInEffect ? "⚠ 일부 미구현" : card.HasAutoKeywords ? "⚠ 키워드만" : "⚠ 효과 미구현",
                     Foreground = BrushFromHex("#FAB387"),
                     FontWeight = FontWeights.Bold,
                     FontSize = 10

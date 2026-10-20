@@ -29,6 +29,10 @@ public class CardData
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsEffectImplemented => DigimonTcg.Core.Data.StarterDecks.IsBuiltInCard(CardId);
 
+    /// <summary>내장 카드지만 효과 문장이 아직 대전에서 동작하지 않는 카드</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasUnimplementedBuiltInEffect => IsEffectImplemented && DigimonTcg.Core.Data.StarterDecks.IsTextOnlyEffectCard(CardId);
+
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasAutoKeywords => !IsEffectImplemented && (IsBlocker || SecurityAttackBonus > 0 || InheritedSecurityAttackBonus > 0);
 
