@@ -66,6 +66,7 @@ public class CardCatalogService
         var defaultCards = StarterDecks.GetAllCatalogCards();
         if (File.Exists(_cacheFilePath))
         {
+            bool loadedFromCache = false;
             try
             {
                 string json = File.ReadAllText(_cacheFilePath);
@@ -94,8 +95,7 @@ public class CardCatalogService
                         merged[def.CardId] = def;
                     }
                     _catalog = merged.Values.OrderBy(c => c.CardId).ToList();
-                    SaveCache();
-                    return;
+                    loadedFromCache = true;
                 }
             }
             catch (Exception ex)
@@ -103,8 +103,16 @@ public class CardCatalogService
                 // 캐시를 읽지 못하면 내장 카드만으로 실행하되, 기존 캐시(수천 장)는 덮어쓰지 않는다.
                 // (예전에는 여기서 120장짜리 캐시로 덮어써서, 동시에 실행된 다른 프로세스가 전체 도감을 지운 적이 있다)
                 LastCacheLoadError = ex.Message;
+                _cacheWriteBlocked = true;
                 try { File.Copy(_cacheFilePath, _cacheFilePath + ".unreadable", overwrite: true); } catch { }
                 _catalog = defaultCards.OrderBy(c => c.CardId).ToList();
+                return;
+            }
+
+            if (loadedFromCache)
+            {
+                // 읽기는 성공했으므로, 다시 저장하다 실패해도(다른 프로세스가 파일을 열고 있는 등) 읽은 도감은 그대로 쓴다
+                try { SaveCache(); } catch { }
                 return;
             }
         }
@@ -115,6 +123,10 @@ public class CardCatalogService
 
     /// <summary>마지막으로 캐시를 읽다가 난 오류 (없으면 null) — 이때는 캐시를 덮어쓰지 않고 내장 카드만 쓴다</summary>
     public string? LastCacheLoadError { get; private set; }
+
+    // 캐시를 읽지 못해 내장 카드로 실행 중이면, 이번 실행 동안 기존 캐시 파일에 쓰지 않는다
+    // (내장 120장이나 일부 세트만 받은 도감으로 수천 장짜리 캐시를 덮어쓰지 않도록. 앱을 다시 시작하면 다시 읽는다)
+    private bool _cacheWriteBlocked;
 
     /// <summary>
     /// API에서 받은 카드의 특징(trait) · 등급 · 두 번째 색을 카탈로그 카드에 채운다 (효과 문장 · 이름 · 수치는 그대로). 반환: 바뀐 카드 수
@@ -138,13 +150,17 @@ public class CardCatalogService
         return changed;
     }
 
-    public void SaveCache()
+    /// <summary>도감을 캐시 파일에 저장한다. 캐시를 읽지 못한 채 실행 중이라 저장하지 않았으면 false</summary>
+    public bool SaveCache()
     {
+        if (_cacheWriteBlocked)
+            return false;
         // 다른 프로세스(앱 · 테스트)가 동시에 읽어도 반쯤 쓴 파일을 보지 않도록 임시 파일에 쓴 뒤 한 번에 바꾼다
         string json = JsonSerializer.Serialize(_catalog, JsonOptions);
         string temp = _cacheFilePath + "." + Environment.ProcessId + ".tmp";
         File.WriteAllText(temp, json);
         File.Move(temp, _cacheFilePath, overwrite: true);
+        return true;
     }
 
     public string GetLocalImageFilePath(CardData card)
@@ -348,10 +364,12 @@ public class CardCatalogService
         }
 
         _catalog = map.Values.OrderBy(c => c.CardId).ToList();
-        SaveCache();
+        bool saved = SaveCache();
 
         int implemented = _catalog.Count(c => c.IsEffectImplemented);
         string summary = $"도감 {_catalog.Count}종 (새로 추가 {_catalog.Count - before}종 · 효과 구현 {implemented}종 · 이번에 받은 세트 {fetchedSets}개)";
+        if (!saved)
+            summary += $" — 시작할 때 기존 카드 캐시를 읽지 못해({LastCacheLoadError}) 이번에 받은 카드는 파일에 저장하지 않았습니다. 앱을 다시 시작하면 기존 캐시를 다시 읽습니다.";
         if (limitNote != null)
             return (fetchedSets > 0, $"⏳ {limitNote} {summary}");
         if (failedSets.Count > 0)

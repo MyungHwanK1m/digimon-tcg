@@ -203,6 +203,24 @@ public class Phase5EffectTests
     }
 
     [Fact]
+    public void SpecialEvolution_ExactName_ShouldNotMatchLongerNames()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var snowCard = Api("P5-SNOW", 3, 3000, color: CardColor.Yellow);
+        snowCard.Name = "SnowShoutmon";
+        var snow = new CardInstance(snowCard, 1);
+        state.Player.BattleArea.Add(snow);
+        state.Player.MainDeck.Add(cards["ST1-02"]);
+        var evo = Api("P5-SPECIAL-X", 6, 12000, evoCost: 5,
+            main: "Your [Shoutmon] can digivolve into this card in your hand for a memory cost of 1, ignoring this card's digivolution requirements.");
+        state.Player.Hand.Add(evo);
+
+        // "[Shoutmon]"은 카드명이 정확히 Shoutmon인 디지몬만 — 색 · Lv 조건도 안 맞으므로 진화할 수 없다
+        Assert.False(engine.EvolveDigimon(snow, evo).CanExecute);
+        Assert.Equal("P5-SNOW", snow.TopCard.CardId);
+    }
+
+    [Fact]
     public void AllyAttackEvent_ShouldBuffThatDigimon()
     {
         var (state, engine, cards) = NewMainPhase();

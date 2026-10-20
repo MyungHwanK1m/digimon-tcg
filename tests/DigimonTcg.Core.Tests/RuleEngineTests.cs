@@ -137,6 +137,30 @@ public class RuleEngineTests
     }
 
     [Fact]
+    public void CardCatalogService_UnreadableCache_ShouldNeverBeOverwritten()
+    {
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dtcg_test_" + System.Guid.NewGuid().ToString("N"));
+        try
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            string cachePath = System.IO.Path.Combine(dir, "cards_cache.json");
+            const string broken = "[{ \"CardId\": \"BT1-001\", ";   // 반쯤 쓴 파일
+            System.IO.File.WriteAllText(cachePath, broken);
+
+            var catalog = new CardCatalogService(dir);
+
+            Assert.NotNull(catalog.LastCacheLoadError);
+            Assert.NotEmpty(catalog.Catalog);                 // 내장 카드로 실행
+            Assert.False(catalog.SaveCache());                // 이후 저장(동기화 등)도 막는다
+            Assert.Equal(broken, System.IO.File.ReadAllText(cachePath));
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public void ApiCardParser_ShouldMapCurrentApiFieldsAndOnlyLeadingKeywords()
     {
         // DigimonCard.io 현재 응답 형식 (id / main_effect / source_effect, 키워드는 전각 괄호)

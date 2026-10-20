@@ -80,7 +80,8 @@ internal static class SentenceParser
             int cost = int.Parse(special.Groups["n"].Value);
             bool exact = special.Groups["names"].Success;
             var names = Regex.Matches(special.Groups[exact ? "names" : "inname"].Value, @"\[([^\]]+)\]").Select(x => x.Groups[1].Value).ToList();
-            def?.SpecialEvolution(d => names.Any(n => exact ? d.TopCard.Name.Equals(n, StringComparison.OrdinalIgnoreCase) || TargetSpec.NameHas(d.TopCard, n) : TargetSpec.NameHas(d.TopCard, n)), cost);
+            // "Your [Agumon]"은 카드명이 정확히 같은 디지몬만 ("SnowAgumon"은 아님), "with [Agumon] in its name"은 이름에 포함하면 된다
+            def?.SpecialEvolution(d => names.Any(n => exact ? d.TopCard.Name.Equals(n, StringComparison.OrdinalIgnoreCase) : TargetSpec.NameHas(d.TopCard, n)), cost);
             return null;
         }
         // ≪디지섭션 -N≫: 패에서 이 카드로 진화할 때 자신의 디지몬 1마리를 레스트시켜 진화 코스트 -N
