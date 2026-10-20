@@ -21,16 +21,18 @@ internal static class AiBoard
         + (d.HasBlocker ? 1.5 : 0);
 
     /// <summary>시큐리티 1장의 가치 — 상대 시큐리티가 적을수록 한 장이 더 크다 (다이렉트 어택에 가까워짐)</summary>
-    public static double SecurityCardValue(int remainingSecurity) => 3.0 + Math.Max(0, 5 - remainingSecurity) * 0.8;
+    public static double SecurityCardValue(int remainingSecurity, SmartAiTuning t) =>
+        t.SecurityBase + Math.Max(0, 5 - remainingSecurity) * t.SecurityStep;
 
     /// <summary>시큐리티 체크 checks장 중 한 번이라도 시큐리티 디지몬 · 옵션에 당해 소멸할 어림 확률</summary>
-    public static double SecurityDeathChance(int attackerDp, int checks)
+    public static double SecurityDeathChance(int attackerDp, int checks, SmartAiTuning t)
     {
         double perCheck = attackerDp >= 10000 ? 0.08
             : attackerDp >= 8000 ? 0.18
             : attackerDp >= 6000 ? 0.30
             : attackerDp >= 4000 ? 0.45
             : 0.60;
+        perCheck = Math.Clamp(perCheck * t.DeathRiskScale, 0, 1);
         return 1 - Math.Pow(1 - perCheck, Math.Max(1, checks));
     }
 
@@ -64,7 +66,7 @@ internal static class AiBoard
     /// 어택 한 번의 어림 점수. 블록 · 시큐리티 체크 · 다음 플레이어 턴에 레스트 상태로 맞을 위험까지 본다.
     /// 다이렉트 어택(시큐리티 0장, 블록 없음)은 승리이므로 매우 큰 점수.
     /// </summary>
-    public static double AttackScore(GameState state, CardInstance attacker, CardInstance? target)
+    public static double AttackScore(GameState state, CardInstance attacker, CardInstance? target, SmartAiTuning t)
     {
         var player = state.Player;
         var blocker = ExpectedBlocker(state, attacker, target);
@@ -84,8 +86,8 @@ internal static class AiBoard
             if (security == 0)
                 return 1000;                                 // 다이렉트 어택 = 승리
             int taken = Math.Min(checks, security);
-            double gain = Enumerable.Range(0, taken).Sum(i => SecurityCardValue(security - i));
-            double death = SecurityDeathChance(attacker.GetCurrentDP(), taken);
+            double gain = Enumerable.Range(0, taken).Sum(i => SecurityCardValue(security - i, t));
+            double death = SecurityDeathChance(attacker.GetCurrentDP(), taken, t);
             score = gain - death * Value(attacker);
             survives = death < 0.5;
         }
@@ -95,7 +97,7 @@ internal static class AiBoard
         {
             int threat = player.BattleArea.Select(d => d.GetCurrentDP()).DefaultIfEmpty(0).Max();
             if (threat > attacker.GetCurrentDP())
-                score -= 0.35 * Value(attacker);
+                score -= t.ExposurePenalty * Value(attacker);
         }
         return score;
     }
@@ -135,6 +137,50 @@ internal static class AiBoard
         if (text.Contains("코스트를 지불하지 않고") && text.Contains("등장")) v += 4;
         if (text.Contains("시큐리티") && text.Contains("DP를 +")) v -= 0.5;   // 방어용 버프는 내 턴에 쓰면 이득이 작다
         return v;
+    }
+
+    /// <summary>
+    /// 옵션 [메인] 효과의 이득을 실제 대상으로 어림: 제거 · 바운스는 없앨 수 있는 가장 가치 있는 상대 디지몬(N마리까지면 N마리)의 가치,
+    /// 레스트는 막고 있던 액티브 ≪블로커≫가 있을 때만 크게, 그 밖에는 문장 점수.
+    /// </summary>
+    public static double OptionValue(GameState state, PlayerZones owner, string mainText)
+    {
+        var enemy = ReferenceEquals(owner, state.Player) ? state.DummyOpponent : state.Player;
+        int? cap = Regex.Match(mainText, @"DP (\d+) 이하|(\d+) DP or less", RegexOptions.IgnoreCase) is { Success: true } m
+            ? int.Parse(m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
+            : null;
+        int count = Regex.Match(mainText, @"(\d+)마리까지|up to (\d+)", RegexOptions.IgnoreCase) is { Success: true } c
+            ? int.Parse(c.Groups[1].Success ? c.Groups[1].Value : c.Groups[2].Value)
+            : 1;
+        var hittable = enemy.BattleArea.Where(d => cap == null || d.GetCurrentDP() <= cap).OrderByDescending(Value).ToList();
+        bool targetsEnemy = Regex.IsMatch(mainText, @"상대의 디지몬|opponent's Digimon", RegexOptions.IgnoreCase);
+
+        if (targetsEnemy && Regex.IsMatch(mainText, @"소멸시킨다|\bdelete\b", RegexOptions.IgnoreCase))
+            return hittable.Take(count).Sum(Value);
+        if (targetsEnemy && Regex.IsMatch(mainText, @"패로 (?:되|돌)|to (?:the|its owner's) hand", RegexOptions.IgnoreCase))
+            return hittable.Take(count).Sum(Value) * 0.8;
+        if (targetsEnemy && Regex.IsMatch(mainText, @"레스트시킨다|\bsuspend\b", RegexOptions.IgnoreCase))
+            return hittable.Any(d => d.HasBlocker && !d.IsSuspended) ? 2.5 : 0.5;
+        return TextValue(mainText);
+    }
+
+    /// <summary>
+    /// 이 옵션이 꼭 없애야 할 상대 디지몬을 없애는지: 제거 · 바운스이고, 대상 조건에 맞는 상대 디지몬 중
+    /// 어택을 막을 액티브 ≪블로커≫ 또는 내 어느 디지몬보다 DP가 큰 디지몬이 있을 때.
+    /// </summary>
+    public static bool OptionRemovesKeyThreat(GameState state, PlayerZones owner, string mainText)
+    {
+        bool targetsEnemy = Regex.IsMatch(mainText, @"상대의 디지몬|opponent's Digimon", RegexOptions.IgnoreCase);
+        bool removes = Regex.IsMatch(mainText, @"소멸시킨다|\bdelete\b|패로 (?:되|돌)|to (?:the|its owner's) hand", RegexOptions.IgnoreCase);
+        if (!targetsEnemy || !removes)
+            return false;
+        var enemy = ReferenceEquals(owner, state.Player) ? state.DummyOpponent : state.Player;
+        int? cap = Regex.Match(mainText, @"DP (\d+) 이하|(\d+) DP or less", RegexOptions.IgnoreCase) is { Success: true } m
+            ? int.Parse(m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
+            : null;
+        int myBest = owner.BattleArea.Select(d => d.GetCurrentDP()).DefaultIfEmpty(0).Max();
+        return enemy.BattleArea.Any(d => (cap == null || d.GetCurrentDP() <= cap)
+                                         && ((d.HasBlocker && !d.IsSuspended) || d.GetCurrentDP() > myBest));
     }
 
     /// <summary>

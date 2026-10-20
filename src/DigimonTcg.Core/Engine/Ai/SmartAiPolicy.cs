@@ -17,14 +17,22 @@ namespace DigimonTcg.Core.Engine.Ai;
 /// </summary>
 public sealed class SmartAiPolicy : IAiPolicy
 {
+    private static readonly LegacyAiPolicy Legacy = new();
+
+    public SmartAiTuning Tuning { get; }
+
+    public SmartAiPolicy(SmartAiTuning? tuning = null)
+    {
+        Tuning = tuning ?? new SmartAiTuning();
+    }
+
     public string Name => "개선 AI (한 수 앞 평가)";
     public int MaxMemoryHandOver => 3;
 
-    /// <summary>이 점수를 넘는 어택만 한다 (작은 이득을 위해 디지몬을 위험에 빠뜨리지 않는다)</summary>
-    private const double AttackThreshold = 0.25;
-
     public AiEvolution? ChooseEvolution(GoldfishEngine engine, int memory, bool beforeAttacks)
     {
+        if (!Tuning.SmartEvolution)
+            return Legacy.ChooseEvolution(engine, memory, beforeAttacks);
         var ai = engine.State.DummyOpponent;
         int limit = beforeAttacks ? memory : memory + MaxMemoryHandOver;
         AiEvolution? best = null;
@@ -57,11 +65,13 @@ public sealed class SmartAiPolicy : IAiPolicy
 
     public AiOptionUse? ChooseOption(GoldfishEngine engine, int memory, bool beforeAttacks)
     {
+        if (!Tuning.UseOptions)
+            return null;
         var state = engine.State;
         var ai = state.DummyOpponent;
         int limit = beforeAttacks ? memory : memory + MaxMemoryHandOver;
         CardData? best = null;
-        double bestScore = 0.5;
+        double bestScore = Tuning.OptionMinScore;
         foreach (var card in ai.Hand.Where(c => c.Type == CardType.Option).Distinct())
         {
             int cost = CardScripts.EffectivePlayCost(ai, card);
@@ -70,11 +80,13 @@ public sealed class SmartAiPolicy : IAiPolicy
             string main = AiBoard.MainPart(card.EffectText);
             if (!AiBoard.HasUsefulTarget(state, ai, main))
                 continue;
-            double value = AiBoard.TextValue(main);
+            if (Tuning.SituationalOptions && (cost > memory || !AiBoard.OptionRemovesKeyThreat(state, ai, main)))
+                continue;
+            double value = Tuning.TargetAwareOptions ? AiBoard.OptionValue(state, ai, main) : AiBoard.TextValue(main);
             // 강화 효과는 어택 전에 써야 의미가 있다
             if (!beforeAttacks && value < 2.5)
                 continue;
-            double score = value - cost * 0.6 - Math.Max(0, cost - memory) * 0.4;
+            double score = value - cost * Tuning.OptionCostWeight - Math.Max(0, cost - memory) * 0.4;
             if (score > bestScore)
             {
                 bestScore = score;
@@ -86,6 +98,8 @@ public sealed class SmartAiPolicy : IAiPolicy
 
     public AiAttack? ChooseNextAttack(GoldfishEngine engine, int memory)
     {
+        if (!Tuning.SmartAttack)
+            return Legacy.ChooseNextAttack(engine, memory);
         var state = engine.State;
         var ai = state.DummyOpponent;
         var attackers = ai.BattleArea.Where(engine.CanAttackThisTurn).ToList();
@@ -96,16 +110,16 @@ public sealed class SmartAiPolicy : IAiPolicy
         targets.AddRange(state.Player.BattleArea.Where(d => d.IsSuspended));
 
         AiAttack? best = null;
-        double bestScore = AttackThreshold;
+        double bestScore = Tuning.AttackThreshold;
         foreach (var attacker in attackers)
         {
             // 혼자 남은 ≪블로커≫는 시큐리티를 지키도록 남겨 둔다 (다이렉트 어택 기회는 예외)
             bool loneBlocker = attacker.HasBlocker && ai.BattleArea.Count == 1;
             foreach (var target in targets)
             {
-                double score = AiBoard.AttackScore(state, attacker, target);
+                double score = AiBoard.AttackScore(state, attacker, target, Tuning);
                 if (loneBlocker && score < 1000)
-                    score -= 2.5;
+                    score -= Tuning.LoneBlockerPenalty;
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -118,12 +132,16 @@ public sealed class SmartAiPolicy : IAiPolicy
 
     public bool ShouldUseMainAbility(GoldfishEngine engine, GoldfishEngine.MainAbility ability, int memory)
     {
+        if (!Tuning.SmartMainAbility)
+            return Legacy.ShouldUseMainAbility(engine, ability, memory);
         string text = AiBoard.MainPart(ability.Card.EffectText);
         return AiBoard.TextValue(text) > 0 && AiBoard.HasUsefulTarget(engine.State, engine.State.DummyOpponent, text);
     }
 
     public CardData? ChooseTamerToPlay(GoldfishEngine engine, int memory)
     {
+        if (!Tuning.SmartPlay)
+            return Legacy.ChooseTamerToPlay(engine, memory);
         var ai = engine.State.DummyOpponent;
         if (ai.Tamers.Count >= 2)
             return null;
@@ -135,6 +153,8 @@ public sealed class SmartAiPolicy : IAiPolicy
 
     public CardData? ChooseDigimonToPlay(GoldfishEngine engine, int memory)
     {
+        if (!Tuning.SmartPlay)
+            return Legacy.ChooseDigimonToPlay(engine, memory);
         var state = engine.State;
         var ai = state.DummyOpponent;
         CardData? best = null;
@@ -160,4 +180,43 @@ public sealed class SmartAiPolicy : IAiPolicy
         }
         return best;
     }
+}
+
+/// <summary>
+/// 개선 AI의 점수 기준 · 켜고 끌 수 있는 판단 (승률 측정으로 조정한 값이 기본값).
+/// Smart* · UseOptions를 끄면 그 결정만 기존 AI(Legacy)와 같아진다 — 어떤 판단이 승률에 도움이 되는지 나눠 잴 때 쓴다.
+/// 조정 근거 (추천 덱 36조합 × 시드 20 = 720판, 같은 상대 봇): 기존 AI 56.5% → 처음 값 58.6% → 지금 값 66.8%.
+/// 승률을 올린 것은 어택 판단(끄면 51.5%)과 공격적인 위험 기준이었고, 옵션을 자유롭게 쓰면 메모리를 상대에게 넘기는
+/// 템포 손해로 3~5%p 낮아져 "꼭 필요할 때만"(SituationalOptions)으로 두었다.
+/// </summary>
+public sealed record SmartAiTuning
+{
+    /// <summary>이 점수를 넘는 어택만 한다</summary>
+    public double AttackThreshold { get; init; } = -0.5;
+    /// <summary>어택 뒤 레스트 상태로 상대의 더 센 디지몬에게 맞을 위험 (내 디지몬 가치에 곱함)</summary>
+    public double ExposurePenalty { get; init; } = 0;
+    /// <summary>시큐리티 체크에서 질 어림 확률의 배율 (1 = 기본표)</summary>
+    public double DeathRiskScale { get; init; } = 0.5;
+    /// <summary>시큐리티 1장 가치 = Base + (5 − 남은 장수) × Step</summary>
+    public double SecurityBase { get; init; } = 3.0;
+    public double SecurityStep { get; init; } = 0.8;
+    /// <summary>혼자 남은 ≪블로커≫로 어택할 때 깎는 점수</summary>
+    public double LoneBlockerPenalty { get; init; } = 2.5;
+
+    public bool SmartAttack { get; init; } = true;
+    public bool SmartEvolution { get; init; } = true;
+    public bool SmartPlay { get; init; } = true;
+    public bool SmartMainAbility { get; init; } = true;
+    public bool UseOptions { get; init; } = true;
+    /// <summary>옵션은 (효과 점수 − 코스트 비용)이 이 값을 넘을 때만 쓴다</summary>
+    public double OptionMinScore { get; init; } = 0.5;
+    /// <summary>옵션 코스트 1당 깎는 점수</summary>
+    public double OptionCostWeight { get; init; } = 0.6;
+    /// <summary>옵션 점수를 실제 대상(없앨 수 있는 상대 디지몬의 가치)으로 어림할지 (false = 문장 점수만)</summary>
+    public bool TargetAwareOptions { get; init; } = false;
+    /// <summary>
+    /// 옵션은 꼭 필요할 때만: 어택을 막는 액티브 ≪블로커≫나 내 어느 디지몬보다 센 상대 디지몬을 없애는 제거 · 바운스이고,
+    /// 지금 메모리 안에서 (상대에게 메모리를 넘기지 않고) 쓸 수 있을 때. 메모리를 상대에게 넘기는 템포 손해가 커서 이 기준이 승률에 낫다.
+    /// </summary>
+    public bool SituationalOptions { get; init; } = true;
 }

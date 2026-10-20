@@ -63,19 +63,34 @@ public class AiPolicyTests
     }
 
     [Fact]
-    public void Smart_ShouldUseARemovalOption_OnlyWhenThereIsATarget()
+    public void Smart_ShouldUseARemovalOption_OnlyWhenItRemovesAKeyThreat()
     {
         var (state, engine, cards) = AiTurn();
-        Field(state.DummyOpponent, cards["ST1-07"]);                    // 빨강 디지몬 (옵션 색 조건)
+        Field(state.DummyOpponent, cards["ST1-02"]);                    // 빨강 디지몬 DP 3000 (옵션 색 조건)
         state.DummyOpponent.Hand.Add(cards["ST1-15"]);                  // 기가 디스트로이어: DP 4000 이하 상대 2마리까지 소멸 (코스트 6)
 
         var policy = new SmartAiPolicy();
         Assert.Null(policy.ChooseOption(engine, memory: 6, beforeAttacks: true));   // 상대 필드가 비어 있음
 
-        Field(state.Player, cards["ST1-03"]);                           // DP 2000 → 대상 있음
-        Field(state.Player, cards["ST1-02"]);
+        Field(state.Player, cards["ST1-03"]);                           // DP 2000 — 내 디지몬보다 약하다
+        Assert.Null(policy.ChooseOption(engine, memory: 6, beforeAttacks: true));   // 꼭 없앨 상대가 아니면 메모리를 아낀다
+
+        Field(state.Player, cards["ST1-04"]);                           // DP 4000 — 내 어느 디지몬보다 세다
         Assert.Equal(cards["ST1-15"], policy.ChooseOption(engine, memory: 6, beforeAttacks: true)?.Card);
-        Assert.Null(policy.ChooseOption(engine, memory: 2, beforeAttacks: true));   // 어택 전에는 메모리를 넘기지 않는다
+        Assert.Null(policy.ChooseOption(engine, memory: 2, beforeAttacks: true));   // 상대에게 메모리를 넘기면서까지 쓰지 않는다
+    }
+
+    [Fact]
+    public void Smart_WithFreeOptionUse_ShouldUseRemovalWheneverThereIsATarget()
+    {
+        var (state, engine, cards) = AiTurn();
+        Field(state.DummyOpponent, cards["ST1-07"]);                    // DP 4000
+        state.DummyOpponent.Hand.Add(cards["ST1-15"]);
+        Field(state.Player, cards["ST1-03"]);
+        Field(state.Player, cards["ST1-02"]);
+
+        var free = new SmartAiPolicy(new SmartAiTuning { SituationalOptions = false });
+        Assert.Equal(cards["ST1-15"], free.ChooseOption(engine, memory: 6, beforeAttacks: true)?.Card);
     }
 
     [Fact]
