@@ -77,12 +77,25 @@ public static class KoreanCardData
     public static string DisplayName(CardData card) =>
         Get(card.CardId) is { Name.Length: > 0 } ko ? ko.Name : card.Name;
 
-    /// <summary>메인 효과 표시 — 테이머 · 옵션은 [시큐리티] 효과(하단 텍스트)까지 붙인다 (내장 카드와 같은 형식)</summary>
+    /// <summary>
+    /// 메인 효과 표시 — 테이머 · 옵션은 [시큐리티] 효과(하단 텍스트)까지 붙인다 (내장 카드와 같은 형식).
+    /// 순서: ① 공식 한글(cards_ko.json) ② 내장 카드는 원래 문구(이미 한글판에서 옮긴 한글) ③ 생성한 한글(KoreanEffectRenderer) ④ 영어 원문
+    /// </summary>
     public static string DisplayEffectText(CardData card)
     {
         var ko = Get(card.CardId);
         if (ko == null)
-            return card.EffectText;
+        {
+            if (StarterDecks.IsBuiltInCard(card.CardId))
+                return card.EffectText;
+            if (card.Type is CardType.Tamer or CardType.Option)
+            {
+                string genMain = Generated(card, inherited: false);
+                string genSec = Generated(card, inherited: true);
+                return genSec.Length == 0 ? genMain : genMain.Length == 0 ? genSec : genMain + "\n" + genSec;
+            }
+            return Generated(card, inherited: false);
+        }
         string main = Clean(ko.MainText);
         if (card.Type is CardType.Tamer or CardType.Option)
         {
@@ -96,9 +109,28 @@ public static class KoreanCardData
     {
         var ko = Get(card.CardId);
         if (ko == null)
-            return card.InheritedEffectText;
+        {
+            if (StarterDecks.IsBuiltInCard(card.CardId))
+                return card.InheritedEffectText;
+            return card.Type is CardType.Tamer or CardType.Option ? string.Empty : Generated(card, inherited: true);
+        }
         return card.Type is CardType.Tamer or CardType.Option ? string.Empty : Clean(ko.SourceText);
     }
+
+    /// <summary>공식 한글이 없는 카드: 영어 효과 문장으로 만든 한글 (절 하나도 번역하지 못하면 영어 원문)</summary>
+    private static string Generated(CardData card, bool inherited)
+    {
+        string english = inherited ? card.InheritedEffectText : card.EffectText;
+        if (string.IsNullOrWhiteSpace(english))
+            return string.Empty;
+        return GeneratedCache.GetOrAdd((card.CardId, inherited), _ =>
+        {
+            try { return Engine.Effects.KoreanEffectRenderer.Render(card, inherited) ?? english; }
+            catch { return english; }   // 번역 오류로 화면이 깨지지 않게 — 영어 원문
+        });
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string CardId, bool Inherited), string> GeneratedCache = new();
 
     public static IReadOnlyList<string> DisplayTraits(CardData card) =>
         Get(card.CardId) is { Traits.Count: > 0 } ko ? ko.Traits : card.Traits;

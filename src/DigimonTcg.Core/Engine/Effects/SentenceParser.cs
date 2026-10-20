@@ -298,6 +298,10 @@ internal static class SentenceParser
     }
 
     /// <summary>설명문 괄호 · 라벨("Security Effect", "Inherited Effect", "・") · 특수 공백 정리 (키워드 ＜＞ 안의 괄호는 보존)</summary>
+    /// <summary>한글 생성(KoreanEffectRenderer)이 같은 정리 · 문장 나누기를 쓰도록</summary>
+    internal static string NormalizeForRender(string clause) => Normalize(clause);
+    internal static List<string> SentencesForRender(string body) => MergeRevealSentences(SplitSentences(body));
+
     private static string Normalize(string clause)
     {
         string s = clause.Replace(" ", " ").Replace("’", "'").Replace("‘", "'").Trim();
@@ -2092,7 +2096,7 @@ internal static class SentenceParser
     private static (int Count, Func<CardData, bool> Match)? ParseCardPick(string part)
     {
         // "1 A card or 1 B card" — 어느 한쪽 조건
-        var alternatives = Regex.Split(part.Trim(), @"\s+or\s+(?=(?:up to )?(?:\d+|a|an) )", RegexOptions.IgnoreCase);
+        var alternatives = Regex.Split(part.Trim(), @"(?<!level \d+)\s+or\s+(?=(?:up to )?(?:\d+|a|an) )", RegexOptions.IgnoreCase);   // "level 4 or 5"는 나누지 않는다
         // "1 purple Digimon card or Option card" — 뒤쪽에 수가 없으면 앞의 수를 붙인다
         var lead = Regex.Match(part.Trim(), @"^(?:up to )?(?:\d+|a|an) ");
         if (alternatives.Length == 1 && lead.Success)
@@ -2112,7 +2116,7 @@ internal static class SentenceParser
     private static (int Count, Func<CardData, bool> Match)? ParseSingleCardPick(string part)
     {
         var m = Regex.Match(part.Trim(),
-            $@"^(?:up to )?(?<n>\d+|a|an|all) (?<adj>(?:(?:{TargetSpec.NameList}(?:traits?)?|level \d+(?: or (?:lower|higher))?|play costs? \d+ or (?:lower|higher|less|more)|(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)\s+)*)(?<kind>Digimon|Tamer|Option)?\s*(?:cards?)?(?<filter>.*)$",
+            $@"^(?:up to )?(?<n>\d+|a|an|all) (?<adj>(?:(?:{TargetSpec.NameList}(?: traits?)?|level \d+(?: or (?:lower|higher|(?:level )?\d+))?|play costs? \d+ or (?:lower|higher|less|more)|(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)\s+)*)(?<kind>Digimon|Tamer|Option)?\s*(?:cards?)?(?<filter>.*)$",
             RegexOptions.IgnoreCase);
         if (!m.Success) return null;
         int count = int.TryParse(m.Groups["n"].Value, out int k) ? k : m.Groups["n"].Value.Equals("all", StringComparison.OrdinalIgnoreCase) ? 99 : 1;
@@ -2123,7 +2127,7 @@ internal static class SentenceParser
         else if (kind == "option") filters.Add(c => c.Type == CardType.Option);
 
         string adj = m.Groups["adj"].Value;
-        foreach (Match a in Regex.Matches(adj, $@"(?<names>{TargetSpec.NameList})(?<trait> traits?)?|level (?<lv>\d+)(?: or (?<dir>lower|higher))?|play costs? (?<pc>\d+) or (?<pdir>lower|higher|less|more)|(?<colors>(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)", RegexOptions.IgnoreCase))
+        foreach (Match a in Regex.Matches(adj, $@"(?<names>{TargetSpec.NameList})(?<trait> traits?)?|level (?<lv>\d+)(?: or (?:(?<dir>lower|higher)|(?:level )?(?<lv2>\d+)))?|play costs? (?<pc>\d+) or (?<pdir>lower|higher|less|more)|(?<colors>(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)", RegexOptions.IgnoreCase))
         {
             if (a.Groups["names"].Success)
             {
@@ -2143,7 +2147,8 @@ internal static class SentenceParser
             else if (a.Groups["lv"].Success)
             {
                 int lv = int.Parse(a.Groups["lv"].Value); string dir = a.Groups["dir"].Value.ToLowerInvariant();
-                filters.Add(dir == "lower" ? c => c.Level <= lv : dir == "higher" ? c => c.Level >= lv : c => c.Level == lv);
+                if (a.Groups["lv2"].Success) { int lv2 = int.Parse(a.Groups["lv2"].Value); filters.Add(c => c.Level == lv || c.Level == lv2); }   // "level 4 or 5"
+                else filters.Add(dir == "lower" ? c => c.Level <= lv : dir == "higher" ? c => c.Level >= lv : c => c.Level == lv);
             }
             else if (a.Groups["colors"].Success)
             {
