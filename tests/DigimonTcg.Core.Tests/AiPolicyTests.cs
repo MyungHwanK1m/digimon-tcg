@@ -1,0 +1,122 @@
+using System.Collections.Generic;
+using System.Linq;
+using DigimonTcg.Core.Data;
+using DigimonTcg.Core.Engine;
+using DigimonTcg.Core.Engine.Ai;
+using DigimonTcg.Core.Models;
+using Xunit;
+
+namespace DigimonTcg.Core.Tests;
+
+/// <summary>AI 정책의 결정 (상태를 바꾸지 않는 판단만) — 개선 AI의 한 수 앞 평가 · 옵션 사용 · 기존 AI와 같은 결정</summary>
+public class AiPolicyTests
+{
+    private static (GameState State, GoldfishEngine Engine, Dictionary<string, CardData> Cards) AiTurn()
+    {
+        var state = new GameState { CurrentTurn = 3, CurrentPhase = Phase.TurnEnd, TurnSequence = 6, CurrentStage = PracticeStage.Stage3_AiBattle };
+        var cards = StarterDecks.GetAllCatalogCards().ToDictionary(c => c.CardId);
+        for (int i = 0; i < 5; i++)
+            state.Player.SecurityStack.Add(cards["ST2-02"]);
+        return (state, new GoldfishEngine(state), cards);
+    }
+
+    private static CardInstance Field(PlayerZones zones, CardData card, bool suspended = false)
+    {
+        var inst = new CardInstance(card, currentTurn: 1) { IsSuspended = suspended };
+        zones.BattleArea.Add(inst);
+        return inst;
+    }
+
+    [Fact]
+    public void Smart_ShouldGoForTheDirectAttack_WhenThePlayerHasNoSecurity()
+    {
+        var (state, engine, cards) = AiTurn();
+        state.Player.SecurityStack.Clear();
+        var attacker = Field(state.DummyOpponent, cards["ST1-02"]);   // DP 3000이어도 다이렉트 어택이면 승리
+
+        var attack = new SmartAiPolicy().ChooseNextAttack(engine, memory: 2);
+
+        Assert.Equal(new AiAttack(attacker, null), attack);
+    }
+
+    [Fact]
+    public void Smart_ShouldNotAttackIntoABlockerThatWouldDeleteIt()
+    {
+        var (state, engine, cards) = AiTurn();
+        Field(state.DummyOpponent, cards["ST1-02"]);                    // DP 3000
+        Field(state.Player, cards["ST1-06"]);                           // 코어드라몬 ≪블로커≫ DP 6000 (액티브)
+
+        Assert.Null(new SmartAiPolicy().ChooseNextAttack(engine, memory: 2));
+        Assert.NotNull(new LegacyAiPolicy().ChooseNextAttack(engine, memory: 2));   // 기존 AI는 그대로 어택
+    }
+
+    [Fact]
+    public void Smart_ShouldPreferAWinnableFightOverARiskySecurityAttack()
+    {
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-04"]);    // 드라코몬 DP 4000
+        var restedWeak = Field(state.Player, cards["ST1-03"], suspended: true);   // 아구몬 DP 2000, 레스트
+
+        var attack = new SmartAiPolicy().ChooseNextAttack(engine, memory: 2);
+
+        Assert.Equal(new AiAttack(attacker, restedWeak), attack);
+    }
+
+    [Fact]
+    public void Smart_ShouldUseARemovalOption_OnlyWhenThereIsATarget()
+    {
+        var (state, engine, cards) = AiTurn();
+        Field(state.DummyOpponent, cards["ST1-07"]);                    // 빨강 디지몬 (옵션 색 조건)
+        state.DummyOpponent.Hand.Add(cards["ST1-15"]);                  // 기가 디스트로이어: DP 4000 이하 상대 2마리까지 소멸 (코스트 6)
+
+        var policy = new SmartAiPolicy();
+        Assert.Null(policy.ChooseOption(engine, memory: 6, beforeAttacks: true));   // 상대 필드가 비어 있음
+
+        Field(state.Player, cards["ST1-03"]);                           // DP 2000 → 대상 있음
+        Field(state.Player, cards["ST1-02"]);
+        Assert.Equal(cards["ST1-15"], policy.ChooseOption(engine, memory: 6, beforeAttacks: true)?.Card);
+        Assert.Null(policy.ChooseOption(engine, memory: 2, beforeAttacks: true));   // 어택 전에는 메모리를 넘기지 않는다
+    }
+
+    [Fact]
+    public void Smart_ShouldRespectOptionColorRequirement()
+    {
+        var (state, engine, cards) = AiTurn();
+        Field(state.DummyOpponent, cards["ST2-02"]);                    // 파란 디지몬만 있음
+        state.DummyOpponent.Hand.Add(cards["ST1-15"]);                  // 빨강 옵션
+        Field(state.Player, cards["ST1-03"]);
+
+        Assert.Null(new SmartAiPolicy().ChooseOption(engine, memory: 8, beforeAttacks: true));
+    }
+
+    [Fact]
+    public void Legacy_ShouldNeverUseOptions_AndAttackWithEveryoneByDp()
+    {
+        var (state, engine, cards) = AiTurn();
+        var weak = Field(state.DummyOpponent, cards["ST1-02"]);
+        var strong = Field(state.DummyOpponent, cards["ST1-07"]);
+        state.DummyOpponent.Hand.Add(cards["ST1-15"]);
+        Field(state.Player, cards["ST1-03"]);
+
+        var legacy = new LegacyAiPolicy();
+        Assert.Null(legacy.ChooseOption(engine, memory: 8, beforeAttacks: true));
+        Assert.Equal(new AiAttack(strong, null), legacy.ChooseNextAttack(engine, memory: 0));
+        strong.IsSuspended = true;
+        Assert.Equal(new AiAttack(weak, null), legacy.ChooseNextAttack(engine, memory: 0));
+    }
+
+    [Fact]
+    public void Smart_ShouldPreferEvolvingADigimonThatCanAttackThisTurn()
+    {
+        var (state, engine, cards) = AiTurn();
+        var ready = Field(state.DummyOpponent, cards["ST1-03"]);        // 아구몬 Lv.3 (어택 가능)
+        state.DummyOpponent.BreedingArea = new CardInstance(cards["ST1-01"], currentTurn: 2);   // 코로몬 Lv.2
+        state.DummyOpponent.Hand.Add(cards["ST1-07"]);                  // 그레이몬 Lv.4 (아구몬 위)
+        state.DummyOpponent.Hand.Add(cards["ST1-03"]);                  // 아구몬 Lv.3 (코로몬 위)
+
+        var evo = new SmartAiPolicy().ChooseEvolution(engine, memory: 3, beforeAttacks: true);
+
+        Assert.Equal(ready, evo?.Base);
+        Assert.Equal(cards["ST1-07"], evo?.Card);
+    }
+}
