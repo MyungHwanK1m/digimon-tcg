@@ -76,6 +76,9 @@ public sealed class EffectContext
     /// <summary>옵션: "Then, place this card in your battle area" — 트래시 대신 배틀 에어리어에 놓는다 (≪딜레이≫ 옵션)</summary>
     public bool PlaceInBattleArea { get; set; }
 
+    /// <summary>"~ would leave the battle area / be deleted" 효과가 떠나는 것 · 소멸을 막았는지 ("prevent it from leaving" · "it isn't deleted")</summary>
+    public bool PreventLeave { get; set; }
+
     /// <summary>문장 파서의 문장을 하나라도 처리하려 했는지 · 그중 하나라도 실제로 처리했는지 — [메인] 기동 효과가 아무것도 하지 않았으면 사용으로 치지 않는다</summary>
     public bool StepsRan { get; set; }
     public bool AnyStepResolved { get; set; }

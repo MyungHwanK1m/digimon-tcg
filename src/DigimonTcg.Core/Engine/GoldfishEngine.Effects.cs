@@ -119,6 +119,8 @@ public partial class GoldfishEngine
         var ctx = new EffectContext(this, owner, self, other, chosenTarget) { TriggerCard = triggerCard };
 
         _effectDepth++;
+        var outerEffectOwner = CurrentEffectOwner;
+        CurrentEffectOwner = owner;
         try
         {
             if (mainCard != null && CardScripts.For(mainCard) is { } main)
@@ -146,10 +148,58 @@ public partial class GoldfishEngine
         finally
         {
             _effectDepth--;
+            CurrentEffectOwner = outerEffectOwner;
         }
         if (_effectDepth == 0)
             FlushPendingTriggers();
         return ctx;
+    }
+
+    /// <summary>지금 처리 중인 효과의 주인 (효과 밖이면 null) — "자신의 효과 이외로" 같은 판단</summary>
+    internal PlayerZones? CurrentEffectOwner { get; private set; }
+
+    /// <summary>지금 배틀 에어리어를 떠나려는 디지몬의 사정 ("would leave the battle area / be deleted" 효과의 조건이 본다)</summary>
+    internal sealed record LeaveInfo(CardInstance Digimon, bool Deletion, bool InBattle, bool ByOwnEffect);
+    internal LeaveInfo? CurrentLeave { get; private set; }
+
+    /// <summary>
+    /// "When ~ would leave the battle area / would be deleted" 효과를 발휘하고, 그중 하나라도 떠나는 것을 막았으면 true.
+    /// deletion = 소멸로 떠나는지, inBattle = 배틀로 소멸하는지. 자신의 효과로 떠나는지는 지금 처리 중인 효과의 주인으로 판단한다.
+    /// </summary>
+    internal bool TryPreventLeave(PlayerZones zones, CardInstance inst, bool deletion, bool inBattle)
+    {
+        if (!zones.BattleArea.Contains(inst))
+            return false;
+        var outer = CurrentLeave;
+        CurrentLeave = new LeaveInfo(inst, deletion, inBattle, !inBattle && ReferenceEquals(CurrentEffectOwner, zones));
+        bool prevented = false;
+        try
+        {
+            prevented |= RunEffects(EffectTrigger.ThisDigimonWouldLeave, zones, inst, inst.TopCard).PreventLeave;
+            if (deletion && !prevented)
+                prevented |= RunEffects(EffectTrigger.ThisDigimonWouldBeDeleted, zones, inst, inst.TopCard).PreventLeave;
+            foreach (var d in zones.BattleArea.Where(d => !ReferenceEquals(d, inst)).ToList())
+            {
+                if (prevented) break;
+                prevented |= RunEffects(EffectTrigger.AllyDigimonWouldLeave, zones, d, d.TopCard, other: inst).PreventLeave;
+                if (deletion && !prevented)
+                    prevented |= RunEffects(EffectTrigger.AllyDigimonWouldBeDeleted, zones, d, d.TopCard, other: inst).PreventLeave;
+            }
+            foreach (var card in zones.Tamers.Concat(zones.OptionsInPlay.Select(p => p.Card)).Distinct().ToList())
+            {
+                if (prevented) break;
+                prevented |= RunEffects(EffectTrigger.AllyDigimonWouldLeave, zones, null, card, other: inst, includeInherited: false).PreventLeave;
+                if (deletion && !prevented)
+                    prevented |= RunEffects(EffectTrigger.AllyDigimonWouldBeDeleted, zones, null, card, other: inst, includeInherited: false).PreventLeave;
+            }
+        }
+        finally
+        {
+            CurrentLeave = outer;
+        }
+        if (prevented)
+            EffectLog(zones, $"[{inst.TopCard.Name}]은(는) 효과로 배틀 에어리어를 떠나지 않습니다.");
+        return prevented && zones.BattleArea.Contains(inst);
     }
 
     // 효과 처리 중에 일어난 [소멸 시] · "소멸했을 때"는 그 효과를 모두 처리한 뒤에 발휘한다 (공식 Q&A ST6-15 Q1)
@@ -455,6 +505,8 @@ public partial class GoldfishEngine
         if (!zones.BattleArea.Contains(instance))
             return false;
         if (TryPreventDeletion(zones, instance, cause))
+            return false;
+        if (TryPreventLeave(zones, instance, deletion: true, inBattle: cause == DeletionCause.Battle))
             return false;
         RemoveDeleted(zones, instance, cause);
         return true;
@@ -807,6 +859,8 @@ public partial class GoldfishEngine
 
     internal void ReturnToHand(PlayerZones zones, CardInstance inst)
     {
+        if (TryPreventLeave(zones, inst, deletion: false, inBattle: false))
+            return;
         if (!zones.BattleArea.Remove(inst))
             return;
         ApplyOverflow(zones, inst.GetEvolutionStackBottomUp().Append(inst.TopCard));
@@ -883,6 +937,8 @@ public partial class GoldfishEngine
     /// <summary>디지몬을 덱 아래로 (맨 위 카드와 진화원 모두)</summary>
     internal void BottomDeck(PlayerZones zones, CardInstance inst)
     {
+        if (TryPreventLeave(zones, inst, deletion: false, inBattle: false))
+            return;
         if (!zones.BattleArea.Remove(inst))
             return;
         ApplyOverflow(zones, inst.GetEvolutionStackBottomUp().Append(inst.TopCard));
@@ -896,6 +952,8 @@ public partial class GoldfishEngine
     /// <summary>디지몬을 주인의 시큐리티 맨 위에 뒷면으로 (맨 위 카드만 — 진화원은 트래시)</summary>
     internal void PlaceOnSecurity(PlayerZones zones, CardInstance inst)
     {
+        if (TryPreventLeave(zones, inst, deletion: false, inBattle: false))
+            return;
         if (!zones.BattleArea.Remove(inst))
             return;
         ApplyOverflow(zones, inst.GetEvolutionStackBottomUp().Append(inst.TopCard));
@@ -1317,8 +1375,8 @@ public partial class GoldfishEngine
         bool defenderLoses = atkValue >= defValue;
 
         // 진 쪽이 ≪방벽≫ · ≪회피≫로 소멸을 막는지 먼저 정한다 (막으면 ≪길동무≫도 발동하지 않는다)
-        bool attackerDeleted = attackerLoses && !TryPreventDeletion(atkZones, attacker, DeletionCause.Battle);
-        bool defenderDeleted = defenderLoses && !TryPreventDeletion(defZones, defender, DeletionCause.Battle);
+        bool attackerDeleted = attackerLoses && !TryPreventDeletion(atkZones, attacker, DeletionCause.Battle) && !TryPreventLeave(atkZones, attacker, deletion: true, inBattle: true);
+        bool defenderDeleted = defenderLoses && !TryPreventDeletion(defZones, defender, DeletionCause.Battle) && !TryPreventLeave(defZones, defender, deletion: true, inBattle: true);
 
         if (attackerDeleted && !defenderLoses && HasRetaliation(attacker))
         {

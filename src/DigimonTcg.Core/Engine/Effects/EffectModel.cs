@@ -45,6 +45,10 @@ public enum EffectTrigger
     AllyDigiBurst,                  // 자신의 디지몬이 ≪디지버스트≫를 발휘했을 때 (Other = 그 디지몬)
     OpponentTamerPlayed,            // 상대가 테이머를 등장시켰을 때 (TriggerCard = 그 테이머)
     OpponentTamerSuspended,         // 상대의 테이머가 레스트 상태가 되었을 때 (TriggerCard = 그 테이머)
+    ThisDigimonWouldLeave,          // 이 디지몬이 배틀 에어리어를 떠나려 할 때 (소멸 · 패 · 덱 · 시큐리티 — PreventLeave로 막을 수 있다)
+    ThisDigimonWouldBeDeleted,      // 이 디지몬이 소멸하려 할 때
+    AllyDigimonWouldLeave,          // 자신의 다른 디지몬이 배틀 에어리어를 떠나려 할 때 (Other = 그 디지몬)
+    AllyDigimonWouldBeDeleted,      // 자신의 다른 디지몬이 소멸하려 할 때 (Other = 그 디지몬)
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>

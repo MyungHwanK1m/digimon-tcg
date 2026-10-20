@@ -155,6 +155,25 @@ public class Phase7MechanicTests
     }
 
     [Fact]
+    public void WouldLeaveTheBattleArea_ShouldPreventLeavingByOpponentEffectsOnly()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var guard = new CardInstance(Api("P7-LEAVE", 5, 7000,
+            main: "[All Turns] When this Digimon would leave the battle area other than by your effects, by trashing the top card of your security stack, prevent it from leaving."), 1);
+        state.DummyOpponent.BattleArea.Add(guard);
+        state.DummyOpponent.SecurityStack.Add(cards["ST1-02"]);
+        state.DummyOpponent.SecurityStack.Add(cards["ST1-02"]);
+        state.DummyOpponent.SecurityStack.Add(cards["ST1-02"]);   // 시큐리티 3장 이상일 때 이 비용을 내는 것이 추천
+        var killer = Api("P7-LEAVE-KILL", 4, 5000, main: "[On Play] Delete 1 of your opponent's Digimon.");
+        state.Player.Hand.Add(killer);
+
+        engine.PlayCard(killer);
+
+        Assert.Contains(guard, state.DummyOpponent.BattleArea);       // 상대(나)의 효과 — 막는다
+        Assert.Equal(2, state.DummyOpponent.SecurityStack.Count);      // 비용: 시큐리티 위 1장 파기
+    }
+
+    [Fact]
     public void Iceclad_ShouldCompareDigivolutionCardCounts()
     {
         var (state, engine, cards) = NewMainPhase();
