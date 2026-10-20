@@ -43,9 +43,10 @@ public static class ActionValidator
         }
 
         // 공식 룰: 10을 넘는 코스트도 지불할 수 있다 (메모리는 상대 쪽 10에서 멈춘다)
-        int projectedMemory = Math.Max(state.MemoryGauge - card.PlayCost, -10);
+        int cost = CardScripts.EffectivePlayCost(state.Player, card);   // 카드의 코스트 감소 효과 반영
+        int projectedMemory = Math.Max(state.MemoryGauge - cost, -10);
 
-        string guide = $"[{card.Name}] 등장 코스트 {card.PlayCost}를 사용합니다.";
+        string guide = $"[{card.Name}] 등장 코스트 {cost}를 사용합니다.";
 
         if (projectedMemory < 0)
             guide += $" (주의: 메모리가 {projectedMemory}가 되어 카드 처리 후 턴이 종료됩니다)";
@@ -58,6 +59,10 @@ public static class ActionValidator
     /// <summary>옵션 카드의 색 중 자신의 필드(배틀 · 육성 에어리어의 디지몬, 테이머)에 없는 색</summary>
     public static List<CardColor> MissingOptionColors(PlayerZones zones, CardData option)
     {
+        // 카드에 적힌 사용 조건 ("While you have a Tamer, you can ignore this card's color requirements")
+        if (CardScripts.For(option)?.IgnoreColorRequirement is { } ignore && ignore(zones))
+            return new List<CardColor>();
+
         var fieldColors = new HashSet<CardColor>(zones.BattleArea.Select(d => d.TopCard.Color));
         if (zones.BreedingArea != null)
             fieldColors.Add(zones.BreedingArea.TopCard.Color);

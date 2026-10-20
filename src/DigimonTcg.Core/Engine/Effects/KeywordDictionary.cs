@@ -93,7 +93,7 @@ public static class KeywordDictionary
             .Replace(" ", " ").Replace("<br>", "\n").Replace("br>", "\n").Replace("\r", "\n")
             .Split('\n')
             .Select(l => l.Trim())
-            .Where(l => l.Length > 0);
+            .Where(l => l.Length > 0 && !l.StartsWith("|"));   // "|applinkdp =" 같은 API 데이터 잡음 제외
 
     private static ParsedClause Parse(string clause)
     {
@@ -187,9 +187,44 @@ public static class KeywordDictionary
     public static CardScript? GenerateScript(CardData card)
     {
         var script = new CardScript(card.CardId);
-        AddParsed(script, SplitClauses(card.EffectText).Select(Parse), inherited: false);
-        AddParsed(script, SplitClauses(card.InheritedEffectText).Select(Parse), inherited: true);
-        return script.Keywords.Count + script.InheritedKeywords.Count + script.Effects.Count > 0 ? script : null;
+        var def = new CardScriptDefinition(script);
+        foreach (var (inherited, text) in new[] { (false, card.EffectText), (true, card.InheritedEffectText) })
+        {
+            foreach (var (clause, options) in GroupChoices(SplitClauses(text)))
+            {
+                if (options != null)
+                {
+                    SentenceParser.TryParseChoice(clause, options, inherited, card, def);   // "Activate 1 of the effects below:" + "・~"
+                    continue;
+                }
+                var parsed = Parse(clause);
+                if (parsed.Unsupported == null)
+                    AddParsed(script, new[] { parsed }, inherited);
+                else
+                    SentenceParser.TryParse(clause, inherited, card, def);   // 키워드 절이 아니면 문장 파서 (읽지 못하면 등록하지 않음)
+            }
+        }
+        bool any = script.Keywords.Count + script.InheritedKeywords.Count + script.Effects.Count + script.Statics.Count > 0
+                   || script.OverflowMemory > 0 || script.IgnoreColorRequirement != null || script.PlayCostReduction != null;
+        return any ? script : null;
+    }
+
+    /// <summary>"~ Activate 1 of the effects below:" 다음에 오는 "・~" 줄들을 선택지로 묶는다 (그 밖의 절은 options = null)</summary>
+    private static IEnumerable<(string Clause, List<string>? Options)> GroupChoices(IEnumerable<string> clauses)
+    {
+        var list = clauses.ToList();
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (Regex.IsMatch(list[i], @"(?:effects below|following effects)s*[:.]?s*$", RegexOptions.IgnoreCase) && i + 1 < list.Count && list[i + 1].StartsWith("・"))
+            {
+                var options = new List<string>();
+                int j = i + 1;
+                while (j < list.Count && list[j].StartsWith("・")) options.Add(list[j++]);
+                yield return (list[i], options);
+                i = j - 1;
+            }
+            else yield return (list[i], null);
+        }
     }
 
     private static void AddParsed(CardScript script, IEnumerable<ParsedClause> clauses, bool inherited)
@@ -283,17 +318,30 @@ public static class KeywordDictionary
         var result = new List<EffectClause>();
         foreach (var (inherited, text) in new[] { (false, card.EffectText), (true, card.InheritedEffectText) })
         {
-            foreach (var clause in SplitClauses(text))
+            foreach (var (clause, options) in GroupChoices(SplitClauses(text)))
             {
+                if (options != null)
+                {
+                    string? choiceError = SentenceParser.TryParseChoice(clause, options, inherited, card, def: null);
+                    foreach (var line in options.Prepend(clause))
+                        result.Add(new EffectClause(inherited, line, choiceError == null ? ClauseSupport.Supported : ClauseSupport.Unsupported, choiceError ?? "고르는 효과"));
+                    continue;
+                }
                 if (IsRuleHandledClause(card, clause))
                 {
                     result.Add(new EffectClause(inherited, clause, ClauseSupport.Supported, "규칙으로 처리"));
                     continue;
                 }
                 var parsed = Parse(clause);
-                result.Add(parsed.Unsupported == null
-                    ? new EffectClause(inherited, clause, ClauseSupport.Supported, "키워드")
-                    : new EffectClause(inherited, clause, ClauseSupport.Unsupported, parsed.Unsupported));
+                if (parsed.Unsupported == null)
+                {
+                    result.Add(new EffectClause(inherited, clause, ClauseSupport.Supported, "키워드"));
+                    continue;
+                }
+                string? sentenceError = SentenceParser.TryParse(clause, inherited, card, def: null);
+                result.Add(sentenceError == null
+                    ? new EffectClause(inherited, clause, ClauseSupport.Supported, "문장")
+                    : new EffectClause(inherited, clause, ClauseSupport.Unsupported, IsKeywordShapedClause(clause) ? parsed.Unsupported : sentenceError));
             }
         }
         return result;

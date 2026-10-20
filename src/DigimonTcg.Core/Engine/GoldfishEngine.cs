@@ -358,6 +358,7 @@ public partial class GoldfishEngine
     {
         State.CurrentPhase = Phase.Active;
         State.TurnSequence++;
+        State.Player.SuspendedTamers.Clear();
         int awakened = 0;
         foreach (var instance in AllInstances(State.Player))
         {
@@ -430,6 +431,7 @@ public partial class GoldfishEngine
         Log($"육성 에어리어 부화: [{digitama.Name}(Lv.{digitama.Level})]");
 
         State.CurrentPhase = Phase.Main;
+        TriggerStartOfMainPhase(State.Player);
         Log("메인 페이즈로 전환되었습니다.");
         return ActionResult.Success($"{digitama.Name}(Lv.{digitama.Level})을 육성 에어리어에 부화하고 메인 페이즈로 이동했습니다.");
     }
@@ -452,8 +454,10 @@ public partial class GoldfishEngine
         RecalculateFieldBuffs();
 
         Log($"육성 에어리어 이동: [{moving.TopCard.Name}(Lv.{moving.TopCard.Level})] -> 배틀 에어리어");
+        RunEffects(EffectTrigger.WhenMoving, State.Player, moving, moving.TopCard);
 
         State.CurrentPhase = Phase.Main;
+        TriggerStartOfMainPhase(State.Player);
         Log("메인 페이즈로 전환되었습니다.");
         return ActionResult.Success($"{moving.TopCard.Name}(Lv.{moving.TopCard.Level})을 배틀 에어리어로 이동하고 메인 페이즈로 전환했습니다.");
     }
@@ -472,6 +476,7 @@ public partial class GoldfishEngine
         State.CanMulligan = false;
         State.BreedingActionTaken = true;
         State.CurrentPhase = Phase.Main;
+        TriggerStartOfMainPhase(State.Player);
         Log("육성 페이즈를 패스하고 메인 페이즈로 진입합니다.");
         return ActionResult.Success("육성 페이즈를 패스하고 메인 페이즈로 진입했습니다.");
     }
@@ -487,8 +492,9 @@ public partial class GoldfishEngine
 
         State.CanMulligan = false;
         State.Player.Hand.Remove(card);
-        State.MemoryGauge -= card.PlayCost;
-        State.TotalMemorySpent += card.PlayCost;
+        int cost = CardScripts.EffectivePlayCost(State.Player, card);   // 카드의 코스트 감소 효과 반영
+        State.MemoryGauge -= cost;
+        State.TotalMemorySpent += cost;
 
         string effectSummary = string.Empty;
 
@@ -501,7 +507,7 @@ public partial class GoldfishEngine
             {
                 State.Lv3StartedChains++;
             }
-            Log($"디지몬 등장: [{card.Name}(Lv.{card.Level})] (코스트 {card.PlayCost} 지불)");
+            Log($"디지몬 등장: [{card.Name}(Lv.{card.Level})] (코스트 {cost} 지불)");
 
             string onPlay = ApplyOnPlayEffects(State.Player, instance);
             if (onPlay.Length > 0)
@@ -514,13 +520,15 @@ public partial class GoldfishEngine
             effectSummary = string.IsNullOrWhiteSpace(card.EffectText)
                 ? string.Empty
                 : $" [🎖️테이머 효과: {card.EffectText.Split('\n')[0]}]";
-            Log($"테이머 등장: [{card.Name}] (코스트 {card.PlayCost} 지불){effectSummary}");
+            Log($"테이머 등장: [{card.Name}] (코스트 {cost} 지불){effectSummary}");
+            RunEffects(EffectTrigger.OnPlay, State.Player, null, card, includeInherited: false);
+            RecalculateFieldBuffs();
         }
         else if (card.Type == CardType.Option)
         {
             effectSummary = " " + ApplyOptionEffect(State.Player, card, target);
             State.Player.Trash.Add(card);
-            Log($"옵션 사용: [{card.Name}] (코스트 {card.PlayCost} 지불 후 트래시 이동)");
+            Log($"옵션 사용: [{card.Name}] (코스트 {cost} 지불 후 트래시 이동)");
         }
 
         CheckTurnEndAndAutoReset();
@@ -559,6 +567,8 @@ public partial class GoldfishEngine
         // [진화 시] 효과 — 육성 에어리어의 디지몬은 효과를 발휘하지 않는다
         if (State.Player.BattleArea.Contains(target))
             ApplyWhenDigivolvingEffects(State.Player, target, evoCard);
+        if (State.Player.BattleArea.Contains(target))
+            FireForSide(EffectTrigger.AllyDigimonDigivolved, State.Player, target);
 
         var drawn = DrawCard();
         string drawText = drawn != null ? $"진화 보너스 드로우: [{drawn.Name}]" : "덱이 비어 진화 보너스 드로우 없음";
@@ -578,9 +588,14 @@ public partial class GoldfishEngine
             return validation;
 
         State.CanMulligan = false;
-        attacker.IsSuspended = true;
+        Suspend(attacker);
         State.BlitzAttacker = null;
+        _playerAttackRedirect = null;
         TriggerWhenAttackingEffects(attacker, defender);
+        FireForSide(EffectTrigger.OpponentDigimonAttacks, State.DummyOpponent, attacker);
+        FireForSide(EffectTrigger.AllyDigimonAttacks, State.Player, attacker);
+        if (_playerAttackRedirect is { } redirected && State.DummyOpponent.BattleArea.Contains(redirected)) defender = redirected;   // 상대 효과로 어택 대상 변경
+        _playerAttackRedirect = null;
         defender = ApplyAttackKeywords(attacker, defender) ?? defender;
 
         string resultMsg = ResolvePlayerAttackOnDigimon(attacker, defender);
@@ -609,7 +624,7 @@ public partial class GoldfishEngine
             string prefix = string.Empty;
             if (blocker != null)
             {
-                blocker.IsSuspended = true;
+                Suspend(blocker);
                 OnAttackBlocked(attacker);
                 prefix = $"🛡️ 상대 ≪블로커≫ [{blocker.TopCard.Name}]가 블록! ";
             }
@@ -636,12 +651,17 @@ public partial class GoldfishEngine
             return validation;
 
         State.CanMulligan = false;
-        attacker.IsSuspended = true;
+        Suspend(attacker);
         State.BlitzAttacker = null;
+        _playerAttackRedirect = null;
         TriggerWhenAttackingEffects(attacker, null);
+        FireForSide(EffectTrigger.OpponentDigimonAttacks, State.DummyOpponent, attacker);
+        FireForSide(EffectTrigger.AllyDigimonAttacks, State.Player, attacker);
+        var redirected = _playerAttackRedirect is { } r && State.DummyOpponent.BattleArea.Contains(r) ? r : null;   // 상대 효과로 어택 대상 변경
+        _playerAttackRedirect = null;
 
         ActionResult result;
-        if (ApplyAttackKeywords(attacker, null) is { } raidTarget)
+        if ((ApplyAttackKeywords(attacker, redirected) ?? redirected) is { } raidTarget)
         {
             string msg = ResolvePlayerAttackOnDigimon(attacker, raidTarget);
             Log(msg);
@@ -666,7 +686,7 @@ public partial class GoldfishEngine
         var blocker = EffectRules.ChooseOpponentBlocker(State, attacker, null);
         if (blocker != null)
         {
-            blocker.IsSuspended = true;
+            Suspend(blocker);
             OnAttackBlocked(attacker);
             RecalculateFieldBuffs();
             var (atkDeleted, blkDeleted, myDp, blkDp) = ResolveDigimonBattle(attacker, blocker);
@@ -806,7 +826,7 @@ public partial class GoldfishEngine
 
             // [공식 룰 C] 디지몬 → 시큐리티 디지몬과 DP 배틀 후 트래시
             opp.Trash.Add(securityCard);
-            string secEffect = ResolveSecurityDigimonEffect(securityCard, opp, attacker);
+            var (secEffect, playAfterBattle) = ResolveSecurityDigimonEffect(securityCard, opp, attacker);
             if (secEffect.Length > 0)
             {
                 battleSummaries.Add(secEffect);
@@ -817,6 +837,8 @@ public partial class GoldfishEngine
             }
             attackerDp += BattleDpBonus(attacker, opponentHasSources: false);
             int securityDp = securityCard.DP + SecurityDigimonDpBonus(opp, ownersTurn: false);
+            if (playAfterBattle)
+                PlaySecurityDigimonAfterBattle(opp, securityCard);
 
             if (attackerDp > securityDp)
             {
@@ -921,6 +943,8 @@ public partial class GoldfishEngine
 
         State.CurrentPhase = Phase.TurnEnd;
         Log($"메모리가 {State.MemoryGauge}(0 미만)이 되어 플레이어 턴이 종료됩니다.");
+        TriggerEndOfTurn(State.Player);
+        TriggerEndOfOpponentTurn(State.DummyOpponent);
 
         // [이 턴 종료 시] 메모리 -N 효과 (메탈그레이몬 BT1-021 등): 상대에게 그만큼 더 넘어간다
         if (State.PendingEndOfTurnMemoryLoss > 0)
@@ -1041,6 +1065,7 @@ public partial class GoldfishEngine
         // 1. AI 액티브 페이즈 (턴 순번 증가 → "다음 상대의 턴 종료 시까지" 같은 기간 효과의 기준)
         State.TurnSequence++;
         State.OpponentAttackedThisTurn = false;
+        State.DummyOpponent.SuspendedTamers.Clear();
         foreach (var d in AllInstances(State.DummyOpponent))
         {
             d.IsSuspended = false;
@@ -1103,7 +1128,11 @@ public partial class GoldfishEngine
             State.DummyOpponent.BattleArea.Add(aiBreeding);
             Log($"🤖 [AI 육성] 육성 에어리어 이동: [{aiBreeding.TopCard.Name}(Lv.{aiBreeding.TopCard.Level})] -> 배틀 에어리어");
             AddOpponentEvent(OpponentActionKind.Breeding, "배틀 에어리어로 이동", $"육성 에어리어의 {aiBreeding.TopCard.Name} (Lv.{aiBreeding.TopCard.Level}) 출격", aiBreeding.TopCard);
+            AddEffectEvent(aiBreeding.TopCard, CaptureEffectLogs(() => RunEffects(EffectTrigger.WhenMoving, State.DummyOpponent, aiBreeding, aiBreeding.TopCard)));
         }
+
+        AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },
+            CaptureEffectLogs(() => TriggerStartOfMainPhase(State.DummyOpponent)));
 
         // 3-A. [어택 전 메인 페이즈] 메모리가 0 이상으로 유지되는 선에서 먼저 진화 (진화 직후 바로 어택 가능!)
         bool preAttackEvolved = true;
@@ -1163,14 +1192,16 @@ public partial class GoldfishEngine
             if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || aiAttacker.IsSuspended || EffectRules.IsAttackLocked(State, aiAttacker))
                 continue;
 
-            aiAttacker.IsSuspended = true;
+            Suspend(aiAttacker);
             State.OpponentAttackedThisTurn = true;
 
             // AI 디지몬의 [어택 시] 효과 (플레이어와 같은 카드 스크립트) → ≪연계≫ · ≪돌진≫
             var attackEffects = CaptureEffectLogs(() =>
             {
                 TriggerWhenAttackingEffects(aiAttacker, null);
-                ctx.AttackTarget = ApplyAttackKeywords(aiAttacker, null);
+                FireForSide(EffectTrigger.OpponentDigimonAttacks, State.Player, aiAttacker);
+                FireForSide(EffectTrigger.AllyDigimonAttacks, State.DummyOpponent, aiAttacker);
+                ctx.AttackTarget = ApplyAttackKeywords(aiAttacker, ctx.AttackTarget) ?? ctx.AttackTarget;   // 상대(나) 효과로 바뀐 대상 유지
             });
 
             RecalculateFieldBuffs();
@@ -1288,7 +1319,7 @@ public partial class GoldfishEngine
 
         if (playerBlocker != null)
         {
-            playerBlocker.IsSuspended = true;
+            Suspend(playerBlocker);
             var blockedEffects = CaptureEffectLogs(() => OnAttackBlocked(aiAttacker));
             AddEffectEvent(aiAttacker.TopCard, blockedEffects);
             RecalculateFieldBuffs();
@@ -1407,7 +1438,8 @@ public partial class GoldfishEngine
 
             // 3) 내 시큐리티에서 [디지몬]이 나온 경우 -> 공식 룰: 시큐리티 DP 배틀 후 트래시행!
             State.Player.Trash.Add(mySec);
-            var mySecEffect = CaptureEffectLogs(() => ResolveSecurityDigimonEffect(mySec, State.Player, aiAttacker));
+            (string Message, bool PlayAfterBattle) mySecResult = default;
+            var mySecEffect = CaptureEffectLogs(() => mySecResult = ResolveSecurityDigimonEffect(mySec, State.Player, aiAttacker));
             AddEffectEvent(mySec, mySecEffect);
             if (!State.DummyOpponent.BattleArea.Contains(aiAttacker))
                 break;
@@ -1415,6 +1447,8 @@ public partial class GoldfishEngine
             aiDp = aiAttacker.GetCurrentDP();
             aiDp += BattleDpBonus(aiAttacker, opponentHasSources: false);
             int mySecDp = mySec.DP + SecurityDigimonDpBonus(State.Player, ownersTurn: false);
+            if (mySecResult.PlayAfterBattle)
+                PlaySecurityDigimonAfterBattle(State.Player, mySec);
             if (mySecDp >= aiDp && !HasJamming(aiAttacker))
             {
                 bool aiRemoved = DeleteOpponentDigimon(aiAttacker);
@@ -1473,17 +1507,18 @@ public partial class GoldfishEngine
                 State.DummyOpponent.Hand.Remove(tamerCandidate);
                 int beforeMem = ctx.Memory;
                 State.DummyOpponent.Tamers.Add(tamerCandidate);
-                ctx.Memory -= tamerCandidate.PlayCost;
+                ctx.Memory -= CardScripts.EffectivePlayCost(State.DummyOpponent, tamerCandidate);
                 RecalculateFieldBuffs();
                 Log($"🤖 [AI 테이머 등장] [{tamerCandidate.Name}(코스트 {tamerCandidate.PlayCost})] 배치! (AI 메모리: +{beforeMem} → {ctx.Memory})");
                 AddOpponentEvent(OpponentActionKind.Tamer, "테이머 등장", $"{tamerCandidate.Name} · 메모리 {beforeMem} → {ctx.Memory}", tamerCandidate);
+                AddEffectEvent(tamerCandidate, CaptureEffectLogs(() => RunEffects(EffectTrigger.OnPlay, State.DummyOpponent, null, tamerCandidate, includeInherited: false)));
                 acted = true;
                 if (ctx.Memory < 0) break;
             }
 
             // 3) 패에서 디지몬 등장 (메모리가 0 미만이 되어 플레이어에게 1~6 메모리가 넘어가도록 코스트 지불!)
             var playCandidate = State.DummyOpponent.Hand
-                .Where(c => c.Type == CardType.Digimon && c.PlayCost <= ctx.Memory + MaxAiMemoryHandOver)
+                .Where(c => c.Type == CardType.Digimon && CardScripts.EffectivePlayCost(State.DummyOpponent, c) <= ctx.Memory + MaxAiMemoryHandOver)
                 .OrderByDescending(c => c.Level <= 4 ? c.PlayCost : 0)
                 .ThenBy(c => c.PlayCost)
                 .FirstOrDefault();
@@ -1514,6 +1549,8 @@ public partial class GoldfishEngine
             ctx.BlitzAttacker = null;
         }
 
+        AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },
+            CaptureEffectLogs(() => { TriggerEndOfTurn(State.DummyOpponent); TriggerEndOfOpponentTurn(State.Player); }));
         int aiMemory = ctx.Memory;
         int aiEndOfTurnMemoryLoss = ctx.EndOfTurnMemoryLoss;
         if (aiMemory >= 0)
@@ -1563,7 +1600,7 @@ public partial class GoldfishEngine
         AddOpponentEvent(OpponentActionKind.Evolve, "진화", $"{prev} → {evoCard.Name} (Lv.{evoCard.Level}) · 메모리 {beforeMem} → {ctx.Memory}", evoCard);
 
         if (opp.BattleArea.Contains(fieldDigimon))
-            AddEffectEvent(evoCard, CaptureEffectLogs(() => ApplyWhenDigivolvingEffects(opp, fieldDigimon, evoCard)));
+            AddEffectEvent(evoCard, CaptureEffectLogs(() => { ApplyWhenDigivolvingEffects(opp, fieldDigimon, evoCard); FireForSide(EffectTrigger.AllyDigimonDigivolved, opp, fieldDigimon); }));
     }
 
     /// <summary>AI 등장: 코스트 지불 → [등장 시] 효과 (플레이어와 같은 카드 스크립트)</summary>
@@ -1574,9 +1611,10 @@ public partial class GoldfishEngine
         int beforeMem = ctx.Memory;
         var summoned = new CardInstance(card, State.CurrentTurn) { IsOwnersTurn = true };
         opp.BattleArea.Add(summoned);
-        ctx.Memory -= card.PlayCost;
+        int cost = CardScripts.EffectivePlayCost(opp, card);
+        ctx.Memory -= cost;
         RecalculateFieldBuffs();
-        Log($"🤖 [AI 등장] [{card.Name}(Lv.{card.Level}, 코스트 {card.PlayCost})] 소환! (AI 메모리: +{beforeMem} → {ctx.Memory})");
+        Log($"🤖 [AI 등장] [{card.Name}(Lv.{card.Level}, 코스트 {cost})] 소환! (AI 메모리: +{beforeMem} → {ctx.Memory})");
         AddOpponentEvent(OpponentActionKind.Play, "등장", $"{card.Name} (Lv.{card.Level}) · 메모리 {beforeMem} → {ctx.Memory}", card);
 
         AddEffectEvent(card, CaptureEffectLogs(() => ApplyOnPlayEffects(opp, summoned)));

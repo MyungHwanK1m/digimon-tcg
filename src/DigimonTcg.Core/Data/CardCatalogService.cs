@@ -11,13 +11,6 @@ using DigimonTcg.Core.Models;
 
 namespace DigimonTcg.Core.Data;
 
-public class SavedDeckModel
-{
-    public string DeckName { get; set; } = "커스텀 덱";
-    public List<string> DigitamaCardIds { get; set; } = new();
-    public List<string> MainDeckCardIds { get; set; } = new();
-}
-
 public class CardCatalogService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
@@ -29,7 +22,6 @@ public class CardCatalogService
     };
 
     private readonly string _cacheFilePath;
-    private readonly string _savedDecksFilePath;
     private readonly string _imagesDirPath;
     private List<CardData> _catalog = new();
 
@@ -43,7 +35,6 @@ public class CardCatalogService
         _imagesDirPath = Path.Combine(baseDir, "images");
         Directory.CreateDirectory(_imagesDirPath);
         _cacheFilePath = Path.Combine(baseDir, "cards_cache.json");
-        _savedDecksFilePath = Path.Combine(baseDir, "saved_decks.json");
         LoadOrInitializeCache();
     }
 
@@ -92,9 +83,14 @@ public class CardCatalogService
 
                     foreach (var def in defaultCards)
                     {
-                        // 내장 카드는 코드 정의를 우선하되, 이전 동기화로 저장해 둔 등급은 이어받는다
-                        if (string.IsNullOrEmpty(def.Rarity) && merged.TryGetValue(def.CardId, out var cached))
-                            def.Rarity = cached.Rarity;
+                        // 내장 카드는 코드 정의를 우선하되, 이전 동기화로 저장해 둔 등급 · 특징(trait)은 이어받는다
+                        if (merged.TryGetValue(def.CardId, out var cached))
+                        {
+                            if (string.IsNullOrEmpty(def.Rarity))
+                                def.Rarity = cached.Rarity;
+                            if (def.Traits.Count == 0 && cached.Traits.Count > 0)
+                                def.Traits = cached.Traits.ToList();
+                        }
                         merged[def.CardId] = def;
                     }
                     _catalog = merged.Values.OrderBy(c => c.CardId).ToList();
@@ -110,6 +106,28 @@ public class CardCatalogService
 
         _catalog = defaultCards.OrderBy(c => c.CardId).ToList();
         SaveCache();
+    }
+
+    /// <summary>
+    /// API에서 받은 카드의 특징(trait) · 등급 · 두 번째 색을 카탈로그 카드에 채운다 (효과 문장 · 이름 · 수치는 그대로). 반환: 바뀐 카드 수
+    /// </summary>
+    public int ApplyApiDetails(IEnumerable<CardData> apiCards)
+    {
+        var byId = _catalog.ToDictionary(c => c.CardId);
+        int changed = 0;
+        foreach (var api in apiCards)
+        {
+            if (!byId.TryGetValue(api.CardId, out var card))
+                continue;
+            bool touched = false;
+            if (api.Traits.Count > 0 && !api.Traits.SequenceEqual(card.Traits)) { card.Traits = api.Traits.ToList(); touched = true; }
+            if (string.IsNullOrEmpty(card.Rarity) && !string.IsNullOrEmpty(api.Rarity)) { card.Rarity = api.Rarity; touched = true; }
+            if (card.SecondaryColor == null && api.SecondaryColor != null) { card.SecondaryColor = api.SecondaryColor; touched = true; }
+            if (touched) changed++;
+        }
+        if (changed > 0)
+            SaveCache();
+        return changed;
     }
 
     public void SaveCache()
@@ -417,7 +435,14 @@ public class CardCatalogService
             EffectText = mainEffect,
             InheritedEffectText = sourceEffect,
             ImageUrl = $"https://images.digimoncard.io/images/cards/{id}.jpg",
-            Rarity = NormalizeRarity(Str(e, "rarity"))
+            Rarity = NormalizeRarity(Str(e, "rarity")),
+            // 특징: 유형(digi_type ~ digi_type5) · 세대(form) · 속성(attribute) — 효과 문장의 "[X] trait" 판정에 쓴다
+            Traits = new[] { "digi_type", "digi_type2", "digi_type3", "digi_type4", "digi_type5", "form", "attribute" }
+                .Select(k => Str(e, k)?.Trim())
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Select(v => v!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
         };
         // 키워드만 있는 절의 ≪블로커≫ · ≪시큐리티 어택 ±N≫ (조건부로 얻는 키워드는 제외) — 효과 엔진의 키워드 사전 기준
         KeywordDictionary.ApplyDataKeywords(card);
@@ -473,41 +498,6 @@ public class CardCatalogService
             query = query.Where(c => c.PlayCost <= maxPlayCost.Value);
 
         return query.OrderBy(c => c.CardId).ToList();
-    }
-
-    public void SaveCustomDeck(string deckName, IReadOnlyList<CardData> mainDeck, IReadOnlyList<CardData> digitamaDeck)
-    {
-        var model = new SavedDeckModel
-        {
-            DeckName = deckName,
-            MainDeckCardIds = mainDeck.Select(c => c.CardId).ToList(),
-            DigitamaCardIds = digitamaDeck.Select(c => c.CardId).ToList()
-        };
-        string json = JsonSerializer.Serialize(model, JsonOptions);
-        File.WriteAllText(_savedDecksFilePath, json);
-    }
-
-    public (string DeckName, List<CardData> MainDeck, List<CardData> DigitamaDeck)? LoadCustomDeck()
-    {
-        if (!File.Exists(_savedDecksFilePath))
-            return null;
-
-        try
-        {
-            string json = File.ReadAllText(_savedDecksFilePath);
-            var model = JsonSerializer.Deserialize<SavedDeckModel>(json, JsonOptions);
-            if (model == null)
-                return null;
-
-            var map = _catalog.ToDictionary(c => c.CardId);
-            var main = model.MainDeckCardIds.Where(id => map.ContainsKey(id)).Select(id => map[id]).ToList();
-            var digitama = model.DigitamaCardIds.Where(id => map.ContainsKey(id)).Select(id => map[id]).ToList();
-            return (model.DeckName, main, digitama);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static CardType ParseCardType(string? raw) => raw?.ToLowerInvariant() switch

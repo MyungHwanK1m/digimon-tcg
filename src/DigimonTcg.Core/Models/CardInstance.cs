@@ -27,6 +27,13 @@ public class CardInstance
     public bool IsOwnersTurn { get; set; } = true;
 
     // 기간 효과: 값은 GameState.TurnSequence(플레이어 · 상대 턴마다 1씩 증가) 기준 "이 턴 종료 시까지"
+    public List<(int Dp, int Until)> TimedDpBuffs { get; } = new();             // DP ± (엔진이 EffectDpBonus에 더한다)
+    public List<(int Count, int Until)> TimedSecurityAttackBuffs { get; } = new(); // ≪시큐리티 어택 ±N≫
+    public List<(DigimonTcg.Core.Engine.Effects.Keyword Keyword, int Until)> TimedKeywords { get; } = new(); // 얻은 키워드
+
+    /// <summary>효과로 지금 얻고 있는 키워드 (기간 효과 + 조건부 지속 효과) — 엔진이 지속 효과를 계산할 때마다 다시 채운다</summary>
+    public HashSet<DigimonTcg.Core.Engine.Effects.Keyword> ActiveKeywords { get; } = new();
+
     public int CannotAttackUntil { get; set; }     // 어택할 수 없음 (소로 블루 · 로제몬 등)
     public int CannotBlockUntil { get; set; }      // 블록할 수 없음
     public int GrantedBlockerUntil { get; set; }   // ≪블로커≫를 얻음 (메탈그레이몬 ST5-09)

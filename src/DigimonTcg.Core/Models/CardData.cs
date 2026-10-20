@@ -20,6 +20,7 @@ public class CardData
     public int DP { get; set; }                                     // 기본 전투력
     public string EffectText { get; set; } = string.Empty;          // 메인 효과 설명
     public string InheritedEffectText { get; set; } = string.Empty; // 진화원 효과 설명
+    public List<string> Traits { get; set; } = new();               // 특징 (API의 유형 · 세대 · 속성, 예: "Royal Knight", "Ultimate", "Vaccine")
 
     // 인게임 자동 계산을 위한 보조 수치
     public bool IsBlocker { get; set; }                             // ≪블로커≫ 보유 여부

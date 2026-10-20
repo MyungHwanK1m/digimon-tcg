@@ -42,11 +42,16 @@ public static class CardScripts
 
     /// <summary>디지몬이 키워드를 가졌는지 (맨 위 카드의 키워드 + 진화원 효과로 얻는 키워드)</summary>
     public static bool HasKeyword(CardInstance digimon, Keyword keyword) =>
-        (For(digimon.TopCard)?.Keywords.Contains(keyword) ?? false)
+        digimon.ActiveKeywords.Contains(keyword)
+        || (For(digimon.TopCard)?.Keywords.Contains(keyword) ?? false)
         || digimon.EvolutionSources.Any(s => For(s)?.InheritedKeywords.Contains(keyword) ?? false);
 
     /// <summary>옵션 [메인] 효과를 쓸 때 고를 대상 종류</summary>
     public static TargetKind MainTargetOf(CardData card) => For(card)?.MainTarget ?? TargetKind.None;
+
+    /// <summary>실제로 지불할 등장 · 사용 코스트 (카드의 코스트 감소 효과 반영, 0 미만이 되지 않음)</summary>
+    public static int EffectivePlayCost(PlayerZones owner, CardData card) =>
+        Math.Max(0, card.PlayCost - (For(card)?.PlayCostReduction?.Invoke(owner) ?? 0));
 
     /// <summary>카드에 적힌 다른 진화 조건을 만족하는지 (예: 오메가몬은 Lv.6 레드 · 블루 디지몬에서 진화)</summary>
     public static bool MeetsAlternativeEvolution(CardData evoCard, CardInstance target) =>
@@ -97,9 +102,9 @@ public sealed class CardScriptDefinition
         return On(EffectTrigger.Main, resolve);
     }
 
-    public CardScriptDefinition Static(StaticStat stat, EffectSource source, Func<StaticContext, int> value)
+    public CardScriptDefinition Static(StaticStat stat, EffectSource source, Func<StaticContext, int> value, Keyword? keyword = null)
     {
-        _script.Statics.Add(new StaticEffect(stat, source, value));
+        _script.Statics.Add(new StaticEffect(stat, source, value) { Keyword = keyword });
         return this;
     }
 
@@ -122,6 +127,25 @@ public sealed class CardScriptDefinition
     public CardScriptDefinition EvolvesFrom(Func<CardInstance, bool> condition)
     {
         _script.AlternativeEvolution = condition;
+        return this;
+    }
+
+    public CardScriptDefinition ReducePlayCost(Func<PlayerZones, int> reduction)
+    {
+        var previous = _script.PlayCostReduction;
+        _script.PlayCostReduction = previous == null ? reduction : z => previous(z) + reduction(z);
+        return this;
+    }
+
+    public CardScriptDefinition Overflow(int memory)
+    {
+        _script.OverflowMemory = memory;
+        return this;
+    }
+
+    public CardScriptDefinition IgnoreColorRequirementWhen(Func<PlayerZones, bool> condition)
+    {
+        _script.IgnoreColorRequirement = condition;
         return this;
     }
 

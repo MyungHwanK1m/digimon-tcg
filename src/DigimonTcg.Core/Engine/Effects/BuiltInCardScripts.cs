@@ -683,7 +683,7 @@ internal static class BuiltInCardScripts
         {
             var t = c.PickEnemy(d => !d.IsSuspended && !d.HasBlocker);
             if (t == null) return;
-            t.IsSuspended = true;
+            c.Engine.Suspend(t);
             c.Log($"[진화원 효과] 릴리몬: 상대 [{t.TopCard.Name}] 레스트");
         });
 

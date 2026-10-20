@@ -60,6 +60,12 @@ public sealed class EffectContext
     /// <summary>[시큐리티] 효과를 발휘한 이 카드를 트래시 대신 패에 넣는지</summary>
     public bool ReturnToHand { get; set; }
 
+    /// <summary>시큐리티 디지몬: 배틀이 끝난 뒤 트래시 대신 코스트 없이 등장 ("At the end of the battle, play this card")</summary>
+    public bool PlayAfterBattle { get; set; }
+
+    /// <summary>앞 문장에서 고른 대상 ("that Digimon" · "it"이 가리키는 디지몬)</summary>
+    public List<CardInstance> LastTargets { get; set; } = new();
+
     /// <summary>[시큐리티] 결과를 한 번에 정한다</summary>
     public void SecurityResult(string detail, string summary, bool attackerRemoved = false, bool returnToHand = false)
     {

@@ -40,6 +40,13 @@ public class PlayerZones
     public CardInstance? BreedingArea { get; set; }
     public List<CardInstance> BattleArea { get; set; } = new List<CardInstance>();
     public List<CardData> Tamers { get; set; } = new List<CardData>();
+
+    // 레스트 상태인 테이머 (같은 카드 객체가 여러 장일 수 있어 장 수로 센다) — 자신의 액티브 페이즈에 비운다
+    public List<CardData> SuspendedTamers { get; set; } = new List<CardData>();
+
+    /// <summary>이 테이머 카드 중 액티브 상태인 장이 있는지</summary>
+    public bool HasActiveTamer(CardData tamer) =>
+        Tamers.Count(t => ReferenceEquals(t, tamer)) > SuspendedTamers.Count(t => ReferenceEquals(t, tamer));
 }
 
 public class GameState

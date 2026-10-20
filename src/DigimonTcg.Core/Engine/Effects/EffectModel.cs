@@ -20,6 +20,20 @@ public enum EffectTrigger
     OpponentTurnEndWithoutAttack,   // [상대의 턴 종료 시] 이 턴에 상대가 어택하지 않았다면
     StartOfYourTurn,                // [자신의 턴 개시 시]
     EndOfAttack,                    // [어택 종료 시]
+    StartOfYourMainPhase,           // [자신의 메인 페이즈 개시 시]
+    EndOfYourTurn,                  // [자신의 턴 종료 시]
+    EndOfOpponentsTurn,             // [상대의 턴 종료 시]
+    ThisDigimonSuspends,            // 이 디지몬이 레스트 상태가 되었을 때
+    OpponentDigimonAttacks,         // 상대의 디지몬이 어택했을 때 (Other = 어택한 디지몬)
+    OpponentDigimonDeleted,         // 상대의 디지몬이 소멸했을 때 (Other = 소멸한 디지몬)
+    AllyDigimonDeleted,             // 다른 자신의 디지몬이 소멸했을 때
+    AllyDigimonPlayed,              // 자신의 디지몬이 등장했을 때 (Other = 등장한 디지몬)
+    AllyDigimonDigivolved,          // 자신의 디지몬이 진화했을 때 (Other = 진화한 디지몬)
+    AllyDigimonAttacks,             // 자신의 디지몬이 어택했을 때 (Other = 어택한 디지몬)
+    AllyDigimonSuspended,           // 자신의 디지몬이 레스트 상태가 되었을 때 (Other)
+    OpponentDigimonSuspended,       // 상대의 디지몬이 레스트 상태가 되었을 때 (Other)
+    WonBattle,                      // 이 디지몬이 배틀에서 이겼을 때 (상대만 소멸, 어택 · 블록 모두)
+    WhenMoving,                     // [이동 시] 육성 에어리어에서 배틀 에어리어로 이동했을 때
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>
@@ -50,6 +64,7 @@ public enum StaticStat
     SecurityAttack,     // 이 디지몬의 ≪시큐리티 어택 +N≫
     AllyDigimonDp,      // 테이머: 자신의 디지몬 전부의 DP
     SecurityDigimonDp,  // 테이머: 자신의 시큐리티 디지몬의 DP
+    Keyword,            // 이 디지몬이 키워드를 얻는다 (StaticEffect.Keyword, 값이 0이 아니면 얻은 상태 — 조건부 키워드)
 }
 
 /// <summary>옵션 [메인] 효과를 쓸 때 UI가 고르게 할 대상</summary>
@@ -69,7 +84,11 @@ public sealed record CardEffect(EffectTrigger Trigger, EffectSource Source, Acti
 }
 
 /// <summary>지속 효과 한 절 — 필드 상태가 바뀔 때마다 엔진이 다시 계산한다</summary>
-public sealed record StaticEffect(StaticStat Stat, EffectSource Source, Func<StaticContext, int> Value);
+public sealed record StaticEffect(StaticStat Stat, EffectSource Source, Func<StaticContext, int> Value)
+{
+    /// <summary>Stat == Keyword일 때 얻는 키워드</summary>
+    public Keyword? Keyword { get; init; }
+}
 
 /// <summary>지속 효과 계산에 필요한 정보</summary>
 public sealed class StaticContext
@@ -109,4 +128,13 @@ public sealed class CardScript
     public Func<CardInstance, bool>? AlternativeEvolution { get; set; }
 
     public StartOfTurnMemoryEffect? StartOfTurnMemory { get; set; }
+
+    /// <summary>ACE ≪오버플로우 -N≫ — 이 카드가 배틀 에어리어 · 진화원에서 다른 곳으로 가면 주인의 메모리 -N (0이면 없음)</summary>
+    public int OverflowMemory { get; set; }
+
+    /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
+    public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }
+
+    /// <summary>"이 카드를 등장시킬 때 / 사용할 때 코스트 -N" — 자신의 필드를 받아 줄일 코스트를 돌려준다</summary>
+    public Func<PlayerZones, int>? PlayCostReduction { get; set; }
 }
