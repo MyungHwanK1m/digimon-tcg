@@ -87,24 +87,41 @@ public class CardUpgradeManager
         }
 
         // 4. 신규 서브 액티브 무기 획득 옵션 (2-3: 고유 제외 최대 5개 슬롯 제한)
+        // 유저 요청: "서브 무기는 그 랩에 맞는 스킬로 등장하게 해줘"
         if (player.ActiveWeapons.Count < PlayerEntity.MaxActiveSkills)
         {
             var ownedIds = player.Weapons.Select(w => w.Definition.Id).ToHashSet();
+            var currentStage = player.Profile.Stage;
 
-            // 2-4-1: 현재 디지몬의 서브 기술 우선 및 기타 스킬 풀
+            // 현재 디지몬의 진화 단계(Stage) 이하의 스킬만 등장 가능! (성장기일 때 궁극체 스킬 등장 원천 차단)
+            // 1순위: 현재 디지몬의 서브 기술 (SubSkillIds)
+            // 2순위: 현재 진화 단계와 동일한 스킬 (s.Stage == currentStage)
+            // 3순위: 이전 진화 단계 스킬 (s.Stage < currentStage)
             var availableSkills = GameDatabase.Skills.Values
-                .Where(s => !ownedIds.Contains(s.Id) && s.Id != player.SignatureWeapon.Definition.Id)
-                .OrderByDescending(s => player.Profile.SubSkillIds.Contains(s.Id) ? 1 : 0)
+                .Where(s => !ownedIds.Contains(s.Id) &&
+                            s.Id != player.SignatureWeapon.Definition.Id &&
+                            s.Stage <= currentStage)
+                .OrderByDescending(s => player.Profile.SubSkillIds.Contains(s.Id) ? 2 : (s.Stage == currentStage ? 1 : 0))
                 .ThenBy(_ => _rnd.Next())
                 .ToList();
 
             foreach (var skill in availableSkills.Take(3))
             {
                 bool isSignatureSub = player.Profile.SubSkillIds.Contains(skill.Id);
+                string stageTag = skill.Stage switch
+                {
+                    DigimonStage.Rookie => "[성장기]",
+                    DigimonStage.Champion => "[성숙기]",
+                    DigimonStage.Ultimate => "[완전체]",
+                    DigimonStage.Mega => "[궁극체]",
+                    DigimonStage.Ultra => "[초궁극체]",
+                    _ => ""
+                };
+
                 options.Add(new UpgradeOption
                 {
                     Type = UpgradeType.WeaponNew,
-                    Title = isSignatureSub ? $"✨ [고유 서브스킬] {skill.Name}" : $"[신규 무기] {skill.Name}",
+                    Title = isSignatureSub ? $"✨ {stageTag} [고유 서브] {skill.Name}" : $"{stageTag} [신규 무기] {skill.Name}",
                     Subtitle = "Lv.0 ➔ Lv.1 (신규 슬롯)",
                     Description = skill.Description,
                     CardId = skill.CardId,

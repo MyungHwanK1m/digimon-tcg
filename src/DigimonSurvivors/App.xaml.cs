@@ -20,7 +20,18 @@ public partial class App : Application
             // 2. 디자인 에셋 (스킬 투사체, UI, 환경 타일) 자동 생성 및 세팅
             SkillEffectGenerator.GenerateAll(projectRoot);
 
-            // 3. 디지몬 스프라이트 정밀 누끼(외곽 + 내부 고립 포켓 제거) 처리
+            // 2-1. 모든 진화 디지몬 고유 토큰 스프라이트 빌드
+            DigimonTokenGenerator.GenerateAll(projectRoot);
+            string srcRoot = @"D:\Project\DigimonTcg\src\DigimonSurvivors";
+            if (Directory.Exists(srcRoot) && !srcRoot.Equals(projectRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                DigimonTokenGenerator.GenerateAll(srcRoot);
+            }
+
+            // 3. 공식 밴다이 원작 일러스트 정밀 처리
+            NukkiProcessor.ProcessOfficialArtwork();
+
+            // 디지몬 스프라이트 정밀 누끼(외곽 + 내부 고립 포켓 제거) 처리
             string freshDir = Path.Combine(projectRoot, "Assets", "Fresh");
             string spritesDir = Path.Combine(projectRoot, "Assets", "Sprites");
 
@@ -28,11 +39,10 @@ public partial class App : Application
             {
                 NukkiProcessor.ProcessAll(freshDir, spritesDir);
 
-                // 고품질 다크 애니메이션 VFX 및 신규 스프라이트 임포트
+                // 고품질 다크 애니메이션 VFX 임포트
                 string brainDir = @"C:\Users\MyungHwan\.gemini\antigravity\brain\2274f5fa-7175-4dca-911e-091b500f2fc1";
                 string skillsDir = Path.Combine(projectRoot, "Assets", "Skills");
                 ImportBrainVfx(brainDir, skillsDir);
-                SpriteImporter.ImportAllGenerated(brainDir, spritesDir);
 
                 // 분류 디렉토리(Characters, Enemies)로 정돈 복사
                 CategorizeSprites(spritesDir);

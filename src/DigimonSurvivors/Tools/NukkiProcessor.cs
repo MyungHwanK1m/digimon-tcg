@@ -38,8 +38,12 @@ public static class NukkiProcessor
 
         // 1. 배경 판정 기준
         // 배경은 순백색 또는 압축 노이즈로 인한 매우 밝은 무채색 (R,G,B >= 230, |R-G|<=12, |G-B|<=12)
+        // 또는 이미 알파 투명화가 되어 있는 픽셀
         bool IsBackgroundCandidate(int col)
         {
+            int a = (col >> 24) & 0xFF;
+            if (a < 64) return true;
+
             int r = (col >> 16) & 0xFF;
             int g = (col >> 8) & 0xFF;
             int b = col & 0xFF;
@@ -96,108 +100,25 @@ public static class NukkiProcessor
             }
         }
 
-        // 3. 다리 사이, 날개 사이, 꼬리 아래 등 "고립된 내부 배경 포켓" 탐색!
-        // 외곽과 연결되지 않았더라도, 면적이 넓은 순백색 덩어리(50픽셀 이상)이면서
-        // 평균 밝기가 240 이상이고 색상 차이가 거의 없는 덩어리는 배경으로 판정
-        bool[] visited2 = new bool[w * h];
-        for (int y = 0; y < h; y++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                int pos = y * w + x;
-                if (bgMask[pos] == 0 && !visited2[pos] && IsBackgroundCandidate(pixels[pos]))
-                {
-                    // 연결된 흰색 컴포넌트 수집
-                    var comp = new List<int>();
-                    var q = new Queue<int>();
-                    q.Enqueue(pos);
-                    visited2[pos] = true;
+        // 3. 고립된 내부 흰색 영역(몸체, 배, 털, 얼굴 등)은 캐릭터 본체이므로 절대 삭제하지 않고 100% 보존합니다.
+        // 외곽 테두리로부터 도달 가능한 외부 배경만 투명화 처리합니다.
 
-                    while (q.Count > 0)
-                    {
-                        int c = q.Dequeue();
-                        comp.Add(c);
-                        int cx = c % w;
-                        int cy = c / w;
-
-                        int[] dx = { 1, -1, 0, 0 };
-                        int[] dy = { 0, 0, 1, -1 };
-                        for (int i = 0; i < 4; i++)
-                        {
-                            int nx = cx + dx[i];
-                            int ny = cy + dy[i];
-                            if (nx >= 0 && nx < w && ny >= 0 && ny < h)
-                            {
-                                int nPos = ny * w + nx;
-                                if (!visited2[nPos] && bgMask[nPos] == 0 && IsBackgroundCandidate(pixels[nPos]))
-                                {
-                                    visited2[nPos] = true;
-                                    q.Enqueue(nPos);
-                                }
-                            }
-                        }
-                    }
-
-                    // 눈동자나 작은 치아(보통 15~35픽셀 이하)는 보존하고,
-                    // 다리 사이/겨드랑이/날개 사이 등의 큰 고립 배경(40픽셀 이상) 또는
-                    // 매우 순수한 흰색(평균 R,G,B >= 245) 덩어리는 배경으로 처리!
-                    if (comp.Count >= 30)
-                    {
-                        double avgR = 0, avgG = 0, avgB = 0;
-                        foreach (var p in comp)
-                        {
-                            avgR += (pixels[p] >> 16) & 0xFF;
-                            avgG += (pixels[p] >> 8) & 0xFF;
-                            avgB += pixels[p] & 0xFF;
-                        }
-                        avgR /= comp.Count;
-                        avgG /= comp.Count;
-                        avgB /= comp.Count;
-
-                        if (avgR >= 238 && avgG >= 238 && avgB >= 238)
-                        {
-                            foreach (var p in comp)
-                            {
-                                bgMask[p] = 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. 픽셀 알파 투명화 및 경계선 앤티에일리어싱 페더링 (디프린징)
+        // 4. 픽셀 알파 투명화 및 경계선 앤티에일리어싱 처리
         for (int i = 0; i < pixels.Length; i++)
         {
-            if (bgMask[i] == 1)
+            int origA = (pixels[i] >> 24) & 0xFF;
+            if (bgMask[i] == 1 || origA < 64)
             {
                 pixels[i] = 0x00000000; // 완전 투명
             }
             else
             {
-                int cx = i % w;
-                int cy = i / w;
-                bool isNearBg = (cx > 0 && bgMask[i - 1] == 1) ||
-                                (cx < w - 1 && bgMask[i + 1] == 1) ||
-                                (cy > 0 && bgMask[i - w] == 1) ||
-                                (cy < h - 1 && bgMask[i + w] == 1);
-
-                if (isNearBg)
-                {
-                    int col = pixels[i];
-                    int r = (col >> 16) & 0xFF;
-                    int g = (col >> 8) & 0xFF;
-                    int b = col & 0xFF;
-                    int bright = (r + g + b) / 3;
-
-                    // 경계면 흰색 잔상 페더링
-                    if (bright > 200)
-                    {
-                        double alphaRatio = Math.Clamp((255 - bright) / 55.0, 0.05, 1.0);
-                        int alpha = (int)(alphaRatio * 255);
-                        pixels[i] = (alpha << 24) | (r << 16) | (g << 8) | b;
-                    }
-                }
+                // 원작 캐릭터의 흰색 털, 흰색 피부, 크림색 배 등은 완전히 불투명하게 보존
+                int col = pixels[i];
+                int r = (col >> 16) & 0xFF;
+                int g = (col >> 8) & 0xFF;
+                int b = col & 0xFF;
+                pixels[i] = (255 << 24) | (r << 16) | (g << 8) | b;
             }
         }
 
@@ -209,5 +130,85 @@ public static class NukkiProcessor
         encoder.Frames.Add(BitmapFrame.Create(wb));
         using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
         encoder.Save(fs);
+    }
+
+    public static void ProcessOfficialArtwork()
+    {
+        string tcgDir = @"D:\Project\DigimonTcg";
+        string rawDir = Path.Combine(tcgDir, "src", "DigimonSurvivors", "Assets", "RawArt");
+        string freshDir = Path.Combine(tcgDir, "src", "DigimonSurvivors", "Assets", "Fresh");
+        Directory.CreateDirectory(freshDir);
+
+        var targets = new (string rawFile, string spriteName)[]
+        {
+            (Path.Combine(rawDir, "Patamon.jpg"), "Patamon.png"),
+            (Path.Combine(rawDir, "Gomamon.gif"), "Gomamon.png"),
+            (Path.Combine(rawDir, "Tentomon.jpg"), "Tentomon.png"),
+            (Path.Combine(rawDir, "Angemon.jpg"), "Angemon.png")
+        };
+
+        string extFreshDir = @"D:\Project\DigimonSurvivors\Assets\Fresh";
+        if (!Directory.Exists(extFreshDir)) Directory.CreateDirectory(extFreshDir);
+
+        string[] destDirs = new[]
+        {
+            freshDir,
+            extFreshDir,
+            Path.Combine(tcgDir, "src", "DigimonSurvivors", "Assets", "Sprites"),
+            Path.Combine(tcgDir, "src", "DigimonSurvivors", "Assets", "Sprites", "Characters"),
+            @"D:\Project\DigimonSurvivors\Assets\Sprites",
+            @"D:\Project\DigimonSurvivors\Assets\Sprites\Characters",
+            @"D:\Project\DigimonSurvivors\publish\Assets\Sprites",
+            @"D:\Project\DigimonSurvivors\publish\Assets\Sprites\Characters"
+        };
+
+        foreach (var dir in destDirs)
+        {
+            try
+            {
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+            }
+            catch { }
+        }
+
+        foreach (var (srcFile, spriteName) in targets)
+        {
+            if (!File.Exists(srcFile)) continue;
+            string freshPath = Path.Combine(freshDir, spriteName);
+            ProcessImage(srcFile, freshPath);
+
+            foreach (var d in destDirs)
+            {
+                try
+                {
+                    if (Directory.Exists(d))
+                    {
+                        File.Copy(freshPath, Path.Combine(d, spriteName), true);
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // Fresh 내의 모든 원작 일러스트(가루몬 등 흰색 털/몸체 디지몬 포함)도 신규 알고리즘으로 동기화
+        foreach (var freshFile in Directory.GetFiles(freshDir, "*.png"))
+        {
+            string spriteName = Path.GetFileName(freshFile);
+            string tempOut = Path.Combine(Path.GetTempPath(), $"clean_{spriteName}");
+            try
+            {
+                ProcessImage(freshFile, tempOut);
+                foreach (var d in destDirs)
+                {
+                    if (Directory.Exists(d))
+                    {
+                        File.Copy(tempOut, Path.Combine(d, spriteName), true);
+                    }
+                }
+                File.Delete(tempOut);
+            }
+            catch { }
+        }
     }
 }

@@ -15,6 +15,7 @@ public static class GameDatabase
         InitializeDigimons();
         InitializeSkills();
         InitializePassives();
+        FinalizeSkillStages();
     }
 
     private static void InitializeDigimons()
@@ -208,7 +209,7 @@ public static class GameDatabase
             SubSkillIds = new() { "great_horns", "fire_wall" },
             Description = "머리 부분이 단단한 갑각으로 뒤덮인 육식 공룡형 디지몬. 거대한 폭발 화염 '메가 플레임'을 전방에 뿜어냅니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "metal_greymon", "skull_greymon", "megadramon" }
+            EvolutionCandidateIds = new() { "metal_greymon", "skull_greymon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -228,7 +229,7 @@ public static class GameDatabase
             SubSkillIds = new() { "freeze_fang", "ice_wall" },
             Description = "푸른 줄무늬 모피를 지닌 늑대형 수인 디지몬. 쾌속의 이동 속도와 고주파의 냉기 화염을 연속 발사합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "were_garurumon", "zudomon", "panjyamon" }
+            EvolutionCandidateIds = new() { "were_garurumon", "zudomon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -248,7 +249,7 @@ public static class GameDatabase
             SubSkillIds = new() { "fire_flap", "wind_cutter" },
             Description = "타오르는 화염의 날개를 지닌 거대 거조형 디지몬. 유성처럼 떨어지는 불꽃을 전방위로 퍼붓습니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "garudamon", "sirenmon", "karatenmon" }
+            EvolutionCandidateIds = new() { "garudamon", "holy_angemon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -268,7 +269,7 @@ public static class GameDatabase
             SubSkillIds = new() { "razor_wing", "dark_contract" },
             Description = "칠흑의 박쥐 날개를 지닌 타천사형 악마 디지몬. 길게 뻗는 악마의 손톱 '데스 클로'로 적의 심장을 쥡니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "vamdemon", "lady_devimon", "skull_satamon" }
+            EvolutionCandidateIds = new() { "vamdemon", "lady_devimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -288,7 +289,7 @@ public static class GameDatabase
             SubSkillIds = new() { "holy_rod", "god_blessing" },
             Description = "6장의 빛나는 날개를 지닌 성스러운 천사 디지몬. 황금의 성스러운 주먹 '헤븐즈 너클'로 악을 정화합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "holy_angemon", "angewomon", "shakkoumon" }
+            EvolutionCandidateIds = new() { "holy_angemon", "angewomon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -302,13 +303,13 @@ public static class GameDatabase
             BaseMaxHp = 260,
             BaseSpeed = 210,
             BaseDp = 5000,
-            SpriteFileName = "Guardromon.png",
+            SpriteFileName = "Kabuterimon.png",
             CardId = "ST4-08",
             SignatureWeaponId = "mega_blaster",
             SubSkillIds = new() { "beetle_horn", "electro_shocker" },
             Description = "강인한 곤충형 디지몬. 뿔 끝에서 방출하는 고출력 전자포 '메가 블래스터'를 일제 발사합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "mega_kabuterimon", "okuwamon", "atler_kabuterimon" }
+            EvolutionCandidateIds = new() { "mega_kabuterimon", "lilimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -322,13 +323,13 @@ public static class GameDatabase
             BaseMaxHp = 270,
             BaseSpeed = 200,
             BaseDp = 4000,
-            SpriteFileName = "Garurumon.png",
+            SpriteFileName = "Ikkakumon.png",
             CardId = "ST2-05",
             SignatureWeaponId = "harpoon_torpedo",
             SubSkillIds = new() { "northern_lights", "horn_drill" },
             Description = "극지방에서 살아가는 바다짐승형 디지몬. 머리의 뿔 미사일 '하푼 토피도'를 연사합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "zudomon", "whamon", "marine_devimon" }
+            EvolutionCandidateIds = new() { "zudomon", "were_garurumon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -348,7 +349,7 @@ public static class GameDatabase
             SubSkillIds = new() { "bone_axe", "fury_club" },
             Description = "거대한 뼈 몽둥이를 휘두르는 호전적인 오니형 디지몬. 전방에 충격파 '패왕권'을 내지릅니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "skull_greymon", "etemon", "digitamamon" }
+            EvolutionCandidateIds = new() { "skull_greymon", "metal_greymon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -362,13 +363,13 @@ public static class GameDatabase
             BaseMaxHp = 260,
             BaseSpeed = 205,
             BaseDp = 5000,
-            SpriteFileName = "Greymon.png",
-            CardId = "ST5-06",
+            SpriteFileName = "DarkTyrannomon.png",
+            CardId = "ST5-08",
             SignatureWeaponId = "iron_tail",
             SubSkillIds = new() { "dark_matter", "fire_blast" },
             Description = "바이러스에 감염되어 흉포해진 공룡 디지몬. 강력한 강철 꼬리와 검은 화염포를 난사합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "metal_tyrannomon", "skull_greymon", "megadramon" }
+            EvolutionCandidateIds = new() { "skull_greymon", "metal_greymon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -382,13 +383,13 @@ public static class GameDatabase
             BaseMaxHp = 240,
             BaseSpeed = 220,
             BaseDp = 5000,
-            SpriteFileName = "Birdramon.png",
+            SpriteFileName = "Coredramon.png",
             CardId = "ST1-06",
             SignatureWeaponId = "blue_flare",
             SubSkillIds = new() { "strike_tail", "dragon_breath" },
             Description = "순수 드래곤의 피를 진하게 물려받은 용인형 디지몬. 푸른 화염 '블루 플레어'를 뿜어냅니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "groundramon", "metal_greymon", "megadramon" }
+            EvolutionCandidateIds = new() { "metal_greymon", "garudamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -402,13 +403,13 @@ public static class GameDatabase
             BaseMaxHp = 220,
             BaseSpeed = 240,
             BaseDp = 4000,
-            SpriteFileName = "Piyomon.png",
+            SpriteFileName = "Unimon.png",
             CardId = "ST3-07",
             SignatureWeaponId = "holy_shot",
             SubSkillIds = new() { "corn_thrust", "aerial_gallop" },
             Description = "전설의 유니콘과 페가수스가 융합된 환수형 디지몬. 성스러운 광탄을 연속으로 발사합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "holy_angemon", "garudamon", "shakkoumon" }
+            EvolutionCandidateIds = new() { "holy_angemon", "garudamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -422,7 +423,7 @@ public static class GameDatabase
             BaseMaxHp = 210,
             BaseSpeed = 230,
             BaseDp = 4000,
-            SpriteFileName = "Piyomon.png",
+            SpriteFileName = "Gatomon.png",
             CardId = "ST3-06",
             SignatureWeaponId = "cat_punch",
             SubSkillIds = new() { "cat_eye", "tail_ring_flash" },
@@ -442,13 +443,13 @@ public static class GameDatabase
             BaseMaxHp = 210,
             BaseSpeed = 215,
             BaseDp = 4000,
-            SpriteFileName = "PicoDevimon.png",
+            SpriteFileName = "Wizardmon.png",
             CardId = "ST6-07",
             SignatureWeaponId = "thunder_ball",
             SubSkillIds = new() { "magical_game", "terror_illusion" },
             Description = "이세계 마법을 다루는 마인형 디지몬. 번개 구체 '썬더 볼'을 사방으로 소환합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "vamdemon", "skull_satamon", "baalmon" }
+            EvolutionCandidateIds = new() { "vamdemon", "lady_devimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -462,13 +463,13 @@ public static class GameDatabase
             BaseMaxHp = 220,
             BaseSpeed = 235,
             BaseDp = 4000,
-            SpriteFileName = "PicoDevimon.png",
+            SpriteFileName = "BlackGatomon.png",
             CardId = "ST6-06",
             SignatureWeaponId = "cat_laser",
             SubSkillIds = new() { "dangerous_claw", "dark_charm" },
             Description = "사악한 마성을 지닌 검은 고양이 디지몬. 눈에서 암흑 레이저를 뿜어 적을 꿰뚫습니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "lady_devimon", "vamdemon", "skull_satamon" }
+            EvolutionCandidateIds = new() { "lady_devimon", "vamdemon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -482,13 +483,13 @@ public static class GameDatabase
             BaseMaxHp = 250,
             BaseSpeed = 200,
             BaseDp = 4000,
-            SpriteFileName = "Guardromon.png",
+            SpriteFileName = "Togemon.png",
             CardId = "ST4-06",
             SignatureWeaponId = "chiku_chiku_bang",
             SubSkillIds = new() { "macha_punch", "needle_spray" },
             Description = "권투 글러브를 낀 선인장형 디지몬. 온몸에서 가시를 폭풍처럼 뿜어내는 '치쿠치쿠 뱅뱅'을 씁니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "lilimon", "mega_kabuterimon", "rose_mon" }
+            EvolutionCandidateIds = new() { "lilimon", "mega_kabuterimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -502,13 +503,13 @@ public static class GameDatabase
             BaseMaxHp = 270,
             BaseSpeed = 190,
             BaseDp = 4000,
-            SpriteFileName = "Guardromon.png",
+            SpriteFileName = "Woodmon.png",
             CardId = "ST4-07",
             SignatureWeaponId = "branch_drain",
             SubSkillIds = new() { "woody_smash", "leaf_cutter" },
             Description = "말라붙은 거목 형태의 식물형 디지몬. 적의 생명력을 흡수하며 묵직한 줄기로 내려칩니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "jyureimon", "mega_kabuterimon", "okuwamon" }
+            EvolutionCandidateIds = new() { "mega_kabuterimon", "lilimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -522,13 +523,13 @@ public static class GameDatabase
             BaseMaxHp = 260,
             BaseSpeed = 210,
             BaseDp = 5000,
-            SpriteFileName = "WereGarurumon.png",
+            SpriteFileName = "Grizzlymon.png",
             CardId = "ST2-07",
             SignatureWeaponId = "crescent_dawn",
             SubSkillIds = new() { "maul_attack", "bear_claw" },
             Description = "강인한 체격을 지닌 맹수형 곰 디지몬. 일격필살의 발톱으로 지면을 가릅니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "were_garurumon", "zudomon", "grappleomon" }
+            EvolutionCandidateIds = new() { "were_garurumon", "zudomon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -542,13 +543,13 @@ public static class GameDatabase
             BaseMaxHp = 300,
             BaseSpeed = 180,
             BaseDp = 5000,
-            SpriteFileName = "Guardromon.png",
+            SpriteFileName = "Tankmon.png",
             CardId = "ST5-07",
             SignatureWeaponId = "hyper_cannon",
             SubSkillIds = new() { "machine_gun_fire", "tread_crush" },
             Description = "전차와 융합된 중무장 개틀링 디지몬. 고폭탄 '하이퍼 캐논'을 연사합니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "andromon", "megadramon", "metal_greymon_black" }
+            EvolutionCandidateIds = new() { "metal_greymon", "skull_greymon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -562,13 +563,13 @@ public static class GameDatabase
             BaseMaxHp = 240,
             BaseSpeed = 220,
             BaseDp = 4000,
-            SpriteFileName = "Garurumon.png",
+            SpriteFileName = "Seadramon.png",
             CardId = "BT1-034",
             SignatureWeaponId = "ice_arrow",
             SubSkillIds = new() { "water_breath", "constriction" },
             Description = "해양을 지배하는 거대 수룡형 디지몬. 절대영도의 얼음 화살 '아이스 애로우'를 쏩니다.",
             RequiredSignatureLevel = 5,
-            EvolutionCandidateIds = new() { "mega_seadramon", "zudomon", "whamon" }
+            EvolutionCandidateIds = new() { "zudomon", "were_garurumon" }
         });
 
         // ======================== 완전체 (Ultimate / Lv.5) ========================
@@ -590,7 +591,7 @@ public static class GameDatabase
             SubSkillIds = new() { "trident_arm", "metal_slash" },
             Description = "몸의 절반 이상을 기계화하여 비약적인 화력을 손에 넣은 사이보그형 디지몬. 유도 미사일 '기가 디스트로이어'를 일제 발사합니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "war_greymon", "blitz_greymon" }
+            EvolutionCandidateIds = new() { "war_greymon", "mugendramon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -610,7 +611,7 @@ public static class GameDatabase
             SubSkillIds = new() { "moon_sault_kick", "garuru_kick" },
             Description = "두 발로 서서 격투술을 연마한 늑대인간형 디지몬. 신속의 칼바람 손톱 '카이저 네일'로 주변 적들을 난도질합니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "metal_garurumon", "cres_garurumon" }
+            EvolutionCandidateIds = new() { "metal_garurumon", "plesiomon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -630,7 +631,7 @@ public static class GameDatabase
             SubSkillIds = new() { "crimson_claw", "great_spirit" },
             Description = "붉은 깃털과 강철 발톱을 지닌 조인형 디지몬. 진홍의 거대 검풍으로 적진을 일도양단합니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "hououmon", "valkyrimon" }
+            EvolutionCandidateIds = new() { "hououmon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -650,7 +651,7 @@ public static class GameDatabase
             SubSkillIds = new() { "blood_stream", "cloud_of_bats" },
             Description = "언데드의 왕으로 군림하는 흡혈귀 디지몬. 무수한 악마 박쥐 떼를 불러 적의 피를 흡수합니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "piemon", "venom_vamdemon" }
+            EvolutionCandidateIds = new() { "piemon", "mugendramon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -664,13 +665,13 @@ public static class GameDatabase
             BaseMaxHp = 410,
             BaseSpeed = 235,
             BaseDp = 7000,
-            SpriteFileName = "Angemon.png",
+            SpriteFileName = "HolyAngemon.png",
             CardId = "ST3-08",
             SignatureWeaponId = "heaven_gate",
             SubSkillIds = new() { "excalibur", "soul_vanish" },
             Description = "8장의 은빛 날개와 엑스칼리버를 장착한 대천사 디지몬. 아공간 문 '헤븐즈 게이트'를 열어 악을 소멸시킵니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "seraphimon", "slash_angemon" }
+            EvolutionCandidateIds = new() { "seraphimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -684,13 +685,13 @@ public static class GameDatabase
             BaseMaxHp = 460,
             BaseSpeed = 220,
             BaseDp = 8000,
-            SpriteFileName = "Guardromon.png",
-            CardId = "ST4-08",
+            SpriteFileName = "MegaKabuterimon.png",
+            CardId = "ST4-11",
             SignatureWeaponId = "horn_buster",
             SubSkillIds = new() { "wild_blaster", "mega_horn" },
             Description = "비행 능력과 장갑이 대폭 강화된 장수풍뎅이 디지몬. 뿔에서 초거대 번개 에너지탄을 방출합니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "hercules_kabuterimon", "ancient_beatmon" }
+            EvolutionCandidateIds = new() { "hercules_kabuterimon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -704,13 +705,13 @@ public static class GameDatabase
             BaseMaxHp = 470,
             BaseSpeed = 215,
             BaseDp = 8000,
-            SpriteFileName = "WereGarurumon.png",
+            SpriteFileName = "Zudomon.png",
             CardId = "ST2-09",
             SignatureWeaponId = "hammer_spark",
             SubSkillIds = new() { "thor_hammer", "ice_smash" },
             Description = "크롬디지조이드제 토르 해머를 든 바다사자형 디지몬. 대지를 내리쳐 벼락과 충격파를 일으킵니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "plesiomon", "vikemon" }
+            EvolutionCandidateIds = new() { "plesiomon", "metal_garurumon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -730,7 +731,7 @@ public static class GameDatabase
             SubSkillIds = new() { "oblivion_bird", "bone_strike" },
             Description = "싸움에만 집착한 끝에 암흑 진화해 뼈만 남은 언데드형 디지몬. 극도의 파괴력과 광역 폭발을 자랑합니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "black_war_greymon", "mugendramon" }
+            EvolutionCandidateIds = new() { "mugendramon", "war_greymon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -744,13 +745,13 @@ public static class GameDatabase
             BaseMaxHp = 390,
             BaseSpeed = 240,
             BaseDp = 7000,
-            SpriteFileName = "Angemon.png",
+            SpriteFileName = "Angewomon.png",
             CardId = "ST3-09",
             SignatureWeaponId = "holy_arrow",
             SubSkillIds = new() { "heaven_charm", "saint_air" },
             Description = "아름다운 8장의 날개를 지닌 여성 대천사 디지몬. 성스러운 화살로 번개처럼 악을 꿰뚫습니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "magnadramon", "mastemon" }
+            EvolutionCandidateIds = new() { "seraphimon", "rose_mon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -764,13 +765,13 @@ public static class GameDatabase
             BaseMaxHp = 400,
             BaseSpeed = 245,
             BaseDp = 7000,
-            SpriteFileName = "Vamdemon.png",
+            SpriteFileName = "LadyDevimon.png",
             CardId = "ST6-08",
             SignatureWeaponId = "darkness_wave",
             SubSkillIds = new() { "poison_spear", "dark_slap" },
             Description = "강력한 암흑의 힘을 지닌 여성 타천사 디지몬. 검은 박쥐 파동 '다크니스 웨이브'로 대상을 태워버립니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "lilithmon", "piemon" }
+            EvolutionCandidateIds = new() { "piemon", "mugendramon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -784,13 +785,13 @@ public static class GameDatabase
             BaseMaxHp = 380,
             BaseSpeed = 250,
             BaseDp = 6000,
-            SpriteFileName = "Patamon.png",
-            CardId = "ST4-09",
+            SpriteFileName = "Lilimon.png",
+            CardId = "ST4-10",
             SignatureWeaponId = "flower_cannon",
             SubSkillIds = new() { "fairy_vine", "temptation_pollen" },
             Description = "꽃잎 날개를 활짝 펼친 요정형 디지몬. 양손을 모아 화약 가루와 꽃잎 에너지탄을 쏩니다.",
             RequiredSignatureLevel = 7,
-            EvolutionCandidateIds = new() { "rose_mon" }
+            EvolutionCandidateIds = new() { "rose_mon", "hercules_kabuterimon" }
         });
 
         // ======================== 궁극체 (Mega / Lv.6) ========================
@@ -850,7 +851,9 @@ public static class GameDatabase
             CardId = "ST1-10",
             SignatureWeaponId = "starlight_explosion",
             SubSkillIds = new() { "crimson_flare", "holy_feather" },
-            Description = "4장의 황금 날개를 펼친 전설의 성수형 디지몬. 성스러운 빛의 가루를 흩뿌려 적을 정화합니다."
+            Description = "4장의 황금 날개를 펼친 전설의 성수형 디지몬. 성스러운 빛의 가루를 흩뿌려 적을 정화합니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -864,11 +867,13 @@ public static class GameDatabase
             BaseMaxHp = 660,
             BaseSpeed = 250,
             BaseDp = 12000,
-            SpriteFileName = "Angemon.png",
+            SpriteFileName = "Seraphimon.png",
             CardId = "ST3-11",
             SignatureWeaponId = "strike_of_the_seven_stars",
             SubSkillIds = new() { "testament", "seven_heavens" },
-            Description = "최고위 치천사 디지몬. 7개의 초열 광구 '세븐 즈 헤븐'으로 모든 악을 완전히 소멸시킵니다."
+            Description = "최고위 치천사 디지몬. 7개의 초열 광구 '세븐 즈 헤븐'으로 모든 악을 완전히 소멸시킵니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -882,11 +887,13 @@ public static class GameDatabase
             BaseMaxHp = 720,
             BaseSpeed = 240,
             BaseDp = 13000,
-            SpriteFileName = "Guardromon.png",
-            CardId = "ST4-11",
+            SpriteFileName = "HerculesKabuterimon.png",
+            CardId = "ST4-13",
             SignatureWeaponId = "giga_blaster",
             SubSkillIds = new() { "high_mega_blaster", "horn_scissor" },
-            Description = "카부테리몬과 쿠와가몬의 정점을 합친 황금의 거대 곤충 왕. 초거대 번개 폭풍을 사방으로 방출합니다."
+            Description = "카부테리몬과 쿠와가몬의 정점을 합친 황금의 거대 곤충 왕. 초거대 번개 폭풍을 사방으로 방출합니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -904,7 +911,9 @@ public static class GameDatabase
             CardId = "BT2-080",
             SignatureWeaponId = "trump_sword",
             SubSkillIds = new() { "ending_snipe", "toy_wonderland" },
-            Description = "어둠의 사천왕을 통솔하는 지옥의 광대. 등에 꽂힌 4자루의 검 '트럼프 소드'를 텔레포트 시켜 적을 벱니다."
+            Description = "어둠의 사천왕을 통솔하는 지옥의 광대. 등에 꽂힌 4자루의 검 '트럼프 소드'를 텔레포트 시켜 적을 벱니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -918,11 +927,13 @@ public static class GameDatabase
             BaseMaxHp = 690,
             BaseSpeed = 230,
             BaseDp = 11000,
-            SpriteFileName = "Garurumon.png",
+            SpriteFileName = "Plesiomon.png",
             CardId = "ST2-10",
             SignatureWeaponId = "sorrow_blue",
             SubSkillIds = new() { "sad_water", "shaking_tail" },
-            Description = "환상의 고대 수룡 디지몬. 슬픈 울음소리로 적의 전의를 상실시키고 초음파 해일을 일으킵니다."
+            Description = "환상의 고대 수룡 디지몬. 슬픈 울음소리로 적의 전의를 상실시키고 초음파 해일을 일으킵니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -936,11 +947,13 @@ public static class GameDatabase
             BaseMaxHp = 640,
             BaseSpeed = 265,
             BaseDp = 11000,
-            SpriteFileName = "Patamon.png",
-            CardId = "ST4-10",
+            SpriteFileName = "Rosemon.png",
+            CardId = "ST4-12",
             SignatureWeaponId = "forbidden_temptation",
             SubSkillIds = new() { "thorn_whip", "beauty_shock" },
-            Description = "꽃들의 여왕으로 불리는 요정형 디지몬. 가시 채찍과 장미 꽃잎 폭풍으로 전장을 매혹합니다."
+            Description = "꽃들의 여왕으로 불리는 요정형 디지몬. 가시 채찍과 장미 꽃잎 폭풍으로 전장을 매혹합니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         AddDigimon(new DigimonProfile
@@ -954,11 +967,13 @@ public static class GameDatabase
             BaseMaxHp = 800,
             BaseSpeed = 200,
             BaseDp = 14000,
-            SpriteFileName = "MetalGreymon.png",
-            CardId = "ST5-11",
+            SpriteFileName = "Mugendramon.png",
+            CardId = "ST5-12",
             SignatureWeaponId = "infinity_cannon",
             SubSkillIds = new() { "booster_claw", "catastrophe_d" },
-            Description = "모든 사이보그 디지몬의 부품을 집대성한 100% 풀메탈 살육 기계. 2문의 무겐 캐논으로 지평선을 날립니다."
+            Description = "모든 사이보그 디지몬의 부품을 집대성한 100% 풀메탈 살육 기계. 2문의 무겐 캐논으로 지평선을 날립니다.",
+            RequiredSignatureLevel = 8,
+            EvolutionCandidateIds = new() { "omegamon" }
         });
 
         // ======================== 초궁극체 (Ultra / Lv.7) ========================
@@ -1870,6 +1885,42 @@ public static class GameDatabase
             CooldownReductionPerLevel = 0.06,
             Description = "초당 HP 재생 +6 및 스킬 쿨타임 -6% 단축."
         });
+    }
+
+    private static void FinalizeSkillStages()
+    {
+        // 1. 디지몬의 시그니처 및 서브스킬로부터 단계(Stage) 자동 매핑
+        foreach (var digi in Digimons.Values)
+        {
+            if (!string.IsNullOrEmpty(digi.SignatureWeaponId) && Skills.TryGetValue(digi.SignatureWeaponId, out var sigSkill))
+            {
+                sigSkill.Stage = digi.Stage;
+            }
+
+            foreach (var subId in digi.SubSkillIds)
+            {
+                if (Skills.TryGetValue(subId, out var subSkill))
+                {
+                    subSkill.Stage = digi.Stage;
+                }
+            }
+        }
+
+        // 2. 명시적 특수 스킬 스테이지 매핑
+        if (Skills.TryGetValue("spit_fire", out var s1)) s1.Stage = DigimonStage.Rookie;
+        if (Skills.TryGetValue("hammer_spark", out var s2)) s2.Stage = DigimonStage.Champion;
+        if (Skills.TryGetValue("holy_rod", out var s3)) s3.Stage = DigimonStage.Champion;
+        if (Skills.TryGetValue("dark_matter", out var s4)) s4.Stage = DigimonStage.Champion;
+        if (Skills.TryGetValue("ice_arrow", out var s5)) s5.Stage = DigimonStage.Champion;
+        if (Skills.TryGetValue("haouken", out var s6)) s6.Stage = DigimonStage.Champion;
+        if (Skills.TryGetValue("harpoon_torpedo", out var s7)) s7.Stage = DigimonStage.Champion;
+        if (Skills.TryGetValue("sorrow_blue", out var s8)) s8.Stage = DigimonStage.Ultimate;
+        if (Skills.TryGetValue("trident_arm", out var s9)) s9.Stage = DigimonStage.Ultimate;
+        if (Skills.TryGetValue("hyper_cannon", out var s10)) s10.Stage = DigimonStage.Ultimate;
+        if (Skills.TryGetValue("night_raid", out var s11)) s11.Stage = DigimonStage.Ultimate;
+        if (Skills.TryGetValue("dramon_killer", out var s12)) s12.Stage = DigimonStage.Mega;
+        if (Skills.TryGetValue("trump_sword", out var s13)) s13.Stage = DigimonStage.Mega;
+        if (Skills.TryGetValue("grey_sword", out var s14)) s14.Stage = DigimonStage.Ultra;
     }
 
     private static void AddDigimon(DigimonProfile d) => Digimons[d.Id] = d;

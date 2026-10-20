@@ -48,14 +48,9 @@ public partial class MainWindow : Window
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         string projectRoot = @"D:\Project\DigimonSurvivors";
-        string spritesDir = System.IO.Path.Combine(projectRoot, "Assets", "Sprites");
-        string brainDir = @"C:\Users\MyungHwan\.gemini\antigravity\brain\2274f5fa-7175-4dca-911e-091b500f2fc1";
-
-        // 신규 생성된 스프라이트 자동 투명화 변환
-        if (System.IO.Directory.Exists(brainDir))
-        {
-            Tools.SpriteImporter.ImportAllGenerated(brainDir, spritesDir);
-        }
+        // 공식 밴다이 원작 일러스트 자동 변환 및 동기화
+        Tools.NukkiProcessor.ProcessOfficialArtwork();
+        Tools.DigimonTokenGenerator.GenerateAll(projectRoot);
 
         AssetManager.PrewarmAllSprites();
         AssetManager.PrewarmAllSkills();
@@ -70,9 +65,9 @@ public partial class MainWindow : Window
         ImgGabumon.Source = AssetManager.GetSprite("Gabumon.png");
         ImgPiyomon.Source = AssetManager.GetSprite("Piyomon.png");
         ImgPicoDevimon.Source = AssetManager.GetSprite("PicoDevimon.png");
-        ImgPatamon.Source = AssetManager.GetSprite("Patamon.png") ?? AssetManager.GetSprite("Piyomon.png");
-        ImgTentomon.Source = AssetManager.GetSprite("Tentomon.png") ?? AssetManager.GetSprite("Guardromon.png");
-        ImgGomamon.Source = AssetManager.GetSprite("Gomamon.png") ?? AssetManager.GetSprite("Gabumon.png");
+        ImgPatamon.Source = AssetManager.GetSprite("Patamon.png");
+        ImgTentomon.Source = AssetManager.GetSprite("Tentomon.png");
+        ImgGomamon.Source = AssetManager.GetSprite("Gomamon.png");
         ImgGoburimon.Source = AssetManager.GetSprite("Goburimon.png");
 
         UpdateStarterSelectionUI();
@@ -250,8 +245,8 @@ public partial class MainWindow : Window
     {
         if (_engine.EvolvingFromProfile != null && _engine.EvolvingToProfile != null)
         {
-            ImgEvoFrom.Source = AssetManager.GetSprite(_engine.EvolvingFromProfile.SpriteFileName);
-            ImgEvoTo.Source = AssetManager.GetSprite(_engine.EvolvingToProfile.SpriteFileName);
+            ImgEvoFrom.Source = AssetManager.GetDigimonSprite(_engine.EvolvingFromProfile);
+            ImgEvoTo.Source = AssetManager.GetDigimonSprite(_engine.EvolvingToProfile);
             TxtEvoNames.Text = $"{_engine.EvolvingFromProfile.Name} 진화! ──────> {_engine.EvolvingToProfile.Name}!";
             EvolutionOverlay.Visibility = Visibility.Visible;
         }

@@ -31,10 +31,10 @@
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" MaxWidth="1080" Margin="0,0,0,18">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <!-- 1. 아구몬 -->
-                        <Border x:Name="CardAgumon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#FF5252" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Agumon">
+                        <Border x:Name="CardAgumon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#FF5252" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Agumon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgAgumon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#33FF5252" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgAgumon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="아구몬" FontSize="15" FontWeight="Bold" Foreground="#FF8A80" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[백신 / 화염]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -43,10 +43,10 @@
                         </Border>
 
                         <!-- 2. 파피몬 -->
-                        <Border x:Name="CardGabumon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#40C4FF" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Gabumon">
+                        <Border x:Name="CardGabumon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#40C4FF" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Gabumon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgGabumon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#3340C4FF" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgGabumon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="파피몬" FontSize="15" FontWeight="Bold" Foreground="#80D8FF" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[데이터 / 냉기]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -55,10 +55,10 @@
                         </Border>
 
                         <!-- 3. 피요몬 -->
-                        <Border x:Name="CardPiyomon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#FF80AB" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Piyomon">
+                        <Border x:Name="CardPiyomon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#FF80AB" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Piyomon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgPiyomon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#33FF80AB" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgPiyomon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="피요몬" FontSize="15" FontWeight="Bold" Foreground="#FF80AB" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[백신 / 질풍]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -67,10 +67,10 @@
                         </Border>
 
                         <!-- 4. 피코데블몬 -->
-                        <Border x:Name="CardPicoDevimon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#BA68C8" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_PicoDevimon">
+                        <Border x:Name="CardPicoDevimon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#BA68C8" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_PicoDevimon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgPicoDevimon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#33BA68C8" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgPicoDevimon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="피코데블몬" FontSize="15" FontWeight="Bold" Foreground="#E1BEE7" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[바이러스 / 암흑]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -79,10 +79,10 @@
                         </Border>
 
                         <!-- 5. 파닥몬 -->
-                        <Border x:Name="CardPatamon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#FFD54F" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Patamon">
+                        <Border x:Name="CardPatamon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#FFD54F" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Patamon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgPatamon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#33FFD54F" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgPatamon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="파닥몬" FontSize="15" FontWeight="Bold" Foreground="#FFE082" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[백신 / 신성]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -91,10 +91,10 @@
                         </Border>
 
                         <!-- 6. 텐토몬 -->
-                        <Border x:Name="CardTentomon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#81C784" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Tentomon">
+                        <Border x:Name="CardTentomon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#81C784" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Tentomon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgTentomon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#3381C784" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgTentomon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="텐토몬" FontSize="15" FontWeight="Bold" Foreground="#A5D6A7" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[백신 / 번개]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -103,10 +103,10 @@
                         </Border>
 
                         <!-- 7. 고마몬 -->
-                        <Border x:Name="CardGomamon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#4DD0E1" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Gomamon">
+                        <Border x:Name="CardGomamon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#4DD0E1" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Gomamon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgGomamon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#334DD0E1" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgGomamon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="고마몬" FontSize="15" FontWeight="Bold" Foreground="#80DEEA" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[백신 / 해수]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -115,10 +115,10 @@
                         </Border>
 
                         <!-- 8. 고블몬 -->
-                        <Border x:Name="CardGoburimon" Width="170" Height="240" Margin="6" CornerRadius="8" Background="#162032" BorderBrush="#B0BEC5" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Goburimon">
+                        <Border x:Name="CardGoburimon" Width="170" Height="250" Margin="6" CornerRadius="10" Background="#162032" BorderBrush="#B0BEC5" BorderThickness="2" Cursor="Hand" MouseDown="SelectStarter_Goburimon">
                             <StackPanel Margin="8">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="#263238" HorizontalAlignment="Center" Margin="0,4,0,8">
-                                    <Image x:Name="ImgGoburimon" Stretch="Uniform" Margin="4"/>
+                                <Border Width="82" Height="82" CornerRadius="12" Background="#142032" BorderBrush="#33B0BEC5" BorderThickness="1.5" HorizontalAlignment="Center" Margin="0,2,0,8">
+                                    <Image x:Name="ImgGoburimon" Stretch="Uniform" Margin="4" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <TextBlock Text="고블몬" FontSize="15" FontWeight="Bold" Foreground="#CFD8DC" HorizontalAlignment="Center"/>
                                 <TextBlock Text="[바이러스 / 격투]" FontSize="11" Foreground="#B0BEC5" HorizontalAlignment="Center" Margin="0,1,0,6"/>
@@ -219,15 +219,15 @@
                 </TextBlock>
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
-                    <Border Width="130" Height="130" CornerRadius="65" Background="#162236" BorderBrush="#607D8B" BorderThickness="3" Margin="15">
-                        <Image x:Name="ImgEvoFrom" Stretch="Uniform" Margin="8"/>
+                    <Border Width="140" Height="160" CornerRadius="14" Background="#162236" BorderBrush="#607D8B" BorderThickness="2.5" Margin="15">
+                        <Image x:Name="ImgEvoFrom" Stretch="Uniform" Margin="10" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
                     <TextBlock Text="➔" FontSize="48" FontWeight="Bold" Foreground="#FFD700" VerticalAlignment="Center"/>
-                    <Border Width="170" Height="170" CornerRadius="85" Background="#1A2D4C" BorderBrush="#00E5FF" BorderThickness="4" Margin="15">
+                    <Border Width="170" Height="190" CornerRadius="16" Background="#1A2D4C" BorderBrush="#00E5FF" BorderThickness="3.5" Margin="15">
                         <Border.Effect>
                             <DropShadowEffect Color="#00E5FF" BlurRadius="30" ShadowDepth="0" />
                         </Border.Effect>
-                        <Image x:Name="ImgEvoTo" Stretch="Uniform" Margin="8"/>
+                        <Image x:Name="ImgEvoTo" Stretch="Uniform" Margin="12" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
                 </StackPanel>
 

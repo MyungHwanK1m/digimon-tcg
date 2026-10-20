@@ -110,7 +110,8 @@ public class GameEngine
     private void SpawnInitialMonoliths()
     {
         Point[] positions = {
-            new(-400, -350), new(400, -350), new(-400, 350), new(400, 350)
+            new(-240, -180), new(240, -180), new(-240, 180), new(240, 180),
+            new(0, -280), new(0, 280)
         };
         foreach (var pos in positions)
         {
@@ -128,6 +129,28 @@ public class GameEngine
                 Particles.AddCyberTrail(Player.Position, Player.Radius * 1.5, Color.FromRgb(0, 229, 255));
             }
             AddScreenShake(0.18);
+
+            // 대시 충격으로 모놀리스 타격
+            foreach (var mono in Monoliths)
+            {
+                if (!mono.IsAlive) continue;
+                double dx = mono.Position.X - Player.Position.X;
+                double dy = mono.Position.Y - Player.Position.Y;
+                double hitDist = mono.Radius + Player.Radius + 35;
+                if (dx * dx + dy * dy <= hitDist * hitDist)
+                {
+                    mono.TakeDamage(60);
+                    Particles.AddHitSparks(mono.Position, inputDir * 400, Colors.Cyan, 10);
+                    SoundSystem.PlayHit();
+                    FloatingTexts.Add(new FloatingTextEntity
+                    {
+                        Position = mono.Position,
+                        Text = "💥 DASH 60",
+                        Color = Colors.Gold,
+                        Size = 18
+                    });
+                }
+            }
         }
     }
 
@@ -210,7 +233,7 @@ public class GameEngine
         Spawner.Update(dt, GameTime, Player.Position, Enemies, ArenaBounds);
 
         // 3. 무기 발사 및 스킬 업데이트
-        Weapons.Update(dt, Player, Enemies, Projectiles, AreaEffects, FloatingTexts);
+        Weapons.Update(dt, Player, Enemies, Projectiles, AreaEffects, FloatingTexts, Monoliths);
 
         // 4. 투사체 업데이트 및 충돌 판정
         for (int i = Projectiles.Count - 1; i >= 0; i--)
@@ -224,23 +247,39 @@ public class GameEngine
                 continue;
             }
 
+            // 고유 스킬 원소별 궤적 파티클 방출
+            if (GameSettings.ParticlesEnabled && _rnd.NextDouble() < 0.7)
+            {
+                Particles.AddSkillTrail(proj.Position, proj.Velocity, proj.SkillId, proj.ParticleColor);
+            }
+
             // 모놀리스와의 충돌 판정
             foreach (var mono in Monoliths)
             {
                 if (!mono.IsAlive) continue;
+                if (proj.IsOrbiting && mono.HitFlashTimer > 0) continue;
+
                 double dx = mono.Position.X - proj.Position.X;
                 double dy = mono.Position.Y - proj.Position.Y;
-                if (dx * dx + dy * dy <= (mono.Radius + proj.Radius) * (mono.Radius + proj.Radius))
+                double hitDist = mono.Radius + proj.Radius;
+                if (dx * dx + dy * dy <= hitDist * hitDist)
                 {
                     mono.TakeDamage(proj.Damage);
                     Particles.AddHitSparks(mono.Position, proj.Velocity, Colors.Cyan, 6);
                     SoundSystem.PlayHit();
-                    if (!mono.IsAlive)
+                    FloatingTexts.Add(new FloatingTextEntity
                     {
-                        TriggerMonolithDestroyed(mono.Position);
+                        Position = new Point(mono.Position.X + (_rnd.NextDouble() - 0.5) * 20, mono.Position.Y - 20),
+                        Text = $"💎 {(int)proj.Damage}",
+                        Color = Colors.Cyan,
+                        Size = 16
+                    });
+
+                    if (!proj.IsOrbiting)
+                    {
+                        proj.PierceLeft--;
+                        if (proj.PierceLeft <= 0) { proj.IsAlive = false; break; }
                     }
-                    proj.PierceLeft--;
-                    if (proj.PierceLeft <= 0) { proj.IsAlive = false; break; }
                 }
             }
 
@@ -341,6 +380,28 @@ public class GameEngine
                         }
                     }
                 }
+
+                // 모놀리스에도 장판 지속 대미지 적용
+                foreach (var mono in Monoliths)
+                {
+                    if (!mono.IsAlive) continue;
+                    double distSq = (mono.Position.X - area.Position.X) * (mono.Position.X - area.Position.X) +
+                                    (mono.Position.Y - area.Position.Y) * (mono.Position.Y - area.Position.Y);
+                    double hitDist = area.Radius + mono.Radius;
+                    if (distSq <= hitDist * hitDist)
+                    {
+                        mono.TakeDamage(area.DamagePerTick);
+                        Player.RecordDamage(area.Name, area.DamagePerTick);
+                        Particles.AddHitSparks(mono.Position, new Vector(0, -1), area.VisualColor, 4);
+                        FloatingTexts.Add(new FloatingTextEntity
+                        {
+                            Position = new Point(mono.Position.X + (_rnd.NextDouble() - 0.5) * 15, mono.Position.Y - 15),
+                            Text = $"💎 {(int)area.DamagePerTick}",
+                            Color = area.VisualColor,
+                            Size = 14
+                        });
+                    }
+                }
             }
         }
 
@@ -396,8 +457,16 @@ public class GameEngine
             }
         }
 
-        // 7. 모놀리스 파괴된 객체 정리
-        Monoliths.RemoveAll(m => !m.IsAlive);
+        // 7. 모놀리스 파괴된 객체 정리 및 보상 드롭
+        for (int i = Monoliths.Count - 1; i >= 0; i--)
+        {
+            var mono = Monoliths[i];
+            if (!mono.IsAlive)
+            {
+                TriggerMonolithDestroyed(mono.Position);
+                Monoliths.RemoveAt(i);
+            }
+        }
 
         // 8. 특수 필드 아이템 업데이트 및 획득
         for (int i = FieldDrops.Count - 1; i >= 0; i--)
@@ -558,6 +627,14 @@ public class GameEngine
                         Player?.RecordDamage("Bomb", 99999);
                     }
                 }
+                // 화면 내 모놀리스도 즉시 파괴
+                foreach (var mono in Monoliths)
+                {
+                    if (mono.IsAlive)
+                    {
+                        mono.TakeDamage(99999);
+                    }
+                }
                 break;
 
             case FieldItemType.TimeFreeze:
@@ -606,6 +683,27 @@ public class GameEngine
                 FloatingTexts.Add(new FloatingTextEntity
                 {
                     Position = enemy.Position,
+                    Text = $"💥 {(int)damage}",
+                    Color = color,
+                    Size = 18
+                });
+            }
+        }
+
+        foreach (var mono in Monoliths)
+        {
+            if (!mono.IsAlive) continue;
+            double dx = mono.Position.X - center.X;
+            double dy = mono.Position.Y - center.Y;
+            double hitDist = radius + mono.Radius;
+            if (dx * dx + dy * dy <= hitDist * hitDist)
+            {
+                mono.TakeDamage(damage);
+                Player?.RecordDamage("Explosion", damage);
+                Particles.AddHitSparks(mono.Position, new Vector(dx, dy), color, 8);
+                FloatingTexts.Add(new FloatingTextEntity
+                {
+                    Position = new Point(mono.Position.X, mono.Position.Y - 20),
                     Text = $"💥 {(int)damage}",
                     Color = color,
                     Size = 18

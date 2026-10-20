@@ -33,6 +33,7 @@ public class SkillDefinition
     public double BaseDuration { get; set; } = 3.0;
     public string Description { get; set; } = string.Empty;
     public string IconCardCode { get; set; } = string.Empty;
+    public DigimonStage Stage { get; set; } = DigimonStage.Rookie;
 }
 
 public class PassiveDefinition

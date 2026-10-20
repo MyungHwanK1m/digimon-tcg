@@ -19,7 +19,8 @@ public class WeaponSystem
         List<EnemyEntity> enemies,
         List<ProjectileEntity> projectiles,
         List<AreaEffectEntity> areaEffects,
-        List<FloatingTextEntity> floatingTexts)
+        List<FloatingTextEntity> floatingTexts,
+        List<MonolithEntity>? monoliths = null)
     {
         // 1. 회전 보호막(Petit Fire 등) 동기화
         SyncOrbitingWeapons(player, projectiles);
@@ -38,7 +39,7 @@ public class WeaponSystem
             if (weapon.CooldownTimer >= cd)
             {
                 weapon.CooldownTimer = 0.0;
-                FireWeapon(weapon, player, enemies, projectiles, areaEffects, floatingTexts);
+                FireWeapon(weapon, player, enemies, projectiles, areaEffects, floatingTexts, monoliths);
             }
         }
     }
@@ -95,7 +96,8 @@ public class WeaponSystem
         List<EnemyEntity> enemies,
         List<ProjectileEntity> projectiles,
         List<AreaEffectEntity> areaEffects,
-        List<FloatingTextEntity> floatingTexts)
+        List<FloatingTextEntity> floatingTexts,
+        List<MonolithEntity>? monoliths = null)
     {
         var aliveEnemies = enemies.Where(e => e.IsAlive).ToList();
         double dmg = weapon.GetCurrentDamage(player.DamageMultiplier);
@@ -106,12 +108,18 @@ public class WeaponSystem
         {
             case WeaponType.ProjectileDirect:
             {
-                // 가장 가까운 적 방향으로 발사
+                // 가장 가까운 적 방향으로 발사 (적 없으면 근처 모놀리스 조준)
                 var closest = aliveEnemies
                     .OrderBy(e => (e.Position.X - player.Position.X) * (e.Position.X - player.Position.X) +
                                   (e.Position.Y - player.Position.Y) * (e.Position.Y - player.Position.Y))
                     .Take(projCount)
                     .ToList();
+
+                MonolithEntity? nearestMono = monoliths?
+                    .Where(m => m.IsAlive)
+                    .OrderBy(m => (m.Position.X - player.Position.X) * (m.Position.X - player.Position.X) +
+                                  (m.Position.Y - player.Position.Y) * (m.Position.Y - player.Position.Y))
+                    .FirstOrDefault();
 
                 for (int i = 0; i < projCount; i++)
                 {
@@ -119,6 +127,10 @@ public class WeaponSystem
                     if (i < closest.Count)
                     {
                         dir = new Vector(closest[i].Position.X - player.Position.X, closest[i].Position.Y - player.Position.Y);
+                    }
+                    else if (nearestMono != null)
+                    {
+                        dir = new Vector(nearestMono.Position.X - player.Position.X, nearestMono.Position.Y - player.Position.Y);
                     }
                     else
                     {
@@ -215,9 +227,28 @@ public class WeaponSystem
                 break;
             }
 
-            case WeaponType.LightningStrike: // 해머 스파크
+            case WeaponType.LightningStrike: // 해머 스파크, 꼬마 벼락
             {
-                if (aliveEnemies.Count == 0) break;
+                if (aliveEnemies.Count == 0)
+                {
+                    if (monoliths != null)
+                    {
+                        var mTargets = monoliths.Where(m => m.IsAlive).OrderBy(_ => _rnd.Next()).Take(projCount).ToList();
+                        foreach (var m in mTargets)
+                        {
+                            m.TakeDamage(dmg);
+                            floatingTexts.Add(new FloatingTextEntity
+                            {
+                                Position = m.Position,
+                                Text = $"⚡ {(int)dmg}",
+                                Color = color,
+                                Size = 20
+                            });
+                        }
+                        if (mTargets.Count > 0) SoundSystem.PlayHit();
+                    }
+                    break;
+                }
 
                 var randomTargets = aliveEnemies.OrderBy(_ => _rnd.Next()).Take(projCount).ToList();
                 foreach (var target in randomTargets)
@@ -297,6 +328,28 @@ public class WeaponSystem
                     }
                 }
 
+                if (monoliths != null)
+                {
+                    foreach (var mono in monoliths)
+                    {
+                        if (!mono.IsAlive) continue;
+                        double distSq = (mono.Position.X - player.Position.X) * (mono.Position.X - player.Position.X) +
+                                        (mono.Position.Y - player.Position.Y) * (mono.Position.Y - player.Position.Y);
+                        if (distSq <= (radius + mono.Radius) * (radius + mono.Radius))
+                        {
+                            mono.TakeDamage(dmg);
+                            hitCount++;
+                            floatingTexts.Add(new FloatingTextEntity
+                            {
+                                Position = mono.Position,
+                                Text = $"⚔️ {(int)dmg}",
+                                Color = Colors.Cyan,
+                                Size = 20
+                            });
+                        }
+                    }
+                }
+
                 if (hitCount > 0) SoundSystem.PlayHit();
 
                 // 참격 이펙트 장판
@@ -326,6 +379,22 @@ public class WeaponSystem
                         Color = Color.FromRgb(255, 60, 0),
                         Size = 24
                     });
+                }
+
+                if (monoliths != null)
+                {
+                    foreach (var mono in monoliths)
+                    {
+                        if (!mono.IsAlive) continue;
+                        mono.TakeDamage(dmg);
+                        floatingTexts.Add(new FloatingTextEntity
+                        {
+                            Position = mono.Position,
+                            Text = $"💥 {(int)dmg}",
+                            Color = Colors.Cyan,
+                            Size = 22
+                        });
+                    }
                 }
                 SoundSystem.PlayEvolution();
 

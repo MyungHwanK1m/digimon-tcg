@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DigimonSurvivors.Models;
 
 namespace DigimonSurvivors.Rendering;
 
@@ -57,7 +58,12 @@ public static class AssetManager
         {
             string devPath = Path.Combine(@"D:\Project\DigimonSurvivors\Assets\Sprites", filename);
             if (File.Exists(devPath)) fullPath = devPath;
-            else return null;
+            else
+            {
+                string tcgSrcPath = Path.Combine(@"D:\Project\DigimonTcg\src\DigimonSurvivors\Assets\Sprites", filename);
+                if (File.Exists(tcgSrcPath)) fullPath = tcgSrcPath;
+                else return null;
+            }
         }
 
         try
@@ -72,6 +78,37 @@ public static class AssetManager
         catch
         {
             // 폴백
+        }
+
+        return null;
+    }
+
+    public static BitmapSource? GetDigimonSprite(DigimonProfile? profile)
+    {
+        if (profile == null) return null;
+
+        if (!string.IsNullOrEmpty(profile.SpriteFileName))
+        {
+            var sprite = GetSprite(profile.SpriteFileName);
+            if (sprite != null) return sprite;
+        }
+
+        // 폴백: 스프라이트 파일이 없으면 CardId로부터 즉석 생성
+        if (!string.IsNullOrEmpty(profile.CardId))
+        {
+            string tcgCardsDir = @"D:\Project\DigimonTcg\data\images";
+            string cardPath = Path.Combine(tcgCardsDir, $"{profile.CardId}.jpg");
+            var token = Tools.DigimonTokenGenerator.CreateTokenBitmap(cardPath, profile.Attribute);
+            if (token != null)
+            {
+                if (!string.IsNullOrEmpty(profile.SpriteFileName))
+                {
+                    _spriteCache[profile.SpriteFileName] = token;
+                }
+                return token;
+            }
+
+            return GetCardImage(profile.CardId);
         }
 
         return null;
