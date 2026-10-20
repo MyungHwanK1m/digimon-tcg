@@ -136,17 +136,17 @@ public class SentenceParserTests
     }
 
     [Fact]
-    public void ChoiceEffect_ShouldResolveTheFirstOptionByDefault()
+    public void ChoiceEffect_WithoutPlayerChoice_ShouldPickTheHigherValueOption()
     {
         var (state, engine, cards) = NewMainPhase();
         state.Player.MainDeck.Add(cards["ST1-02"]);
-        var chooser = Api("SP-CHOICE", 3, 3000, main: "[On Play] Activate 1 of the effects below:\n・Gain 1 memory.\n・＜Draw 1＞ (Draw 1 card from your deck.)", playCost: 1);
+        var chooser = Api("SP-CHOICE", 3, 3000, main: "[On Play] Activate 1 of the effects below:\n・Gain 1 memory.\n・＜Draw 2＞ (Draw 2 cards from your deck.)", playCost: 1);
         state.Player.Hand.Add(chooser);
 
         engine.PlayCard(chooser);
 
-        Assert.Equal(3, state.MemoryGauge);   // 3 - 1 + 1
-        Assert.Single(state.Player.MainDeck); // 드로우는 하지 않았다
+        Assert.Equal(2, state.MemoryGauge);    // 3 - 1 (메모리 +1은 고르지 않았다)
+        Assert.Empty(state.Player.MainDeck);   // AI 평가: ≪2 드로우≫ > 메모리 +1
         Assert.All(KeywordDictionary.Analyze(chooser), c => Assert.Equal(ClauseSupport.Supported, c.Support));
     }
 

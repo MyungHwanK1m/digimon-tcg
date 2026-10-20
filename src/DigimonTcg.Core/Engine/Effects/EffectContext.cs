@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Generic;
 using DigimonTcg.Core.Models;
@@ -125,12 +126,21 @@ public sealed class EffectContext
     /// <summary>상대 디지몬 ≪퇴화 N≫ — 버린 매수</summary>
     public int DeDigivolveEnemy(CardInstance target, int count) => Engine.DeDigivolve(Enemy, target, count);
 
-    /// <summary>상대 디지몬 중 대상 고르기: preferred가 조건에 맞으면 그것, 아니면 DP가 가장 높은 것</summary>
+    /// <summary>
+    /// 상대 디지몬 1마리를 대상으로 고른다: preferred(UI가 고른 대상 · 어택 상대)가 조건에 맞으면 그것,
+    /// 아니면 플레이어의 효과는 플레이어에게 묻고(추천 = AI 평가), AI의 효과는 AI 평가가 가장 높은 것.
+    /// </summary>
     public CardInstance? PickEnemy(Func<CardInstance, bool>? match = null, CardInstance? preferred = null) =>
-        GoldfishEngine.PickTarget(Enemy.BattleArea, preferred, match);
+        Pick(Enemy, match, preferred, "상대 디지몬");
 
     public CardInstance? PickOwn(Func<CardInstance, bool>? match = null, CardInstance? preferred = null) =>
-        GoldfishEngine.PickTarget(Owner.BattleArea, preferred, match);
+        Pick(Owner, match, preferred, "자신의 디지몬");
+
+    private CardInstance? Pick(PlayerZones zone, Func<CardInstance, bool>? match, CardInstance? preferred, string what)
+    {
+        var ranked = AiEvaluator.Rank(zone.BattleArea.Where(d => match == null || match(d)), preferred);
+        return Engine.ChooseTargets(Owner, ranked, 1, $"[{Card?.Name}] 효과의 대상({what} 1마리)을 고르세요.", optional: false, preselected: preferred).FirstOrDefault();
+    }
 
     /// <summary>상대 디지몬 1마리의 진화원을 아래에서 1장 파기 (가장 레벨이 높은 대상)</summary>
     public void TrashBottomSourceOfEnemy(Func<CardInstance, bool> match, string source) =>

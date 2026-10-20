@@ -24,6 +24,8 @@ public sealed class TargetSpec
     /// <summary>"가장 DP가 높은 / 낮은" 같은 고르기 기준 (null이면 효과 종류에 따라 엔진이 고른다)</summary>
     public Func<IEnumerable<CardInstance>, IEnumerable<CardInstance>>? Selector { get; private set; }
     public string Text { get; private init; } = string.Empty;
+    /// <summary>"up to N" — 고르지 않아도 된다</summary>
+    public bool UpTo { get; private init; }
 
     private static readonly Regex Head = new(
         @"^(?:(?<count>\d+|all|up to \d+) of )?(?<side>your opponent's|your|their|its owner's)\s+(?<adj>(?:(?:unsuspended|suspended|(?:lowest|highest) (?:level|DP|play cost)|level \d+(?: or (?:lower|higher|more|less))?|\[[^\]]+\](?: trait)?)\s+)*)(?<kind>Digimon or Tamers|Digimon|Security Digimon)(?<rest>.*)$",
@@ -48,6 +50,7 @@ public sealed class TargetSpec
         {
             Opponent = side is "your opponent's" or "their",
             Count = !countGiven ? 0 : count == "all" ? 0 : int.Parse(Regex.Match(count, @"\d+").Value),
+            UpTo = count.StartsWith("up to", StringComparison.Ordinal),
             Text = phrase,
         };
         // "your Digimon" (수 없음) = 자신의 디지몬 전부
@@ -227,7 +230,9 @@ public sealed class TargetSpec
             .OrderByDescending(d => ReferenceEquals(d, preferred))
             .ThenByDescending(d => !Opponent && ReferenceEquals(d, c.Self))
             .ThenByDescending(d => d.GetCurrentDP())
-            .ThenByDescending(d => d.TopCard.Level);
-        return ordered.Take(Count).ToList();
+            .ThenByDescending(d => d.TopCard.Level)
+            .ToList();
+        string side = Opponent ? "상대 디지몬" : "자신의 디지몬";
+        return c.Engine.ChooseTargets(c.Owner, ordered, Count, $"[{c.Card?.Name}] 효과의 대상({side} {Count}마리{(UpTo ? "까지" : "")})을 고르세요.", UpTo, preferred);
     }
 }

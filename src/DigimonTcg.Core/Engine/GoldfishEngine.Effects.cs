@@ -425,6 +425,47 @@ public partial class GoldfishEngine
         return picked != null && options.Contains(picked) ? picked : optional ? null : recommended;
     }
 
+    /// <summary>
+    /// 효과 대상 고르기 (count마리, 0 = 전부). ranked = 추천 순서의 후보.
+    /// 플레이어의 효과이고 정말 고를 것이 있을 때만 묻는다 — 후보가 count 이하면 전부, UI가 미리 고른 대상(preselected)이 맞으면 그것.
+    /// AI · 테스트는 추천 순서대로.
+    /// </summary>
+    internal List<CardInstance> ChooseTargets(PlayerZones owner, IReadOnlyList<CardInstance> ranked, int count, string question, bool optional, CardInstance? preselected)
+    {
+        if (count <= 0)
+            return ranked.ToList();
+        bool ask = ReferenceEquals(owner, State.Player) && PlayerChoices != null;
+        if (!ask || (ranked.Count <= count && !optional) || ranked.Count == 0)
+            return ranked.Take(count).ToList();
+        if (count == 1 && preselected != null && ranked.Contains(preselected))
+            return new List<CardInstance> { preselected };
+
+        var picked = new List<CardInstance>();
+        var remaining = ranked.ToList();
+        for (int i = 0; i < count && remaining.Count > 0; i++)
+        {
+            string q = count > 1 ? $"{question} ({i + 1}/{count})" : question;
+            var p = PlayerChoices!.ChooseDigimon(State, q, remaining, remaining[0], optional || i > 0);
+            if (p == null || !remaining.Contains(p))
+            {
+                if (optional || i > 0) break;
+                p = remaining[0];
+            }
+            picked.Add(p);
+            remaining.Remove(p);
+        }
+        return picked;
+    }
+
+    /// <summary>고르는 효과의 선택지 — 플레이어면 묻고, 아니면 추천(AI 평가 점수가 가장 높은 것)</summary>
+    internal int ChooseOption(PlayerZones owner, string question, IReadOnlyList<string> options, int recommended)
+    {
+        if (!ReferenceEquals(owner, State.Player) || PlayerChoices == null || options.Count <= 1)
+            return recommended;
+        int pick = PlayerChoices.ChooseOption(State, question, options, recommended);
+        return pick >= 0 && pick < options.Count ? pick : recommended;
+    }
+
     // =====================================================================
     // 어택 키워드 — ≪연계≫ · ≪돌진≫ · ≪속공≫ · ≪진격≫
     // =====================================================================

@@ -200,18 +200,16 @@ internal static class SentenceParser
             options.Add(steps.ToArray());
         }
 
-        var optionTexts = rawOptions.Select(o => Normalize(o)).ToArray();
+        var optionTexts = rawOptions.Select(o => Normalize(o).TrimStart('・').Trim()).ToArray();
+        // AI 추천: 문장 점수(AiEvaluator)의 합이 가장 큰 선택지 (같으면 앞의 것)
+        var values = optionTexts.Select(t => SplitSentences(t).Sum(AiEvaluator.EstimateSentenceValue)).ToArray();
+        int recommended = Array.IndexOf(values, values.Max());
         Action<EffectContext> resolve = c =>
         {
             if (cond != null && !cond(c)) return;
-            int pick = 0;
-            for (int i = 0; i < options.Count - 1; i++)
-            {
-                if (c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] 이 효과를 고를까요?\n{optionTexts[i]}", recommended: i == 0)) { pick = i; break; }
-                pick = i + 1;
-            }
+            int pick = c.Engine.ChooseOption(c.Owner, $"[{c.Card.Name}] 발휘할 효과를 1개 고르세요.", optionTexts, recommended);
             foreach (var s in options[pick])
-                if (s.Condition == null || s.Condition(c)) s.Act(c);
+                RunStep(s, c);
         };
         Func<EffectContext, bool>? when = qualifier switch
         {
@@ -485,7 +483,16 @@ internal static class SentenceParser
     // 발동 효과: [시점] 문장들
     // =====================================================================
 
-    private sealed record Step(Func<EffectContext, bool>? Condition, Action<EffectContext> Act);
+    /// <summary>문장 하나: 조건 · 동작 · "~할 수 있다"(Optional — 발휘할지 묻는다) · 원문(물을 때 보여 줌)</summary>
+    private sealed record Step(Func<EffectContext, bool>? Condition, Action<EffectContext> Act, bool Optional = false, string Text = "");
+
+    /// <summary>문장을 처리한다: 조건 확인 → "~할 수 있다"면 효과 주인에게 묻기(추천 = AI 평가) → 동작</summary>
+    private static void RunStep(Step s, EffectContext c)
+    {
+        if (s.Condition != null && !s.Condition(c)) return;
+        if (s.Optional && !c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] 이 효과를 발휘할까요?\n{s.Text}", AiEvaluator.EstimateSentenceValue(s.Text) >= 0)) return;
+        s.Act(c);
+    }
 
     private static string? ParseTriggered(string body, bool inherited, CardData card, List<EffectTrigger> triggers, Qualifier qualifier, bool oncePerTurn, Pending pending, Func<EffectContext, bool>? eventCondition = null)
     {
@@ -521,10 +528,7 @@ internal static class SentenceParser
             Action<EffectContext> resolve = c =>
             {
                 foreach (var s in stepList)
-                {
-                    if (s.Condition != null && !s.Condition(c)) continue;
-                    s.Act(c);
-                }
+                    RunStep(s, c);
                 if (tr == EffectTrigger.Security && c.Summary.Length == 0)
                     c.Summary = c.Message.Length > 0 ? Shorten(c.Message) : "효과 발휘";
             };
@@ -580,7 +584,8 @@ internal static class SentenceParser
             if (cond == null) return (null, $"미지원 조건 (If {ifm.Groups["c"].Value})");
             s = ifm.Groups["rest"].Value;
         }
-        s = Regex.Replace(s, @"^you may\s+", "", RegexOptions.IgnoreCase);   // "~할 수 있다": 지금은 언제나 발휘 (대상 선택 UI는 4단계)
+        bool optional = Regex.IsMatch(s, @"^you may\s+", RegexOptions.IgnoreCase);   // "~할 수 있다": 발휘할지 효과 주인이 정한다
+        s = Regex.Replace(s, @"^you may\s+", "", RegexOptions.IgnoreCase);
         s = s.Trim();
 
         // 비용: "By trashing 1 card in your hand, ~" — 낼 수 있을 때만, 낼지는 효과 주인이 정한다 (플레이어는 물어봄)
@@ -598,7 +603,7 @@ internal static class SentenceParser
                 if (!canPay(c)) return;
                 if (!c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] {describe} 효과를 발휘할까요?", recommend(c))) return;
                 pay(c);
-                if (innerStep.Condition == null || innerStep.Condition(c)) innerStep.Act(c);
+                RunStep(innerStep, c);
             };
             return (new Step(cond, paidAct), null);
         }
@@ -610,7 +615,7 @@ internal static class SentenceParser
 
         var act = ParseAction(s.TrimEnd('.'), card, triggers);
         if (act.Error != null) return (null, act.Error);
-        return (new Step(cond, act.Act!), null);
+        return (new Step(cond, act.Act!, optional, sentence.Trim()), null);
     }
 
     /// <summary>비용 구절 → (낼 수 있는지, 내기, AI 추천, 설명)</summary>

@@ -68,7 +68,8 @@ public partial class MainWindow : Window
         _savedDeckStore = new SavedDeckStore(Path.Combine(Path.GetDirectoryName(_catalogService.ImagesDirectoryPath)!, "saved_decks.json"));
         _gameState = new GameState();
         _engine = new GoldfishEngine(_gameState) { PlayerChoosesBlocks = true };
-        _engine.PlayerChoices = new WpfChoiceProvider(this);   // ≪방벽≫ · ≪회피≫ · ≪돌진≫ · ≪연계≫ 같은 "~할 수 있다" 선택
+        // 카드 효과의 "~할 수 있다" 확인 · 대상 고르기 · 고르는 효과 (카드 그림으로 보여 준다)
+        _engine.PlayerChoices = new WpfChoiceProvider(this, card => CreateCardVisualFrame(card, width: 108, height: 151));
 
         // 기본 추천 1번 덱(ST-1 가이아 레드 + 오메가몬) 로드 및 백그라운드 대련 상태 준비
         var (st1Main, st1Digitama) = StarterDecks.CreateSt1GaiaRedPreset();
