@@ -98,15 +98,23 @@ public class CardCatalogService
                     return;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 캐시 손상 시 기본 카드로 복구
+                // 캐시를 읽지 못하면 내장 카드만으로 실행하되, 기존 캐시(수천 장)는 덮어쓰지 않는다.
+                // (예전에는 여기서 120장짜리 캐시로 덮어써서, 동시에 실행된 다른 프로세스가 전체 도감을 지운 적이 있다)
+                LastCacheLoadError = ex.Message;
+                try { File.Copy(_cacheFilePath, _cacheFilePath + ".unreadable", overwrite: true); } catch { }
+                _catalog = defaultCards.OrderBy(c => c.CardId).ToList();
+                return;
             }
         }
 
         _catalog = defaultCards.OrderBy(c => c.CardId).ToList();
         SaveCache();
     }
+
+    /// <summary>마지막으로 캐시를 읽다가 난 오류 (없으면 null) — 이때는 캐시를 덮어쓰지 않고 내장 카드만 쓴다</summary>
+    public string? LastCacheLoadError { get; private set; }
 
     /// <summary>
     /// API에서 받은 카드의 특징(trait) · 등급 · 두 번째 색을 카탈로그 카드에 채운다 (효과 문장 · 이름 · 수치는 그대로). 반환: 바뀐 카드 수
@@ -132,8 +140,11 @@ public class CardCatalogService
 
     public void SaveCache()
     {
+        // 다른 프로세스(앱 · 테스트)가 동시에 읽어도 반쯤 쓴 파일을 보지 않도록 임시 파일에 쓴 뒤 한 번에 바꾼다
         string json = JsonSerializer.Serialize(_catalog, JsonOptions);
-        File.WriteAllText(_cacheFilePath, json);
+        string temp = _cacheFilePath + "." + Environment.ProcessId + ".tmp";
+        File.WriteAllText(temp, json);
+        File.Move(temp, _cacheFilePath, overwrite: true);
     }
 
     public string GetLocalImageFilePath(CardData card)

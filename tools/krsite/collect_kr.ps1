@@ -140,6 +140,14 @@ $merged = [ordered]@{}
 foreach ($f in Get-ChildItem $SetDir -Filter *.json | Sort-Object { [int]$_.BaseName }) {
   $set = Get-Content $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
   foreach ($c in $set.Cards) {
+    # 패러렐은 번호 뒤에 P가 붙어 있다 (예: "EX1-001P", 이름 "EX1-001 아구몬") → 기본 번호로 합친다
+    $m = [regex]::Match($c.CardId, '^([A-Z]+\d*-\d+)(\S*)$')
+    if ($m.Success -and $m.Groups[2].Value) {
+      $c.CardId = $m.Groups[1].Value
+      $c.Parallel = $true
+    }
+    $c.Name = [regex]::Replace($c.Name, '^[A-Z]+\d*-\d+\S*\s+', '')
+    if (-not $c.Name) { continue }
     $id = $c.CardId
     if (-not $merged.Contains($id)) {
       $merged[$id] = [ordered]@{ Card = $c; Parallels = @() }
@@ -192,12 +200,27 @@ if ($Docs) {
       if (-not $resp.IsSuccessStatusCode) { Write-Warning "자료 실패($([int]$resp.StatusCode)): $label"; continue }
       $fname = $resp.Content.Headers.ContentDisposition.FileNameStar
       if (-not $fname) { $fname = $resp.Content.Headers.ContentDisposition.FileName }
-      if ($fname) { $fname = [System.Uri]::UnescapeDataString($fname.Trim('"')) } else { $fname = "$label.bin" }
+      if ($fname) {
+        $fname = [System.Uri]::UnescapeDataString($fname.Trim('"'))
+        # 서버가 UTF-8 파일 이름을 그대로 보내면 .NET은 Latin-1로 읽는다 → UTF-8로 다시 해석
+        if ($fname -match '[\u00C0-\u00FF]') { $fname = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding(28591).GetBytes($fname)) }
+      } else { $fname = "$label.bin" }
       $fname = $fname -replace '[\\/:*?"<>|]', '_'
       $path = Join-Path $DocDir $fname
       if ((Test-Path $path) -and -not $Refresh) { continue }
       [System.IO.File]::WriteAllBytes($path, $resp.Content.ReadAsByteArrayAsync().Result)
       Write-Host "자료: $fname"
+    }
+    # 금지 · 제한 / 언어 통일 룰 / 재정 변경처럼 뉴스 글로 올라온 자료는 글 HTML을 저장한다
+    $news = [regex]::Matches($qna, 'href="(https://digimoncard\.co\.kr/index\.php\?mid=news&amp;document_srl=(\d+))/?"') | ForEach-Object { @{ Url = [System.Net.WebUtility]::HtmlDecode($_.Groups[1].Value); Id = $_.Groups[2].Value } } | Sort-Object { $_.Id } -Unique
+    foreach ($n in $news) {
+      $path = Join-Path $DocDir "news_$($n.Id).html"
+      if ((Test-Path $path) -and -not $Refresh) { continue }
+      $html = Get-Html $n.Url
+      if (-not $html) { continue }
+      $title = Clean ([regex]::Match($html, '<title>(.*?)</title>', 'Singleline').Groups[1].Value)
+      Set-Content -Path $path -Value $html -Encoding UTF8
+      Write-Host "자료 글: news_$($n.Id).html — $title"
     }
   }
 }

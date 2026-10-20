@@ -57,6 +57,7 @@ public class CardData
     [System.Text.Json.Serialization.JsonIgnore]
     public IReadOnlyList<string> DisplayTraits => DigimonTcg.Core.Data.KoreanCardData.DisplayTraits(this);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string DisplaySummary =>
         Type == CardType.Digitama
             ? $"[{CardId}] {DisplayName} (Lv.{Level} 디지타마)"
