@@ -44,6 +44,12 @@ Console.WriteLine($" - Lv.3 위에 Lv.5 진화 시도 -> 차단됨: \"{wrongLeve
 // 4. 1인 솔리테어 (Goldfish) 킬 각 연습 시뮬레이션 (Turn 1 ~ Direct Attack 승리)
 Console.WriteLine("[Phase 1 & 2 솔리테어 골드피시 시뮬레이션: 부화 -> 진화 체인 -> 시큐리티 돌파 -> 다이렉트 어택]");
 engine.StartNewGame(st1Main, st1Digitama, seed: 42);
+engine.BeginGame();
+
+// 데모 재현성을 위해 더미 시큐리티를 DP 2000 이하 성장기 5장으로 고정 (연습 모드 시큐리티는 원래 무작위)
+state.DummyOpponent.SecurityStack.Clear();
+state.DummyOpponent.SecurityStack.AddRange(new[] { "ST1-03", "BT1-010", "ST2-03", "ST3-04", "ST4-04" }
+    .Select(id => StarterDecks.GetAllCatalogCards().First(c => c.CardId == id)));
 
 // Turn 1: 육성 에어리어 부화 -> 패에 Lv.3~Lv.6 진화 라인을 보장하여 체인 검증
 state.Player.Hand.Clear();
@@ -54,7 +60,7 @@ state.Player.Hand.AddRange(new[]
     sample["ST1-09"], // 메탈그레이몬 (Lv.5, 진화 3)
     sample["ST1-11"], // 워그레이몬 (Lv.6, 진화 4)
     sample["ST1-02"], // 피요몬 (Lv.3, 등장 2)
-    sample["ST1-14"]  // 스타라이트 익스플로전 (시큐리티 어택 +1)
+    sample["ST1-14"]  // 스타라이트 익스플로전 (다음 상대 턴 종료 시까지 시큐리티 디지몬 DP +7000, 코스트 2)
 });
 
 engine.HatchDigitama(); // 코로몬(Lv.2) 부화 -> 자동으로 Main 페이즈 진입
@@ -66,8 +72,7 @@ engine.EvolveDigimon(state.Player.BreedingArea!, sample["ST1-09"]); // 메탈그
 engine.MoveFromBreedingArea();
 var mainAttacker = state.Player.BattleArea.First();
 engine.PlayCard(sample["ST1-02"]); // 피요몬 배틀 에어리어 등장 (메모리 3 -> 1)
-engine.PlayCard(sample["ST1-14"], mainAttacker); // 스타라이트 익스플로전 (메모리 1 -> -1이지만 진화 먼저 테스트하기 위해 순서 조정 없이 공격 가능 여부 확인!)
-// 위 옵션 사용으로 메모리가 -1이 되어 Turn 3으로 자동 전환됨!
+engine.PlayCard(sample["ST1-14"]); // 스타라이트 익스플로전 (메모리 1 -> -1 → Turn 3으로 자동 전환)
 
 // Turn 3: 육성 패스 -> 워그레이몬(Lv.6) 진화 전 공격 또는 진화 후 공격
 engine.PassBreedingPhase();
@@ -83,6 +88,19 @@ engine.AttackSecurityOrDirect(mainAttacker);
 if (!state.IsGameOver)
 {
     engine.AttackSecurityOrDirect(secondAttacker);
+}
+
+// 아직 시큐리티가 남았다면 (시큐리티에서 블로커 · 옵션이 나온 경우 등) 이후 턴에도 어택 가능한 디지몬으로 계속 공격
+for (int extraTurn = 0; extraTurn < 6 && !state.IsGameOver; extraTurn++)
+{
+    engine.PassBreedingPhase();
+    foreach (var attacker in state.Player.BattleArea.Where(d => !d.IsSuspended && d.TurnPlayed < state.CurrentTurn).ToList())
+    {
+        if (state.IsGameOver || state.CurrentPhase != Phase.Main) break;
+        engine.AttackSecurityOrDirect(attacker);
+    }
+    if (!state.IsGameOver && state.CurrentPhase == Phase.Main)
+        engine.PassTurn();
 }
 
 Console.WriteLine("\n--- 시뮬레이션 진행 로그 ---");

@@ -48,11 +48,11 @@ public partial class MainWindow : Window
 
     private static bool IsAllyTargetedOption(CardData card) =>
         card.Type == CardType.Option &&
-        card.CardId is "ST1-13" or "ST1-14" or "ST2-15" or "ST3-13" or "ST4-13";
+        card.CardId is "ST1-13" or "ST2-15" or "ST3-13";   // 자신의 디지몬 1마리 대상
 
     private static bool IsEnemyTargetedOption(CardData card) =>
         card.Type == CardType.Option &&
-        card.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16" or "ST3-16" or "ST4-14" or "ST4-16" or "ST5-15" or "ST5-16" or "ST6-15" or "ST6-16";
+        card.CardId is "ST1-15" or "ST1-16" or "ST2-14" or "ST2-16" or "ST3-16" or "ST4-16" or "ST5-15" or "ST5-16" or "ST6-15";   // 상대 디지몬 대상
 
     public MainWindow()
     {
@@ -60,7 +60,7 @@ public partial class MainWindow : Window
 
         _catalogService = new CardCatalogService();
         _gameState = new GameState();
-        _engine = new GoldfishEngine(_gameState);
+        _engine = new GoldfishEngine(_gameState) { PlayerChoosesBlocks = true };
 
         // 기본 추천 1번 덱(ST-1 가이아 레드 + 오메가몬) 로드 및 백그라운드 대련 상태 준비
         var (st1Main, st1Digitama) = StarterDecks.CreateSt1GaiaRedPreset();
@@ -79,6 +79,7 @@ public partial class MainWindow : Window
         // 1. 처음 켰을 때 메인 로비 화면(실전 대련[AI], 덱빌딩, 연습)으로 시작!
         UpdateTopTabVisuals(activeTab: -1);
         RefreshAllSimulatorUi();
+        InitSetFilter();
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
         ApplyLobbyArtwork();
@@ -90,7 +91,8 @@ public partial class MainWindow : Window
 
     private async System.Threading.Tasks.Task PrefetchCatalogImagesAsync()
     {
-        foreach (var card in _catalogService.Catalog.ToList())
+        // 미리 받는 것은 효과 구현 카드(덱 · 대전에서 주로 쓰는 카드)만. 나머지 수천 장은 바인더에 보일 때 받는다.
+        foreach (var card in _catalogService.Catalog.Where(c => c.IsEffectImplemented && _catalogService.GetKoreanImageFilePath(c.CardId) == null).ToList())
         {
             string localPath = _catalogService.GetLocalImageFilePath(card);
             if (!File.Exists(localPath) || new FileInfo(localPath).Length <= 500)
@@ -113,6 +115,28 @@ public partial class MainWindow : Window
     {
         if (_bitmapCache.TryGetValue(card.CardId, out var cached))
             return cached;
+
+        // 공식 한글판 카드 이미지가 있으면 우선 사용 (data/images_ko · data/tmp)
+        string? koreanPath = _catalogService.GetKoreanImageFilePath(card.CardId);
+        if (koreanPath != null)
+        {
+            try
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.DecodePixelWidth = 480;
+                bmp.UriSource = new Uri(koreanPath, UriKind.Absolute);
+                bmp.EndInit();
+                bmp.Freeze();
+                _bitmapCache[card.CardId] = bmp;
+                return bmp;
+            }
+            catch
+            {
+                // webp 코덱이 없는 PC 등 — 영문 이미지로 대체
+            }
+        }
 
         string localPath = _catalogService.GetLocalImageFilePath(card);
         if (File.Exists(localPath) && new FileInfo(localPath).Length > 500)
@@ -142,21 +166,48 @@ public partial class MainWindow : Window
         return null;
     }
 
+    // 이미지 지연 다운로드: 같은 카드 중복 요청 방지 · 실패한 카드는 이번 실행 중 재시도하지 않음 · 화면 갱신은 0.5초 모아서 한 번
+    private readonly HashSet<string> _imageDownloadsInFlight = new();
+    private readonly HashSet<string> _imageDownloadsFailed = new();
+    private DispatcherTimer? _imageRefreshTimer;
+
     private async System.Threading.Tasks.Task DownloadAndRefreshCardImageAsync(CardData card)
     {
-        var path = await _catalogService.EnsureCardImageCachedAsync(card);
-        if (path != null)
+        if (_imageDownloadsFailed.Contains(card.CardId) || !_imageDownloadsInFlight.Add(card.CardId))
+            return;
+
+        try
         {
-            Dispatcher.Invoke(() =>
-            {
-                if (!_bitmapCache.ContainsKey(card.CardId))
-                {
-                    RefreshAllSimulatorUi();
-                    if (DeckBuilderView.Visibility == Visibility.Visible)
-                        RefreshCatalogUi();
-                }
-            });
+            var path = await _catalogService.EnsureCardImageCachedAsync(card);
+            if (path == null)
+                _imageDownloadsFailed.Add(card.CardId);
+            else
+                ScheduleImageRefresh();
         }
+        finally
+        {
+            _imageDownloadsInFlight.Remove(card.CardId);
+        }
+    }
+
+    private void ScheduleImageRefresh()
+    {
+        if (_imageRefreshTimer == null)
+        {
+            _imageRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _imageRefreshTimer.Tick += (_, _) =>
+            {
+                _imageRefreshTimer.Stop();
+                if (WorkspaceContainerGrid.Visibility != Visibility.Visible)
+                    return;
+                if (SimulatorView.Visibility == Visibility.Visible)
+                    RefreshAllSimulatorUi();
+                if (DeckBuilderView.Visibility == Visibility.Visible)
+                    RefreshCatalogUi();
+            };
+        }
+        _imageRefreshTimer.Stop();
+        _imageRefreshTimer.Start();
     }
 
     private void UpdateCardInspector(CardData card)
@@ -165,9 +216,9 @@ public partial class MainWindow : Window
         InspectorCardFrame.BorderBrush = GetCardColorBrush(card.Color);
         InspectorColorBadge.Background = GetCardColorBrush(card.Color);
 
-        TxtInspectorBadge.Text = card.Type == CardType.Digimon || card.Type == CardType.Digitama
+        TxtInspectorBadge.Text = (card.Type == CardType.Digimon || card.Type == CardType.Digitama
             ? $"Lv.{card.Level} {card.Color} {card.Type}"
-            : $"{card.Color} {card.Type}";
+            : $"{card.Color} {card.Type}") + (string.IsNullOrEmpty(card.Rarity) ? "" : $" · {card.Rarity}");
 
         TxtInspectorName.Text = card.Name;
         TxtInspectorStats.Text = card.Type == CardType.Digimon
@@ -178,6 +229,19 @@ public partial class MainWindow : Window
 
         TxtInspectorEffect.Text = string.IsNullOrWhiteSpace(card.EffectText) ? "없음 (바닐라)" : card.EffectText;
         TxtInspectorInherited.Text = string.IsNullOrWhiteSpace(card.InheritedEffectText) ? "없음" : card.InheritedEffectText;
+
+        // 대전 엔진이 효과를 구현하지 않은 카드 안내
+        InspectorImplNote.Visibility = card.IsEffectImplemented ? Visibility.Collapsed : Visibility.Visible;
+        if (!card.IsEffectImplemented)
+        {
+            var keywords = new List<string>();
+            if (card.IsBlocker) keywords.Add("블로커");
+            if (card.SecurityAttackBonus > 0) keywords.Add($"시큐리티 어택 +{card.SecurityAttackBonus}");
+            if (card.InheritedSecurityAttackBonus > 0) keywords.Add($"진화원 시큐리티 어택 +{card.InheritedSecurityAttackBonus}");
+            TxtInspectorImplNote.Text = keywords.Count > 0
+                ? $"⚠️ 효과 미구현 카드 — 대전에서는 DP · 코스트 · 진화 조건과 키워드({string.Join(", ", keywords)})만 적용됩니다."
+                : "⚠️ 효과 미구현 카드 — 대전에서는 DP · 코스트 · 진화 조건만 적용되고 아래 효과는 동작하지 않습니다.";
+        }
 
         var bmp = GetCardBitmap(card);
         if (bmp != null)
@@ -391,10 +455,6 @@ public partial class MainWindow : Window
     private void UpdateTopTabVisuals(int activeTab)
     {
         // -1: 메인 로비, 0: 실전 대련[AI], 1: 연습[솔리테어], 2: 덱 빌딩 & 도감
-        SetHeaderTabActive(BtnTabOfficialMatch, activeTab == 0, "Neo.Brush.Card.Red");
-        SetHeaderTabActive(BtnTabSimulator, activeTab == 1, "Neo.Brush.Card.Green");
-        SetHeaderTabActive(BtnTabDeckBuilder, activeTab == 2, "Neo.Brush.Card.Blue");
-
         // 로비(타이틀 화면)에서는 상단 헤더와 안내 바를 숨기고 전면 키 아트 + 세로 메뉴만 보여 준다
         var chrome = activeTab == -1 ? Visibility.Collapsed : Visibility.Visible;
         TopHeaderBar.Visibility = chrome;
@@ -456,30 +516,14 @@ public partial class MainWindow : Window
         TxtInspectorInherited.FontSize = deckBuilder ? 12 : 10.5;
     }
 
-    private static void SetHeaderTabActive(Button tab, bool active, string accentBrushKey)
-    {
-        // 활성 탭 = 모드 색으로 채운 알약, 비활성 탭 = 고스트 (스타일 기본값으로 되돌림)
-        if (active)
-        {
-            tab.Background = Theme.GetBrush(accentBrushKey);
-            tab.Foreground = Theme.GetBrush("Neo.Brush.Text.OnNeon");
-            tab.BorderBrush = Theme.GetBrush(accentBrushKey);
-        }
-        else
-        {
-            tab.ClearValue(BackgroundProperty);
-            tab.ClearValue(ForegroundProperty);
-            tab.ClearValue(BorderBrushProperty);
-        }
-    }
 
     // ==================== 🏠 메인 로비 모드 카드 일러스트 배너 ====================
     private void ApplyLobbyArtwork()
     {
         // 타이틀 화면 키 아트: 초궁극체(Lv.7) 일러스트 → 없으면 레드 궁극체(Lv.6)
-        Func<CardData, bool> heroPick = c => c.Type == CardType.Digimon && c.Level == 7;
+        Func<CardData, bool> heroPick = c => c.IsEffectImplemented && c.Type == CardType.Digimon && c.Level == 7;
         if (!_catalogService.Catalog.Any(c => heroPick(c) && GetCardBitmap(c) != null))
-            heroPick = c => c.Type == CardType.Digimon && c.Level == 6 && c.Color == CardColor.Red;
+            heroPick = c => c.IsEffectImplemented && c.Type == CardType.Digimon && c.Level == 6 && c.Color == CardColor.Red;
 
         SetLobbyArt(LobbyHeroArt, heroPick, new Rect(0.17, 0.11, 0.79, 0.47));   // 코스트 아이콘 · 텍스트 박스를 피해 그림만
         SetLobbyArt(LobbyHeroBlur, heroPick);
@@ -640,6 +684,13 @@ public partial class MainWindow : Window
 
         // 실전 AI 대전은 화면에 대련장이 처음 보일 때 코인 토스로 선공 / 후공을 정한다
         _coinTossPending = stage == PracticeStage.Stage3_AiBattle;
+
+        // 새 게임: 이전 게임의 리플레이 / 결과 화면 정리
+        _gameResultShown = false;
+        _replayTimer?.Stop();
+        _replayQueue.Clear();
+        OpponentReplayOverlay.Visibility = Visibility.Collapsed;
+        HideGameResult();
     }
 
     // ==================== 🎲 코인 토스 (실전 대련 선공 / 후공 결정) ====================
@@ -716,7 +767,7 @@ public partial class MainWindow : Window
         TxtCoinResult.Text = _coinTossPlayerFirst ? "앞면! 내가 선공입니다" : "뒷면! 상대 AI 선공입니다";
         TxtCoinResult.Foreground = Theme.GetBrush(_coinTossPlayerFirst ? "Neo.Brush.CyanBright" : "Neo.Brush.RoseSoft");
         TxtCoinResultSub.Text = _coinTossPlayerFirst
-            ? "선공은 1턴째 드로우 없이 시작합니다."
+            ? "선공은 메모리 0 · 드로우 없이 1턴을 시작합니다."
             : "상대가 먼저 1턴을 진행합니다. 후공인 나는 1턴째에도 1장 드로우합니다.";
         var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220));
         TxtCoinResult.BeginAnimation(OpacityProperty, fadeIn);
@@ -742,18 +793,62 @@ public partial class MainWindow : Window
         };
         CoinTossOverlay.BeginAnimation(OpacityProperty, fade);
 
-        if (_coinTossPlayerFirst)
+        // 공식 룰 5-2: 선공 결정 → 초기 손패 확인 · 멀리건 → 시큐리티 5장 → 게임 시작 (멀리건 화면이 이어서 뜬다)
+        _engine.DecideFirstPlayer(_coinTossPlayerFirst);
+        RefreshAllSimulatorUi();
+        ShowToast(true, _coinTossPlayerFirst
+            ? "🎲 코인 토스: 앞면 — 내가 선공! 초기 손패를 확인하고 멀리건 여부를 정하세요."
+            : "🎲 코인 토스: 뒷면 — 상대 AI 선공! 초기 손패를 확인하고 멀리건 여부를 정하세요.");
+    }
+
+    // ==================== 🃏 게임 시작 전 초기 손패 확인 · 멀리건 (공식 룰 5-2) ====================
+    private void TryShowMulliganChoice()
+    {
+        bool waiting = _gameState.CurrentPhase == Phase.Setup && !_gameState.IsGameOver;
+        // 실전 대련은 코인 토스로 선공을 정한 뒤에 묻는다
+        bool ready = waiting && !_coinTossPending && CoinTossOverlay.Visibility != Visibility.Visible
+                     && (_gameState.CurrentStage != PracticeStage.Stage3_AiBattle || _engine.IsFirstPlayerDecided);
+        if (!waiting)
         {
-            _engine.Log("🎲 코인 토스 결과: 플레이어 선공 / 상대 AI 후공");
-            RefreshAllSimulatorUi();
-            ShowToast(true, "🎲 코인 토스: 앞면 — 내가 선공! (1턴째 드로우 없음) 육성 페이즈부터 시작하세요.");
+            MulliganOverlay.Visibility = Visibility.Collapsed;
+            return;
         }
-        else
+        if (!ready || WorkspaceContainerGrid.Visibility != Visibility.Visible || SimulatorView.Visibility != Visibility.Visible)
+            return;
+
+        string first = _gameState.PlayerGoesFirst ? "내가 선공 (1턴째 드로우 없음)" : "상대 AI 선공 (나는 1턴째에도 1장 드로우)";
+        TxtMulliganDetail.Text = _gameState.CanMulligan
+            ? $"{first} · 마음에 들지 않으면 손패 5장을 덱에 섞고 다시 5장을 뽑을 수 있습니다 (1회). 시큐리티 5장은 손패를 확정한 뒤 덱 위에서 놓입니다."
+            : $"{first} · 멀리건을 사용했습니다. 이 손패로 게임을 시작합니다.";
+
+        MulliganHandPanel.Children.Clear();
+        foreach (var card in _gameState.Player.Hand)
         {
-            var res = _engine.GiveFirstTurnToOpponent();
-            RefreshAllSimulatorUi();
-            ShowToast(res.CanExecute, $"🎲 코인 토스: 뒷면 — 상대 AI 선공! {(res.CanExecute ? res.GuideMessage : res.Reason)}");
+            var frame = CreateCardVisualFrame(card, width: 120, height: 168);
+            frame.Margin = new Thickness(6, 0, 6, 0);
+            frame.MouseEnter += (_, _) => UpdateCardInspector(card);
+            MulliganHandPanel.Children.Add(frame);
         }
+        BtnRedrawHand.IsEnabled = _gameState.CanMulligan;
+        BtnRedrawHand.Opacity = _gameState.CanMulligan ? 1.0 : 0.45;
+
+        if (MulliganOverlay.Visibility != Visibility.Visible)
+        {
+            MulliganOverlay.Visibility = Visibility.Visible;
+            MulliganOverlay.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
+        }
+    }
+
+    private void BtnRedrawHand_Click(object sender, RoutedEventArgs e)
+    {
+        ApplyActionResult(_engine.ExecuteMulligan());   // 새 손패로 다시 그린다 (RefreshAllSimulatorUi → TryShowMulliganChoice)
+    }
+
+    private void BtnKeepHand_Click(object sender, RoutedEventArgs e)
+    {
+        MulliganOverlay.Visibility = Visibility.Collapsed;
+        // 시큐리티 5장을 놓고 선공의 1턴 시작 (AI 선공이면 AI 턴을 진행한 뒤 리플레이로 보여 준다)
+        ApplyActionResult(_engine.BeginGame());
     }
 
     private void CoinTossOverlay_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -793,19 +888,19 @@ public partial class MainWindow : Window
         ApplyPresetDeckAndSync("🔥 [추천 1] 워그레이몬 & 오메가몬 초화력 비트 (50장)", StarterDecks.CreateSt1GaiaRedPreset());
 
     private void BtnQuickDeckBlue_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("❄️ [추천 2] 메탈가루루몬 & 오메가몬 연타 (50장)", StarterDecks.CreateSt2CocytusBluePreset());
+        ApplyPresetDeckAndSync("❄️ [추천 2] 메탈가루몬 & 오메가몬 연타 (50장)", StarterDecks.CreateSt2CocytusBluePreset());
 
     private void BtnQuickDeckYellow_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("⚡ [추천 3] 세라피몬 & 샤인그레이몬 시큐 컨트롤 (50장)", StarterDecks.CreateSt3HeavensYellowPreset());
+        ApplyPresetDeckAndSync("⚡ [추천 3] 세라피몬 & 홀리드라몬 천사 컨트롤 (50장)", StarterDecks.CreateSt3HeavensYellowPreset());
 
     private void BtnQuickDeckGreen_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("🌿 [추천 4] 헤라클캅테리몬 초고속 진화 램프 (50장)", StarterDecks.CreateSt4GigaGreenPreset());
+        ApplyPresetDeckAndSync("🌿 [추천 4] 헤라클레스캅테리몬 & 로제몬 (50장)", StarterDecks.CreateSt4GigaGreenPreset());
 
     private void BtnQuickDeckBlack_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("⚙️ [추천 5] 파워드라몬 & 크레니엄몬 철벽 블로커 (50장)", StarterDecks.CreateSt5MachineBlackPreset());
+        ApplyPresetDeckAndSync("⚙️ [추천 5] 파워드라몬 & 워그레이몬 철벽 블로커 (50장)", StarterDecks.CreateSt5MachineBlackPreset());
 
     private void BtnQuickDeckPurple_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("🔮 [추천 6] 베놈묘티스몬 & 벨제부몬 어그로 (50장)", StarterDecks.CreateSt6VenomVioletPreset());
+        ApplyPresetDeckAndSync("🔮 [추천 6] 피에몬 & 데블몬 길동무 (50장)", StarterDecks.CreateSt6VenomVioletPreset());
 
     // ==================== 📊 우측 사이드바: 필드 디지몬 DP & 테이머 효과 증가치 인스펙터 ====================
     private void UpdateFieldDigimonBreakdown(CardInstance? instance, bool isPinned = false, bool isOpponent = false)
@@ -862,7 +957,7 @@ public partial class MainWindow : Window
         if (instance.TopCard.Type == CardType.Digimon)
         {
             int baseDp = instance.TopCard.DP;
-            int inhDp = instance.GetInheritedDpBonus();
+            int inhDp = instance.GetInheritedDpBonus() + instance.EffectDpBonus;   // 진화원 · 카드 지속 효과
             int tamerDp = instance.TamerDpBonus;
             int skillDp = instance.TemporaryDpBonus;
             int totalBonusDp = instance.GetTotalBonusDP();
@@ -876,7 +971,7 @@ public partial class MainWindow : Window
             int bonusSec = instance.GetTotalBonusSecurityAttack();
             TxtFieldSecBreakdown.Text =
                 $"💥 시큐리티 타격: {secCount}장 (추가공격 +{bonusSec})\n" +
-                $"   └ 기본 1장 | 🔥고유 +{instance.TopCard.SecurityAttackBonus} | 🧬진화원 +{instance.GetInheritedSecurityAttackBonus()} | 🎖️테이머 +{instance.TamerSecurityAttackBonus} | ✨스킬 +{instance.TemporarySecurityAttackBonus}";
+                $"   └ 기본 1장 | 🔥고유 +{instance.TopCard.SecurityAttackBonus} | 🧬진화원 +{instance.GetInheritedSecurityAttackBonus()} | 🎖️테이머 +{instance.TamerSecurityAttackBonus} | ✨스킬 +{instance.TemporarySecurityAttackBonus + instance.EffectSecurityAttackBonus}";
         }
         else
         {
@@ -925,16 +1020,15 @@ public partial class MainWindow : Window
         TxtFieldInspectHeader.Text = $"[내 테이머 존] 🎖️ {tamer.Name} x{count}장";
         TxtFieldInspectPinState.Text = "🎖️ 테이머 지속 효과";
 
-        string dpAura = tamer.Color == CardColor.Red
-            ? $"아군 모든 디지몬 DP +{count * 1000:N0}"
-            : $"진화원이 있는 아군 디지몬 DP +{count * 1000:N0}";
-
-        string secAndMemAura = tamer.CardId == "ST1-12"
-            ? $"진화원 4장 이상 디지몬 💥시큐어택 +{count} | 턴 시작 시 메모리 최소 3 보장"
-            : $"내 턴 시작 시 메모리 +{count} 추가 획득 | {tamer.EffectText}";
+        string mainEffect = tamer.EffectText.Split('\n')[0];
+        string dpAura = tamer.CardId == "ST1-12"
+            ? $"[자신의 턴] 아군 모든 디지몬 DP +{count * 1000:N0}"
+            : tamer.CardId == "ST3-12"
+                ? $"[상대의 턴] 내 시큐리티 디지몬 DP +{count * 2000:N0}"
+                : "없음";
 
         TxtFieldDpBreakdown.Text = $"⚔️ 필드 DP 증가치: {dpAura}";
-        TxtFieldSecBreakdown.Text = $"⚡ 특수 & 메모리 효과: {secAndMemAura}";
+        TxtFieldSecBreakdown.Text = $"⚡ 테이머 효과 (x{count}): {mainEffect}";
         TxtFieldTamerAndSources.Text = $"📜 원문 효과: {tamer.EffectText}";
     }
 
@@ -1112,7 +1206,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>data/cutins/ 에서 {카드번호} 또는 {디지몬 이름} 으로 된 영상(.mp4 / .wmv / .mov)을 찾는다.</summary>
-    private string? FindCutInVideo(CardData card)
+    private string? FindCutInVideo(CardData card) => FindCutInVideoFile(card.CardId, card.Name);
+
+    /// <summary>data/cutins/{이름}.mp4|.wmv|.mov 중 처음 존재하는 파일 (예: victory, defeat, BT1-084, 워그레이몬)</summary>
+    private string? FindCutInVideoFile(params string[] baseNames)
     {
         string? dataDir = Path.GetDirectoryName(_catalogService.ImagesDirectoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (dataDir == null)
@@ -1122,7 +1219,7 @@ public partial class MainWindow : Window
         if (!Directory.Exists(cutInDir))
             return null;
 
-        foreach (string baseName in new[] { card.CardId, card.Name })
+        foreach (string baseName in baseNames)
         {
             foreach (string ext in new[] { ".mp4", ".wmv", ".mov" })
             {
@@ -1289,7 +1386,308 @@ public partial class MainWindow : Window
         RenderDuelPlates();
         RenderTimeAttackHudAndLogs();
         TryStartCoinToss();
+        TryShowMulliganChoice();
+        TryStartOpponentReplay();
+        TryShowBlockChoice();
+        TryShowGameResult();
     }
+
+    // ==================== 🤖 상대 턴 리플레이 (상대가 한 행동을 한 장면씩 보여 줌) ====================
+    private readonly Queue<OpponentActionEvent> _replayQueue = new();
+    private int _replayTotal;
+    private DispatcherTimer? _replayTimer;
+    private bool IsReplayRunning => OpponentReplayOverlay.Visibility == Visibility.Visible;
+
+    private void TryStartOpponentReplay()
+    {
+        if (IsReplayRunning || _gameState.OpponentTurnEvents.Count == 0)
+            return;
+        if (WorkspaceContainerGrid.Visibility != Visibility.Visible || SimulatorView.Visibility != Visibility.Visible)
+            return;
+
+        _replayQueue.Clear();
+        foreach (var ev in _gameState.OpponentTurnEvents)
+            _replayQueue.Enqueue(ev);
+        _gameState.OpponentTurnEvents.Clear();
+        _replayTotal = _replayQueue.Count;
+
+        OpponentReplayOverlay.BeginAnimation(OpacityProperty, null);
+        OpponentReplayOverlay.Opacity = 1;
+        OpponentReplayOverlay.Visibility = Visibility.Visible;
+        ShowNextReplayStep();
+    }
+
+    private void ShowNextReplayStep()
+    {
+        _replayTimer?.Stop();
+        if (_replayQueue.Count == 0)
+        {
+            EndOpponentReplay();
+            return;
+        }
+
+        var ev = _replayQueue.Dequeue();
+        TxtReplayStep.Text = $"{_replayTotal - _replayQueue.Count} / {_replayTotal}";
+        TxtReplayTitle.Text = ev.Title;
+        TxtReplayDetail.Text = ev.Detail;
+
+        var (kindLabel, accentKey) = ev.Kind switch
+        {
+            OpponentActionKind.TurnStart => ("TURN START", "Neo.Brush.RoseSoft"),
+            OpponentActionKind.Breeding => ("BREEDING", "Neo.Brush.Green"),
+            OpponentActionKind.Evolve => ("DIGIVOLVE", "Neo.Brush.Violet"),
+            OpponentActionKind.Play => ("PLAY", "Neo.Brush.CyanBright"),
+            OpponentActionKind.Tamer => ("TAMER", "Neo.Brush.Gold"),
+            OpponentActionKind.Attack => ("ATTACK", "Neo.Brush.Rose"),
+            OpponentActionKind.Block => ("BLOCK", "Neo.Brush.Green"),
+            OpponentActionKind.DirectAttack => ("DIRECT ATTACK", "Neo.Brush.Rose"),
+            OpponentActionKind.TurnEnd => ("TURN END", "Neo.Brush.Cyan"),
+            _ => ev.Title.Contains("역격파") || ev.Title.Contains("테이머") ? ("SECURITY CHECK", "Neo.Brush.Green") : ("SECURITY CHECK", "Neo.Brush.Rose")
+        };
+        var accent = Theme.GetBrush(accentKey);
+        TxtReplayKind.Text = kindLabel;
+        TxtReplayKind.Foreground = accent;
+        ReplayKindChip.BorderBrush = accent;
+        ReplayKindChip.Background = BrushFromHex("#40000000");
+        ReplayBand.BorderBrush = accent;
+
+        // 행동한 카드 (→ 대상 카드: 막은 블로커 / 오픈된 내 시큐리티)
+        ReplayCardSlot.Content = ev.Card == null ? null : CreateReplayCard(ev.Card);
+        ReplaySubCardSlot.Content = ev.SubCard == null ? null : CreateReplayCard(ev.SubCard);
+        TxtReplayArrow.Visibility = ev.Card != null && ev.SubCard != null ? Visibility.Visible : Visibility.Collapsed;
+        ReplayCardSlot.Visibility = ev.Card == null ? Visibility.Collapsed : Visibility.Visible;
+        ReplaySubCardSlot.Visibility = ev.SubCard == null ? Visibility.Collapsed : Visibility.Visible;
+
+        // 장면 전환: 오른쪽에서 밀려 들어오며 나타남
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        ReplayContentShift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(70, 0, TimeSpan.FromMilliseconds(260)) { EasingFunction = ease });
+        ReplayContent.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220)));
+
+        bool quick = ev.Kind is OpponentActionKind.TurnStart or OpponentActionKind.TurnEnd;
+        _replayTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(quick ? 1000 : 1500) };
+        _replayTimer.Tick += (_, _) => ShowNextReplayStep();
+        _replayTimer.Start();
+    }
+
+    private FrameworkElement CreateReplayCard(CardData card)
+    {
+        var frame = CreateCardVisualFrame(card, width: 150, height: 210);
+        return new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            BorderBrush = GetCardColorBrush(card.Color),
+            BorderThickness = new Thickness(2),
+            Effect = Theme.GetEffect("Neo.Shadow.Float"),
+            Child = frame
+        };
+    }
+
+    private void EndOpponentReplay()
+    {
+        _replayTimer?.Stop();
+        _replayQueue.Clear();
+        if (!IsReplayRunning)
+            return;
+
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(200));
+        fade.Completed += (_, _) =>
+        {
+            OpponentReplayOverlay.Visibility = Visibility.Collapsed;
+            OpponentReplayOverlay.BeginAnimation(OpacityProperty, null);
+            OpponentReplayOverlay.Opacity = 1;
+            // 리플레이가 끝난 뒤 블록 선택 · 패배 등 결과 화면이 필요한지 다시 확인
+            TryShowBlockChoice();
+            TryShowGameResult();
+        };
+        OpponentReplayOverlay.BeginAnimation(OpacityProperty, fade);
+    }
+
+    // ==================== 🛡️ 블록 선택 (AI 어택을 ≪블로커≫로 막을지 — 공식 룰상 방어 측의 선택) ====================
+    private void TryShowBlockChoice()
+    {
+        var pending = _gameState.PendingBlock;
+        if (pending == null)
+        {
+            BlockChoiceOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+        // 어택 선언까지의 상대 행동 리플레이를 먼저 다 보여 준 뒤 묻는다
+        if (IsReplayRunning)
+            return;
+        if (WorkspaceContainerGrid.Visibility != Visibility.Visible || SimulatorView.Visibility != Visibility.Visible)
+            return;
+
+        var attacker = pending.Attacker;
+        BlockAttackerSlot.Content = CreateReplayCard(attacker.TopCard);
+        TxtBlockTitle.Text = $"AI [{attacker.TopCard.Name}]의 어택! 블록하시겠습니까?";
+        TxtBlockDetail.Text = $"상대 DP {pending.AttackerDp:N0} · 시큐리티 체크 {pending.SecurityChecks}장 — 막을 ≪블로커≫를 고르거나, 블록하지 않고 시큐리티로 받으세요. (예상 결과는 DP 기준)";
+
+        int mySecurity = _gameState.Player.SecurityStack.Count;
+        TxtNoBlockOutcome.Text = mySecurity == 0
+            ? "⚠️ 내 시큐리티 0장 — 다이렉트 어택으로 패배합니다!"
+            : $"내 시큐리티 {Math.Min(pending.SecurityChecks, mySecurity)}장 체크 (남은 시큐리티 {mySecurity}장)";
+        TxtNoBlockOutcome.Foreground = mySecurity == 0 ? BrushFromHex("#F38BA8") : BrushFromHex("#CDD6F4");
+
+        BlockCandidatesPanel.Children.Clear();
+        foreach (var blocker in pending.Candidates)
+            BlockCandidatesPanel.Children.Add(CreateBlockCandidateButton(blocker, pending.AttackerDp));
+
+        if (BlockChoiceOverlay.Visibility != Visibility.Visible)
+        {
+            BlockChoiceOverlay.Visibility = Visibility.Visible;
+            BlockChoiceOverlay.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
+        }
+    }
+
+    private Button CreateBlockCandidateButton(CardInstance blocker, int attackerDp)
+    {
+        int dp = blocker.GetCurrentDP();
+        var (outcome, color) = dp > attackerDp ? ("✅ 격파 — 내 블로커 생존", "#A6E3A1")
+            : dp == attackerDp ? ("💥 동귀어진 — 양쪽 모두 소멸", "#F9E2AF")
+            : ("💀 희생 — 내 블로커 소멸 (시큐리티는 지켜짐)", "#F38BA8");
+
+        var content = new StackPanel { Width = 150 };
+        content.Children.Add(CreateCardVisualFrame(blocker.TopCard, width: 110, height: 154));
+        content.Children.Add(new TextBlock
+        {
+            Text = $"{blocker.TopCard.Name} · DP {dp:N0}",
+            Foreground = Brushes.White,
+            FontWeight = FontWeights.Bold,
+            FontSize = 13,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 2)
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = outcome,
+            Foreground = BrushFromHex(color),
+            FontSize = 11.5,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        var btn = new Button
+        {
+            Content = content,
+            Style = (Style)FindResource("Neo.Button.Ghost"),
+            Margin = new Thickness(0, 0, 12, 0),
+            Padding = new Thickness(10),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = $"[{blocker.TopCard.Name}]을(를) 레스트하고 이 어택을 대신 받습니다"
+        };
+        btn.MouseEnter += (_, _) => UpdateCardInspector(blocker.TopCard);
+        btn.Click += (_, _) => ChooseBlock(blocker);
+        return btn;
+    }
+
+    private void BtnNoBlock_Click(object sender, RoutedEventArgs e) => ChooseBlock(null);
+
+    private void ChooseBlock(CardInstance? blocker)
+    {
+        BlockChoiceOverlay.Visibility = Visibility.Collapsed;
+        // 결과(블록 배틀 / 시큐리티 체크)와 남은 상대 턴은 리플레이로 이어서 보여 주고, 다음 어택이 있으면 다시 묻는다
+        ApplyActionResult(_engine.ResolvePendingBlock(blocker));
+    }
+
+    private void OpponentReplayOverlay_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e) => ShowNextReplayStep();
+
+    private void BtnReplaySkip_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        EndOpponentReplay();
+    }
+
+    // ==================== 🏁 승리 / 패배 화면 ====================
+    private bool _gameResultShown;
+
+    private void TryShowGameResult()
+    {
+        if (!_gameState.IsGameOver || _gameResultShown || IsReplayRunning)
+            return;
+        if (WorkspaceContainerGrid.Visibility != Visibility.Visible || SimulatorView.Visibility != Visibility.Visible)
+            return;
+
+        _gameResultShown = true;
+        bool win = _gameState.IsVictory;
+
+        TxtResultTitle.Text = win ? "VICTORY" : "DEFEAT";
+        TxtResultTitle.Foreground = win
+            ? Theme.GetBrush("Duel.Brush.LogoFill")
+            : new LinearGradientBrush((Color)ColorConverter.ConvertFromString("#E2E8F0"), (Color)ColorConverter.ConvertFromString("#7F1D1D"), 90);
+        ResultTitleGlow.Color = (Color)ColorConverter.ConvertFromString(win ? "#F9E2AF" : "#F43F75");
+        TxtResultSub.Text = win ? "★ 승리했습니다! ★" : "패배했습니다...";
+        TxtResultReason.Text = string.IsNullOrWhiteSpace(_gameState.GameOverReason) ? "-" : _gameState.GameOverReason;
+        TxtResultStats.Text =
+            $"TURN {_gameState.CurrentTurn} · 상대 시큐리티 {_gameState.DummyOpponent.SecurityStack.Count}장 남음 · 내 시큐리티 {_gameState.Player.SecurityStack.Count}장 남음 · 진화 {_gameState.TotalEvolutionsCount}회";
+
+        Color auraColor = (Color)ColorConverter.ConvertFromString(win ? "#F9E2AF" : "#7F1D1D");
+        ResultAura.Background = new RadialGradientBrush(Color.FromArgb(win ? (byte)120 : (byte)150, auraColor.R, auraColor.G, auraColor.B), Colors.Transparent)
+        {
+            RadiusX = 0.6,
+            RadiusY = 0.7
+        };
+        ResultRays.Fill = CreateCutInSpeedLinesBrush(Color.FromArgb(140, auraColor.R, auraColor.G, auraColor.B));
+        ResultRays.Visibility = win ? Visibility.Visible : Visibility.Collapsed;
+
+        // data/cutins/victory.mp4 · defeat.mp4 가 있으면 배경 영상
+        string? video = FindCutInVideoFile(win ? "victory" : "defeat");
+        ResultVideo.Visibility = video != null ? Visibility.Visible : Visibility.Collapsed;
+        if (video != null)
+        {
+            ResultVideo.Source = new Uri(video, UriKind.Absolute);
+            ResultVideo.Play();
+        }
+
+        GameResultOverlay.Visibility = Visibility.Visible;
+        GameResultOverlay.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(win ? 200 : 700)));
+
+        // 승리: 플래시 + 쾅 하고 꽂히는 타이틀 + 회전 광선 / 패배: 천천히 가라앉는 타이틀
+        var easeOut = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 5 };
+        var titleScale = win
+            ? new DoubleAnimation(2.6, 1.0, TimeSpan.FromMilliseconds(420)) { EasingFunction = easeOut }
+            : new DoubleAnimation(1.25, 1.0, TimeSpan.FromMilliseconds(1600)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        ResultTitleScale.BeginAnimation(ScaleTransform.ScaleXProperty, titleScale);
+        ResultTitleScale.BeginAnimation(ScaleTransform.ScaleYProperty, titleScale);
+        TxtResultTitle.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(win ? 200 : 1400)));
+        if (win)
+        {
+            ResultFlash.BeginAnimation(OpacityProperty, new DoubleAnimation(0.9, 0, TimeSpan.FromMilliseconds(500)));
+            ResultRaysRotate.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(0, 360, TimeSpan.FromSeconds(40)) { RepeatBehavior = RepeatBehavior.Forever });
+        }
+        ResultButtons.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(400)) { BeginTime = TimeSpan.FromMilliseconds(win ? 700 : 1600) });
+    }
+
+    private void HideGameResult()
+    {
+        ResultVideo.Stop();
+        ResultVideo.Source = null;
+        ResultRaysRotate.BeginAnimation(RotateTransform.AngleProperty, null);
+        GameResultOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void BtnResultRetry_Click(object sender, RoutedEventArgs e)
+    {
+        HideGameResult();
+        if (_gameState.CurrentStage == PracticeStage.Stage3_AiBattle)
+        {
+            BtnRematchAi_Click(sender, e);
+            return;
+        }
+        StartGameForStage(_gameState.CurrentStage);
+        RefreshAllSimulatorUi();
+        ShowToast(true, "🔄 같은 스테이지로 새 연습 게임을 시작했습니다!");
+    }
+
+    private void BtnResultClose_Click(object sender, RoutedEventArgs e) => HideGameResult();
+
+    private void BtnResultLobby_Click(object sender, RoutedEventArgs e)
+    {
+        HideGameResult();
+        BtnNavHome_Click(sender, e);
+    }
+
+    private void ResultVideo_MediaFailed(object sender, ExceptionRoutedEventArgs e) => ResultVideo.Visibility = Visibility.Collapsed;
 
     // ==================== 🔮 중앙 네온 메모리 코어 (+10 내 쪽 ← 0 → -10 상대 쪽) ====================
     private const int MemoryCoreCells = 21;
@@ -1433,9 +1831,13 @@ public partial class MainWindow : Window
 
     private void RenderOpponentSecurity()
     {
-        BtnToggleSecurityPeek.Content = _isSecurityPeekEnabled ? "👁️ 앞면보기: ON" : "🙈 앞면보기: OFF (실전 비공개)";
-        BtnToggleSecurityPeek.Background = BrushFromHex(_isSecurityPeekEnabled ? "#A6E3A1" : "#45475A");
-        BtnToggleSecurityPeek.Foreground = BrushFromHex(_isSecurityPeekEnabled ? "#11111B" : "#F8FAFC");
+        // 시큐리티 앞면보기는 연습 모드 전용 — 실전 AI 대전에서는 공식 룰대로 상대 시큐리티를 체크 전까지 비공개로 둔다
+        bool isAiBattle = _gameState.CurrentStage == PracticeStage.Stage3_AiBattle;
+        bool peek = _isSecurityPeekEnabled && !isAiBattle;
+        BtnToggleSecurityPeek.Visibility = isAiBattle ? Visibility.Collapsed : Visibility.Visible;
+        BtnToggleSecurityPeek.Content = peek ? "👁️ 앞면보기: ON" : "🙈 앞면보기: OFF";
+        BtnToggleSecurityPeek.Background = BrushFromHex(peek ? "#A6E3A1" : "#45475A");
+        BtnToggleSecurityPeek.Foreground = BrushFromHex(peek ? "#11111B" : "#F8FAFC");
 
         OpponentSecurityPanel.Children.Clear();
 
@@ -1453,7 +1855,7 @@ public partial class MainWindow : Window
         if (remainingCards.Count > 0)
         {
             var nextCard = remainingCards[0];
-            TxtNextSecurityTarget.Text = _isSecurityPeekEnabled
+            TxtNextSecurityTarget.Text = peek
                 ? $"🎯 다음 타격 (#{clearedCount + 1}): [{nextCard.Name}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : nextCard.Type.ToString())}"
                 : $"🎯 다음 타격: 시큐리티 #{clearedCount + 1} (뒷면 비공개)";
             TxtNextSecurityTarget.Foreground = BrushFromHex("#89DCEB");
@@ -1493,7 +1895,7 @@ public partial class MainWindow : Window
             var card = remainingCards[i];
             int slotNum = clearedCount + i + 1;
             bool isNext = i == 0;
-            var widget = (FrameworkElement)CreateSecuritySlotWidget(card, slotNum, isCleared: false, isBattleWon: true, isNextTarget: isNext, showFace: _isSecurityPeekEnabled);
+            var widget = (FrameworkElement)CreateSecuritySlotWidget(card, slotNum, isCleared: false, isBattleWon: true, isNextTarget: isNext, showFace: peek);
             OpponentSecurityPanel.Children.Add(widget);
             if (isNext)
                 nextTargetSlot = widget;
@@ -1772,12 +2174,12 @@ public partial class MainWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Center
             };
 
-            string statusText = opp.TopCard.IsBlocker && !opp.IsSuspended
+            string statusText = opp.HasBlocker && !opp.IsSuspended
                 ? "🛡️ ≪블로커≫ 방어 대기!"
                 : opp.IsSuspended
                     ? "↻ REST (직접 타격 가능!)"
                     : "⚡ ACTIVE";
-            string statusColor = opp.TopCard.IsBlocker && !opp.IsSuspended
+            string statusColor = opp.HasBlocker && !opp.IsSuspended
                 ? "#F38BA8"
                 : opp.IsSuspended
                     ? "#FAB387"
@@ -1874,7 +2276,7 @@ public partial class MainWindow : Window
                 Width = OpponentZoneSlotWidth,
                 Tag = opp,
                 Background = BrushFromHex(isHighlighted ? "#1B2E28" : "#141522"),
-                BorderBrush = BrushFromHex(isHighlighted ? "#A6E3A1" : opp.TopCard.IsBlocker && !opp.IsSuspended ? "#F38BA8" : "#45475A"),
+                BorderBrush = BrushFromHex(isHighlighted ? "#A6E3A1" : opp.HasBlocker && !opp.IsSuspended ? "#F38BA8" : "#45475A"),
                 BorderThickness = new Thickness(isHighlighted ? 2.5 : 1.5),
                 CornerRadius = new CornerRadius(7),
                 Padding = new Thickness(7, 5, 7, 5),
@@ -1923,6 +2325,55 @@ public partial class MainWindow : Window
         {
             OpponentBattleAreaPanel.Children.Add(CreateEmptyZoneSlot(OpponentZoneSlotWidth, OpponentZoneSlotHeight, isOpponent: true, new Thickness(0, 0, 8, 0)));
         }
+
+        RenderOpponentBreedingArea();
+    }
+
+    // 상대 육성 에어리어 (AI가 부화시킨 디지타마 / 육성 중인 디지몬)
+    private void RenderOpponentBreedingArea()
+    {
+        var breeding = _gameState.DummyOpponent.BreedingArea;
+        if (breeding == null)
+        {
+            OppBreedingSlot.Content = new TextBlock
+            {
+                Text = _gameState.DummyOpponent.DigitamaDeck.Count > 0 ? $"비어 있음\n(디지타마 {_gameState.DummyOpponent.DigitamaDeck.Count}장)" : "비어 있음",
+                Foreground = Theme.GetBrush("Neo.Brush.Text.Dim"),
+                FontSize = 10,
+                TextAlignment = TextAlignment.Center
+            };
+            return;
+        }
+
+        var card = breeding.TopCard;
+        var frame = CreateCardVisualFrame(card, width: 88, height: 120,
+            customDpOrBadge: card.Type == CardType.Digimon ? $"{breeding.GetCurrentDP()}" : $"Lv.{card.Level}");
+        var holder = new StackPanel
+        {
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Children =
+            {
+                frame,
+                new TextBlock
+                {
+                    Text = $"Lv.{card.Level} {card.Name}",
+                    Foreground = Theme.GetBrush("Neo.Brush.Text.Secondary"),
+                    FontSize = 10,
+                    FontWeight = FontWeights.Bold,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = 100,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 3, 0, 0)
+                }
+            }
+        };
+        holder.MouseEnter += (_, _) =>
+        {
+            UpdateCardInspector(card);
+            if (_pinnedFieldInstance == null)
+                UpdateFieldDigimonBreakdown(breeding, isPinned: false, isOpponent: true);
+        };
+        OppBreedingSlot.Content = holder;
     }
 
     // ==================== 🎴 듀얼 필드 카드 존 (유희왕 몬스터 존처럼 빈 슬롯을 각인해 둔다) ====================
@@ -2122,7 +2573,7 @@ public partial class MainWindow : Window
         {
             TamerZonePanel.Children.Add(new TextBlock
             {
-                Text = "없음 (패에서 테이머 카드를 등장시키면 아군 디지몬 DP 증가 & 턴 시작 메모리가 보정됩니다)",
+                Text = "없음 (테이머 카드를 등장시키면 지속 효과가 여기에 표시됩니다)",
                 Foreground = BrushFromHex("#6C7086"),
                 FontSize = 11,
                 VerticalAlignment = VerticalAlignment.Center
@@ -2134,9 +2585,7 @@ public partial class MainWindow : Window
             {
                 var tamer = group.First();
                 int count = group.Count();
-                string auraDesc = tamer.CardId == "ST1-12" || tamer.Color == CardColor.Red
-                    ? $"전체 DP +{count * 1000:N0} | 진화4장↑ 시큐+{count} | 최소 3메모리"
-                    : $"진화 디지몬 DP +{count * 1000:N0} | 턴 시작 메모리 +{count}";
+                string auraDesc = GetHandCardQuickEffectSummary(tamer).Text + (count > 1 ? $" (x{count})" : string.Empty);
 
                 var tamerChip = new Border
                 {
@@ -2325,7 +2774,7 @@ public partial class MainWindow : Window
         string stateText = isBreedingArea
             ? "🛡️ 육성존"
             : instance.IsSuspended ? "↻ REST" : isSummoningSick ? "⏳ 등장대기" : "⚡ ACTIVE";
-        if (!isBreedingArea && instance.TopCard.IsBlocker)
+        if (!isBreedingArea && instance.HasBlocker)
         {
             stateText += " 🛡️블로커";
         }
@@ -2724,34 +3173,28 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>패 카드 위에 붙는 한 줄 효과 요약 — 카드의 실제 효과 문장(첫 줄)에서 설명 괄호를 빼고 줄여서 만든다</summary>
     private static (string Text, string ColorHex) GetHandCardQuickEffectSummary(CardData card)
     {
-        return card.CardId switch
+        static string Shorten(string text)
         {
-            "ST1-12" or "BT1-085" => ("🎖️ 전체 DP+1000 & 최소 3메모리", "#F9E2AF"),
-            "ST2-12" or "BT1-086" => ("🎖️ 진화아군 DP+1000 & 메모리+", "#89DCEB"),
-            "ST3-12" or "BT1-087" => ("🎖️ 황색 아군 DP+1000 & 메모리+", "#F9E2AF"),
-            "ST4-12" or "BT1-089" => ("🎖️ 녹색 아군 DP+1000 & 메모리+", "#A6E3A1"),
-            "ST5-14" => ("🎖️ 흑색 블로커 DP+1000 & 메모리+1", "#94A3B8"),
-            "ST6-14" => ("🎖️ 자색 아군 DP+1000 & 메모리+1", "#CBA6F7"),
-            "ST1-13" or "ST3-13" or "ST4-13" => ("✨ [옵션] 아군 1체 DP +3,000", "#A6E3A1"),
-            "ST1-14" => ("💥 [옵션] DP +2,000 & 시큐어택 +1", "#F9E2AF"),
-            "ST1-15" => ("🔥 [옵션] 상대 DP 4000↓ 2체 소멸", "#F38BA8"),
-            "ST1-16" or "ST3-16" or "ST4-16" or "ST5-16" or "ST6-15" or "ST6-16" => ("🔥 [옵션] 상대 디지몬 즉시 소멸!", "#F38BA8"),
-            "ST2-13" => ("⚡ [옵션] 공짜 메모리 +2 획득!", "#89DCEB"),
-            "ST2-14" or "ST4-14" or "ST5-15" => ("❄️ [옵션] 상대 디지몬 강제 레스트", "#89DCEB"),
-            "ST2-15" => ("❄️ [옵션] 내 진화원 1장 공짜 등장", "#A6E3A1"),
-            "ST2-16" => ("🌊 [옵션] 상대 디지몬 패로 바운스", "#89B4FA"),
-            "ST1-07" or "ST2-08" or "ST3-08" or "BT1-021" => ("🧬 [진화원 효과] 💥시큐리티 어택 +1", "#F9E2AF"),
-            "ST1-08" => ("🔥 [진화시] DP+3000 / 🧬진화원 DP+1000", "#A6E3A1"),
-            "ST1-09" or "ST4-10" or "BT3-054" => ("🧬 [진화원 효과] ▲DP +2,000", "#A6E3A1"),
-            "ST1-11" or "BT1-025" or "ST5-12" or "BT2-065" => ("💥 궁극체 시큐어택+1 & 고화력 돌파", "#F9E2AF"),
-            "ST2-11" or "BT1-044" or "ST6-12" or "BT2-080" => ("⚡ 궁극체 연속 어택 & 시큐 돌파", "#89DCEB"),
-            "BT1-084" or "BT3-112" or "BT5-086" => ("🌌 [Lv.7 초궁극체] DP 15,000 & 적 소멸!", "#F9E2AF"),
-            _ when card.IsBlocker => ("🛡️ ≪블로커≫ 상대 공격 방어", "#FAB387"),
-            _ when card.InheritedDpBonus > 0 => ($"🧬 [진화원 효과] ▲DP +{card.InheritedDpBonus:N0}", "#A6E3A1"),
-            _ => ("⚔️ 기본 전투 디지몬", "#9399B2")
+            string line = text.Split('\n')[0];
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\s*\([^)]*\)", string.Empty).Trim();
+            return line.Length > 26 ? line[..26] + "…" : line;
+        }
+
+        string color = card.Type switch
+        {
+            CardType.Tamer => "#F9E2AF",
+            CardType.Option => "#89DCEB",
+            _ => card.IsBlocker ? "#FAB387" : "#A6E3A1"
         };
+
+        if (!string.IsNullOrWhiteSpace(card.EffectText))
+            return ((card.Type == CardType.Tamer ? "🎖️ " : card.Type == CardType.Option ? "✨ " : "⚡ ") + Shorten(card.EffectText), color);
+        if (!string.IsNullOrWhiteSpace(card.InheritedEffectText))
+            return ("🧬 " + Shorten(card.InheritedEffectText), "#A6E3A1");
+        return ("⚔️ 효과 없음 (바닐라)", "#9399B2");
     }
 
     private void RenderHand()
@@ -3512,11 +3955,14 @@ public partial class MainWindow : Window
             TxtGameResultBanner.Foreground = BrushFromHex("#CDD6F4");
         }
 
-        LstActionLogs.ItemsSource = null;
-        LstActionLogs.ItemsSource = _gameState.ActionLogs;
-        if (_gameState.ActionLogs.Count > 0)
+        // 엔진의 ActionLogs(List<string>)는 변경 알림이 없으므로 직접 바인딩하면 안 된다.
+        // 바인딩 후 엔진이 로그를 추가한 상태에서 레이아웃이 돌면(예: 시큐리티 어택 중 UpdateLayout)
+        // ItemsControl 불일치 예외로 앱이 종료된다 → 매번 스냅샷을 바인딩한다.
+        var logSnapshot = _gameState.ActionLogs.ToList();
+        LstActionLogs.ItemsSource = logSnapshot;
+        if (logSnapshot.Count > 0)
         {
-            LstActionLogs.ScrollIntoView(_gameState.ActionLogs[^1]);
+            LstActionLogs.ScrollIntoView(logSnapshot[^1]);
         }
     }
 
@@ -3595,7 +4041,56 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded)
             return;
+        _catalogPage = 0;
         RefreshCatalogUi();
+    }
+
+    // ==================== 바인더 페이지 / 세트 필터 ====================
+    private const int CatalogPageSize = 60;
+    private int _catalogPage;
+
+    private void BtnCatalogPrev_Click(object sender, RoutedEventArgs e)
+    {
+        _catalogPage--;
+        RefreshCatalogUi();
+        CatalogScrollViewer.ScrollToTop();
+    }
+
+    private void BtnCatalogNext_Click(object sender, RoutedEventArgs e)
+    {
+        _catalogPage++;
+        RefreshCatalogUi();
+        CatalogScrollViewer.ScrollToTop();
+    }
+
+    private static string SetPrefixOf(string cardId) => cardId.Contains('-') ? cardId[..cardId.LastIndexOf('-')] : cardId;
+
+    private static int SetGroupOrder(string cardId)
+    {
+        string p = SetPrefixOf(cardId);
+        return p.StartsWith("ST") ? 0 : p.StartsWith("BT") ? 1 : p.StartsWith("EX") ? 2 : 3;
+    }
+
+    private static int SetNumber(string cardId) =>
+        int.TryParse(new string(SetPrefixOf(cardId).SkipWhile(char.IsLetter).ToArray()), out int n) ? n : 0;
+
+    /// <summary>SET 필터 목록을 도감에 있는 세트 접두어(ST1, BT10, EX3, P ...)로 채운다</summary>
+    private void InitSetFilter()
+    {
+        string? selected = (CmbFilterSet.SelectedItem as ComboBoxItem)?.Content?.ToString();
+        var prefixes = _catalogService.Catalog
+            .Select(c => c.CardId.Contains('-') ? c.CardId[..c.CardId.LastIndexOf('-')] : c.CardId)
+            .Distinct()
+            .OrderBy(p => p.StartsWith("ST") ? 0 : p.StartsWith("BT") ? 1 : p.StartsWith("EX") ? 2 : 3)
+            .ThenBy(p => int.TryParse(new string(p.SkipWhile(char.IsLetter).ToArray()), out int n) ? n : 0)
+            .ThenBy(p => p)
+            .ToList();
+
+        CmbFilterSet.Items.Clear();
+        CmbFilterSet.Items.Add(new ComboBoxItem { Content = "전체" });
+        foreach (var p in prefixes)
+            CmbFilterSet.Items.Add(new ComboBoxItem { Content = p });
+        CmbFilterSet.SelectedIndex = Math.Max(0, prefixes.IndexOf(selected ?? "") + 1);
     }
 
     private void RefreshCatalogUi()
@@ -3636,11 +4131,37 @@ public partial class MainWindow : Window
             _ => null
         };
 
-        var results = _catalogService.SearchCards(keyword, color, type, level);
-        TxtCatalogCount.Text = $"검색된 카드: {results.Count}종 (전체 7색 TCG 도감: {_catalogService.Catalog.Count}종 | ST-1~6 & BT-1~5 수록)";
+        string? setPrefix = (CmbFilterSet.SelectedItem as ComboBoxItem)?.Content?.ToString();
+        if (setPrefix == "전체")
+            setPrefix = null;
+        int implFilter = CmbFilterImpl.SelectedIndex;   // 0 전체 · 1 효과 구현 · 2 효과 미구현
+        string? rarity = (CmbFilterRarity.SelectedItem as ComboBoxItem)?.Content?.ToString();
+        if (rarity == "전체")
+            rarity = null;
+
+        // 정렬: 효과 구현 카드 먼저 → 세트(ST → BT → EX → 그 외, 번호순) → 카드 번호
+        var results = _catalogService.SearchCards(keyword, color, type, level)
+            .Where(c => setPrefix == null || c.CardId.StartsWith(setPrefix + "-", StringComparison.Ordinal))
+            .Where(c => implFilter switch { 1 => c.IsEffectImplemented, 2 => !c.IsEffectImplemented, _ => true })
+            .Where(c => rarity == null || string.Equals(c.Rarity, rarity, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(c => c.IsEffectImplemented)
+            .ThenBy(c => SetGroupOrder(c.CardId))
+            .ThenBy(c => SetNumber(c.CardId))
+            .ThenBy(c => c.CardId, StringComparer.Ordinal)
+            .ToList();
+
+        int implementedTotal = _catalogService.Catalog.Count(c => c.IsEffectImplemented);
+        TxtCatalogCount.Text = $"검색된 카드: {results.Count}종 · 도감 전체 {_catalogService.Catalog.Count}종 (효과 구현 {implementedTotal}종)";
+
+        // 수천 장을 한 번에 그리면 느려지므로 한 페이지(60장)씩
+        int pageCount = Math.Max(1, (results.Count + CatalogPageSize - 1) / CatalogPageSize);
+        _catalogPage = Math.Clamp(_catalogPage, 0, pageCount - 1);
+        TxtCatalogPage.Text = $"{_catalogPage + 1} / {pageCount}";
+        BtnCatalogPrev.IsEnabled = _catalogPage > 0;
+        BtnCatalogNext.IsEnabled = _catalogPage < pageCount - 1;
 
         CatalogWrapPanel.Children.Clear();
-        foreach (var card in results)
+        foreach (var card in results.Skip(_catalogPage * CatalogPageSize).Take(CatalogPageSize))
         {
             int countInDeck = _builderMainDeck.Count(c => c.CardId == card.CardId) +
                               _builderDigitamaDeck.Count(c => c.CardId == card.CardId);
@@ -3667,6 +4188,30 @@ public partial class MainWindow : Window
             Background = Theme.GetBrush("Duel.Brush.SleeveSheen"),
             IsHitTestVisible = false
         });
+
+        if (!card.IsEffectImplemented)
+        {
+            // 대전 엔진이 효과를 구현하지 않은 카드 (API로 받은 카드)
+            cardGrid.Children.Add(new Border
+            {
+                Background = BrushFromHex("#E6301A0A"),
+                BorderBrush = BrushFromHex("#FAB387"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(7, 1, 7, 1),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(5, 0, 0, 30),
+                IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = card.HasAutoKeywords ? "⚠ 키워드만" : "⚠ 효과 미구현",
+                    Foreground = BrushFromHex("#FAB387"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 10
+                }
+            });
+        }
 
         if (inDeck)
         {
@@ -3724,7 +4269,7 @@ public partial class MainWindow : Window
         footer.Children.Add(btnAdd);
         footer.Children.Add(new TextBlock
         {
-            Text = $"{card.CardId} · {countInDeck}/4",
+            Text = string.IsNullOrEmpty(card.Rarity) ? $"{card.CardId} · {countInDeck}/4" : $"{card.CardId} · {card.Rarity} · {countInDeck}/4",
             Foreground = Theme.GetBrush(inDeck ? "Neo.Brush.Gold" : "Neo.Brush.Text.Dim"),
             FontFamily = (FontFamily)FindResource("Neo.Font.Mono"),
             FontWeight = FontWeights.Bold,
@@ -3798,6 +4343,9 @@ public partial class MainWindow : Window
             }
             _builderMainDeck.Add(card);
         }
+
+        if (!card.IsEffectImplemented)
+            ShowToast(false, $"⚠️ [{card.CardId}] {card.Name}은(는) 효과 미구현 카드입니다. 덱에 넣을 수는 있지만 대전에서는 DP · 코스트 · 기본 키워드만 적용됩니다.");
 
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
@@ -3981,11 +4529,12 @@ public partial class MainWindow : Window
     private async void BtnSyncApi_Click(object sender, RoutedEventArgs e)
     {
         BtnSyncApi.IsEnabled = false;
-        ShowToast(true, "🌐 DigimonCard.io 공개 REST API에서 ST-1~ST-6 & BT-1~BT-3 전체 TCG 카드를 일괄 업데이트하는 중입니다...");
-        var (success, msg) = await _catalogService.SyncAllSetsFromApiAsync();
+        var progress = new Progress<string>(text => ShowToast(true, text));
+        var (success, msg) = await _catalogService.SyncAllSetsFromApiAsync(progress);
         ShowToast(success, msg);
+        InitSetFilter();
+        _catalogPage = 0;
         RefreshCatalogUi();
-        _ = PrefetchCatalogImagesAsync();
         BtnSyncApi.IsEnabled = true;
     }
 
@@ -3993,26 +4542,27 @@ public partial class MainWindow : Window
         ApplyPresetDeckAndSync("🔥 [추천 1] 워그레이몬 & 오메가몬 초화력 비트 (50장)", StarterDecks.CreateSt1GaiaRedPreset());
 
     private void BtnLoadPresetSt2_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("❄️ [추천 2] 메탈가루루몬 & 오메가몬 연타 (50장)", StarterDecks.CreateSt2CocytusBluePreset());
+        ApplyPresetDeckAndSync("❄️ [추천 2] 메탈가루몬 & 오메가몬 연타 (50장)", StarterDecks.CreateSt2CocytusBluePreset());
 
     private void BtnLoadPresetSt3_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("⚡ [추천 3] 세라피몬 & 샤인그레이몬 시큐 컨트롤 (50장)", StarterDecks.CreateSt3HeavensYellowPreset());
+        ApplyPresetDeckAndSync("⚡ [추천 3] 세라피몬 & 홀리드라몬 천사 컨트롤 (50장)", StarterDecks.CreateSt3HeavensYellowPreset());
 
     private void BtnLoadPresetSt4_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("🌿 [추천 4] 헤라클캅테리몬 초고속 진화 램프 (50장)", StarterDecks.CreateSt4GigaGreenPreset());
+        ApplyPresetDeckAndSync("🌿 [추천 4] 헤라클레스캅테리몬 & 로제몬 (50장)", StarterDecks.CreateSt4GigaGreenPreset());
 
     private void BtnLoadPresetSt5_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("⚙️ [추천 5] 파워드라몬 & 크레니엄몬 철벽 블로커 (50장)", StarterDecks.CreateSt5MachineBlackPreset());
+        ApplyPresetDeckAndSync("⚙️ [추천 5] 파워드라몬 & 워그레이몬 철벽 블로커 (50장)", StarterDecks.CreateSt5MachineBlackPreset());
 
     private void BtnLoadPresetSt6_Click(object sender, RoutedEventArgs e) =>
-        ApplyPresetDeckAndSync("🔮 [추천 6] 베놈묘티스몬 & 벨제부몬 어그로 (50장)", StarterDecks.CreateSt6VenomVioletPreset());
+        ApplyPresetDeckAndSync("🔮 [추천 6] 피에몬 & 데블몬 길동무 (50장)", StarterDecks.CreateSt6VenomVioletPreset());
 
     private void BtnAutoCompleteDeck_Click(object sender, RoutedEventArgs e)
     {
+        // AI 자동 완성은 대전에서 효과가 동작하는 카드만 사용
         var (completedMain, completedDigitama, guideMsg) = StarterDecks.AutoCompleteRecommendedDeck(
             _builderMainDeck,
             _builderDigitamaDeck,
-            _catalogService.Catalog);
+            _catalogService.Catalog.Where(c => c.IsEffectImplemented).ToList());
 
         _builderMainDeck = completedMain;
         _builderDigitamaDeck = completedDigitama;

@@ -9,10 +9,27 @@ namespace DigimonTcg.Core.Engine;
 /// <summary>
 /// 1인 솔리테어 (Stage 1), 블로커 돌파 챌린지 (Stage 2), 실전 AI 대전 (Stage 3) 통합 룰 엔진
 /// </summary>
-public class GoldfishEngine
+public partial class GoldfishEngine
 {
     public GameState State { get; }
     private readonly Random _rng = new();
+
+    /// <summary>
+    /// true면 AI의 어택을 막을지 플레이어가 고른다 (State.PendingBlock에서 멈추고 ResolvePendingBlock으로 이어 감 — UI가 켠다).
+    /// false면 (테스트 · CLI) 가장 DP가 높은 블로커로 자동 블록한다.
+    /// </summary>
+    public bool PlayerChoosesBlocks { get; set; }
+
+    /// <summary>진행 중인 AI 턴 (플레이어의 블록 선택을 기다리는 동안 남은 어택 · 메모리를 보관)</summary>
+    private sealed class AiTurnContext
+    {
+        public int Memory;
+        public int EndOfTurnMemoryLoss;
+        public bool IsOpeningTurn;
+        public readonly Queue<CardInstance> Attackers = new();
+    }
+
+    private AiTurnContext? _aiTurn;
 
     public GoldfishEngine(GameState state)
     {
@@ -46,7 +63,8 @@ public class GoldfishEngine
         State.CurrentTurn = 1;
         State.CurrentPhase = Phase.Active;
         State.PlayerGoesFirst = true;
-        State.MemoryGauge = 3;
+        // 공식 룰: 메모리 게이지는 0에서 시작하므로 실전 대련의 선공은 첫 턴을 메모리 0으로 시작한다 (연습 모드는 매 턴 3)
+        State.MemoryGauge = State.CurrentStage == PracticeStage.Stage3_AiBattle ? 0 : 3;
         State.CanMulligan = true;
         State.BreedingActionTaken = false;
         State.IsGameOver = false;
@@ -62,6 +80,16 @@ public class GoldfishEngine
         State.LastSecurityBattleResult = string.Empty;
         State.LastSecurityBattleWon = true;
         State.ActionLogs.Clear();
+        State.OpponentTurnEvents.Clear();
+        State.PendingBlock = null;
+        _aiTurn = null;
+        State.TurnSequence = 0;
+        State.PendingEndOfTurnMemoryLoss = 0;
+        State.PlayerSecurityDpBuffs.Clear();
+        State.OpponentSecurityDpBuffs.Clear();
+        State.PlayerAllSecurityAttackUntil = 0;
+        State.OpponentAllSecurityAttackUntil = 0;
+        State.OpponentAttackedThisTurn = false;
 
         State.TargetTurns = State.CurrentStage switch
         {
@@ -84,19 +112,8 @@ public class GoldfishEngine
         var shuffledMain = mainDeck.OrderBy(_ => rng.Next()).ToList();
         State.Player.MainDeck.AddRange(shuffledMain);
 
-        // 플레이어 시큐리티 5장 배치
-        for (int i = 0; i < 5 && State.Player.MainDeck.Count > 0; i++)
-        {
-            State.Player.SecurityStack.Add(State.Player.MainDeck[0]);
-            State.Player.MainDeck.RemoveAt(0);
-        }
-
-        // 플레이어 초기 패 5장 드로우
-        for (int i = 0; i < 5 && State.Player.MainDeck.Count > 0; i++)
-        {
-            State.Player.Hand.Add(State.Player.MainDeck[0]);
-            State.Player.MainDeck.RemoveAt(0);
-        }
+        // 공식 룰 5-2-1-4: 초기 손패 5장 드로우 (시큐리티는 멀리건이 끝난 뒤 BeginGame에서 놓는다)
+        DealInitialHand(State.Player);
 
         // 스테이지별 상대방 세팅 (기초 덱 또는 사용자 지정 덱)
         SetupOpponentForStage(rng, opponentMainDeck, opponentDigitamaDeck, opponentDeckName);
@@ -109,11 +126,135 @@ public class GoldfishEngine
             _ => "1인 연습 모드"
         };
 
-        Log($"=== [{stageTitle}] 새 게임을 시작합니다! ===");
-        ExecuteActivePhase();
-        ExecuteDrawPhase();
-        State.CurrentPhase = Phase.Breeding;
-        Log("육성 페이즈 시작: [부화], [배틀 이동], [패스] 또는 [첫 손패 다시 뽑기(멀리건)]를 선택하세요.");
+        Log($"=== [{stageTitle}] 새 게임을 준비합니다! 초기 손패 5장을 받았습니다. ===");
+
+        // 공식 룰 5-2: 선공 결정 → 손패 5장 → (선공부터) 멀리건 1회 → 시큐리티 5장 → 게임 시작.
+        // 여기서는 손패까지만 나눠 주고 '게임 준비' 단계에서 멈춘다 → DecideFirstPlayer / ExecuteMulligan / BeginGame
+        _setupRng = rng;
+        _firstPlayerDecided = false;
+        State.CurrentPhase = Phase.Setup;
+    }
+
+    private Random _setupRng = new();
+    private bool _firstPlayerDecided;
+
+    /// <summary>게임 준비 단계에서 선공 / 후공이 정해졌는지 (UI가 코인 토스 뒤 멀리건 화면을 띄울 때 사용)</summary>
+    public bool IsFirstPlayerDecided => _firstPlayerDecided;
+
+    private static void DealInitialHand(PlayerZones zones)
+    {
+        for (int i = 0; i < 5 && zones.MainDeck.Count > 0; i++)
+        {
+            zones.Hand.Add(zones.MainDeck[0]);
+            zones.MainDeck.RemoveAt(0);
+        }
+    }
+
+    /// <summary>손패를 모두 덱에 되돌려 섞고 5장을 다시 뽑는다 (공식 룰 5-2-1-5)</summary>
+    private void RedrawInitialHand(PlayerZones zones)
+    {
+        zones.MainDeck.AddRange(zones.Hand);
+        zones.Hand.Clear();
+        var shuffled = zones.MainDeck.OrderBy(_ => _setupRng.Next()).ToList();
+        zones.MainDeck.Clear();
+        zones.MainDeck.AddRange(shuffled);
+        DealInitialHand(zones);
+    }
+
+    /// <summary>
+    /// 선공 / 후공 결정 (게임 준비 단계에서 1회). 실전 AI 대전에서 AI가 선공이면 AI가 먼저 멀리건 여부를 정한다.
+    /// </summary>
+    public ActionResult DecideFirstPlayer(bool playerGoesFirst)
+    {
+        if (State.CurrentPhase != Phase.Setup)
+            return ActionResult.Fail("선공 / 후공은 게임 시작 전에만 정할 수 있습니다.");
+        if (_firstPlayerDecided)
+            return ActionResult.Fail("선공 / 후공은 이미 정해졌습니다.");
+        if (!playerGoesFirst && State.CurrentStage != PracticeStage.Stage3_AiBattle)
+            return ActionResult.Fail("상대 선공은 실전 AI 대전에서만 사용할 수 있습니다.");
+
+        _firstPlayerDecided = true;
+        State.PlayerGoesFirst = playerGoesFirst;
+        Log(playerGoesFirst
+            ? "🎲 선공 결정: 플레이어 선공 / 상대 후공"
+            : "🎲 선공 결정: 상대 AI 선공 / 플레이어 후공");
+
+        // 공식 룰 5-2-1-4: 멀리건 선언은 선공부터
+        if (!playerGoesFirst)
+            DecideAiMulligan();
+        return ActionResult.Success(playerGoesFirst ? "내가 선공입니다." : "상대 AI가 선공입니다.");
+    }
+
+    /// <summary>AI의 멀리건: 처음에 낼 수 있는 Lv.3 디지몬이 손패에 없으면 다시 뽑는다</summary>
+    private void DecideAiMulligan()
+    {
+        if (State.CurrentStage != PracticeStage.Stage3_AiBattle)
+            return;
+        var hand = State.DummyOpponent.Hand;
+        bool hasStarter = hand.Any(c => c.Type == CardType.Digimon && c.Level <= 3);
+        if (hasStarter)
+        {
+            Log("🤖 상대 AI는 초기 손패를 그대로 사용합니다.");
+            return;
+        }
+        RedrawInitialHand(State.DummyOpponent);
+        Log("🤖 상대 AI가 멀리건을 선언하고 초기 손패 5장을 다시 뽑았습니다.");
+    }
+
+    /// <summary>
+    /// 멀리건까지 끝난 뒤 게임을 시작한다: 양쪽 시큐리티 5장을 덱 위에서 놓고 (공식 룰 5-2-1-6) 선공의 1턴을 시작한다.
+    /// playerGoesFirst를 넘기면 선공 결정도 함께 한다 (아직 정하지 않았을 때).
+    /// </summary>
+    public ActionResult BeginGame(bool? playerGoesFirst = null)
+    {
+        if (State.CurrentPhase != Phase.Setup)
+            return ActionResult.Fail("게임이 이미 시작되었습니다.");
+        if (!_firstPlayerDecided)
+        {
+            var decided = DecideFirstPlayer(playerGoesFirst ?? true);
+            if (!decided.CanExecute)
+                return decided;
+        }
+
+        State.CanMulligan = false;
+        // 공식 룰 5-2-1-4: 후공은 선공 다음에 멀리건을 정한다
+        if (State.PlayerGoesFirst)
+            DecideAiMulligan();
+
+        PlaceSecurity(State.Player);
+        if (State.CurrentStage == PracticeStage.Stage3_AiBattle)
+            PlaceSecurity(State.DummyOpponent);   // 연습 모드 더미는 준비 단계에서 무작위 시큐리티를 이미 받았다
+        Log("🛡️ 양쪽 모두 덱 위에서 시큐리티 5장을 놓았습니다. 게임 시작!");
+
+        if (State.PlayerGoesFirst)
+        {
+            State.CurrentTurn = 1;
+            Log("=== 1턴 시작! (선공) ===");
+            ExecuteActivePhase();
+            ExecuteDrawPhase();
+            State.CurrentPhase = Phase.Breeding;
+            Log("육성 페이즈 시작: [부화], [배틀 이동] 또는 [패스]를 선택하세요.");
+            return ActionResult.Success("게임 시작! 선공 1턴 — 메모리 0 · 드로우 없이 육성 페이즈부터 시작합니다.");
+        }
+
+        // AI 선공: AI의 1턴은 0번째 턴으로 진행하고, 이어지는 내 턴을 1턴으로 센다
+        // (같은 번호를 쓰면 AI가 첫 턴에 낸 디지몬이 다음 AI 턴에 '이번 턴에 등장'으로 보여 공격하지 못한다 — 공식 룰 7-1-2-1)
+        State.CurrentTurn = 0;
+        State.CurrentPhase = Phase.TurnEnd;
+        BeginAiTurn(0, isOpeningTurn: true);   // 선공 첫 턴 = 메모리 0 (공격하지 않으므로 블록 선택으로 멈추지 않는다)
+        if (State.IsGameOver)
+            return ActionResult.Success(State.GameOverReason);
+        return ActionResult.Success($"상대 AI 선공 턴이 끝났습니다. 후공 1턴 시작 (메모리 +{State.MemoryGauge}, 1장 드로우)");
+    }
+
+    /// <summary>공식 룰 5-2-1-6: 덱 위에서 5장을 한 장씩 뒷면으로 시큐리티에 놓는다</summary>
+    private static void PlaceSecurity(PlayerZones zones)
+    {
+        for (int i = 0; i < 5 && zones.MainDeck.Count > 0; i++)
+        {
+            zones.SecurityStack.Add(zones.MainDeck[0]);
+            zones.MainDeck.RemoveAt(0);
+        }
     }
 
     private void SetupOpponentForStage(
@@ -156,32 +297,10 @@ public class GoldfishEngine
 
             State.DummyOpponent.MainDeck.AddRange(aiMain.OrderBy(_ => rng.Next()));
 
-            // 공식 룰: 셔플된 50장 메인 덱 맨 위 5장을 그대로 시큐리티에 배치 (디지몬/테이머/옵션 모두 포함!)
-            for (int i = 0; i < 5 && State.DummyOpponent.MainDeck.Count > 0; i++)
-            {
-                State.DummyOpponent.SecurityStack.Add(State.DummyOpponent.MainDeck[0]);
-                State.DummyOpponent.MainDeck.RemoveAt(0);
-            }
+            // 공식 룰 5-2-1-4: 초기 손패 5장 (시큐리티는 멀리건이 끝난 뒤 BeginGame에서 덱 위 5장으로 놓는다)
+            DealInitialHand(State.DummyOpponent);
 
-            // 공식 룰: 그 다음 5장을 초기 손패(Hand)로 드로우
-            for (int i = 0; i < 5 && State.DummyOpponent.MainDeck.Count > 0; i++)
-            {
-                State.DummyOpponent.Hand.Add(State.DummyOpponent.MainDeck[0]);
-                State.DummyOpponent.MainDeck.RemoveAt(0);
-            }
-
-            // AI 초기 필드: 선택한 상대 덱 내부의 Lv.3 성장기 1체를 우선 찾아 배치 (커스텀 덱/타 색상 덱 완벽 호환!)
-            var deckLv3 = State.DummyOpponent.MainDeck.FirstOrDefault(c => c.Type == CardType.Digimon && c.Level == 3);
-            if (deckLv3 != null)
-            {
-                State.DummyOpponent.MainDeck.Remove(deckLv3);
-                State.DummyOpponent.BattleArea.Add(new CardInstance(deckLv3, 0));
-            }
-            else
-            {
-                var fallbackLv3 = catalog["ST1-02"];
-                State.DummyOpponent.BattleArea.Add(new CardInstance(fallbackLv3, 0));
-            }
+            // 공식 룰: AI도 빈 필드에서 시작한다 (디지타마 부화 → 육성 → 배틀 이동 / 손패에서 등장)
             return;
         }
 
@@ -214,55 +333,18 @@ public class GoldfishEngine
     }
 
     /// <summary>
-    /// 첫 턴 멀리건 (초기 손패 5장을 덱으로 되돌리고 다시 5장 드로우 - 게임당 1회)
+    /// 멀리건 (공식 룰 5-2-1-4 / 5-2-1-5): 게임 시작 전, 초기 손패 5장을 덱에 되돌려 섞고 5장을 다시 뽑는다 — 게임당 1회.
+    /// 선공이 먼저 정하므로, AI 선공이면 선공 결정(DecideFirstPlayer) 뒤에만 할 수 있다.
     /// </summary>
     public ActionResult ExecuteMulligan()
     {
-        if (State.IsGameOver)
-            return ActionResult.Fail("이미 종료된 게임입니다.");
+        if (State.CurrentPhase != Phase.Setup || !State.CanMulligan)
+            return ActionResult.Fail("멀리건(손패 다시 뽑기)은 게임 시작 전에 1회만 할 수 있습니다.");
 
-        if (!State.CanMulligan || State.CurrentTurn > 1)
-            return ActionResult.Fail("멀리건(손패 다시 뽑기)은 1턴 시작 시 1회만 사용할 수 있습니다.");
-
-        // 후공이면 1턴 드로우까지 끝난 손패(6장)일 수 있으므로 되돌린 매수만큼 다시 뽑는다
-        int handSize = State.Player.Hand.Count;
-        State.Player.MainDeck.AddRange(State.Player.Hand);
-        State.Player.Hand.Clear();
-
-        var shuffled = State.Player.MainDeck.OrderBy(_ => _rng.Next()).ToList();
-        State.Player.MainDeck.Clear();
-        State.Player.MainDeck.AddRange(shuffled);
-
-        for (int i = 0; i < handSize && State.Player.MainDeck.Count > 0; i++)
-        {
-            DrawCard();
-        }
-
+        RedrawInitialHand(State.Player);
         State.CanMulligan = false;
-        Log($"🔄 멀리건 실행: 손패 {handSize}장을 덱에 섞고 새로운 {handSize}장을 뽑았습니다.");
-        return ActionResult.Success($"🔄 멀리건 완료! 새로운 손패 {handSize}장을 뽑았습니다.");
-    }
-
-    /// <summary>
-    /// <summary>
-    /// 필드 테이머(신태일/매튜 등) 지속 버프 수치 재계산
-    /// </summary>
-    public void RecalculateFieldBuffs()
-    {
-        int taiCount = State.Player.Tamers.Count(t => t.CardId == "ST1-12" || t.Color == CardColor.Red);
-        int mattCount = State.Player.Tamers.Count(t => t.CardId == "ST2-12" || t.Color == CardColor.Blue);
-
-        foreach (var inst in State.Player.BattleArea)
-        {
-            inst.TamerDpBonus = (taiCount * 1000) + (inst.EvolutionSources.Count > 0 ? mattCount * 1000 : 0);
-            inst.TamerSecurityAttackBonus = (inst.EvolutionSources.Count >= 4 && taiCount > 0) ? taiCount : 0;
-        }
-
-        if (State.Player.BreedingArea != null)
-        {
-            State.Player.BreedingArea.TamerDpBonus = 0;
-            State.Player.BreedingArea.TamerSecurityAttackBonus = 0;
-        }
+        Log("🔄 멀리건 실행: 손패 5장을 덱에 섞고 새로운 5장을 뽑았습니다.");
+        return ActionResult.Success("🔄 멀리건 완료! 새로운 손패 5장을 뽑았습니다.");
     }
 
     /// <summary>
@@ -271,28 +353,19 @@ public class GoldfishEngine
     public void ExecuteActivePhase()
     {
         State.CurrentPhase = Phase.Active;
+        State.TurnSequence++;
         int awakened = 0;
-        foreach (var instance in State.Player.BattleArea)
+        foreach (var instance in AllInstances(State.Player))
         {
             if (instance.IsSuspended)
             {
                 instance.IsSuspended = false;
                 awakened++;
             }
-            instance.TemporaryDpBonus = 0;
-            instance.TemporarySecurityAttackBonus = 0;
-            instance.HasUsedOncePerTurnEffect = false;
-            instance.ActiveSkillBuffLabels.Clear();
+            ResetTurnScopedState(instance);
         }
-        if (State.Player.BreedingArea != null)
-        {
-            State.Player.BreedingArea.IsSuspended = false;
-            State.Player.BreedingArea.TemporaryDpBonus = 0;
-            State.Player.BreedingArea.TemporarySecurityAttackBonus = 0;
-            State.Player.BreedingArea.HasUsedOncePerTurnEffect = false;
-            State.Player.BreedingArea.ActiveSkillBuffLabels.Clear();
-        }
-        RecalculateFieldBuffs();
+        PruneExpiredBuffs();
+        SetTurnOwner(playerTurn: true);
         Log($"액티브 페이즈 완료 (기상한 디지몬: {awakened}체)");
     }
 
@@ -425,158 +498,28 @@ public class GoldfishEngine
             }
             Log($"디지몬 등장: [{card.Name}(Lv.{card.Level})] (코스트 {card.PlayCost} 지불)");
 
-            // BT1-029 파피몬 [등장 시] 1드로우
-            if (card.CardId == "BT1-029")
-            {
-                var drawn = DrawCard();
-                if (drawn != null)
-                {
-                    effectSummary = $" [등장 시 효과로 {drawn.Name} 드로우!]";
-                    Log($"[효과] 파피몬(BT1) 등장 시 효과로 [{drawn.Name}] 1장 드로우!");
-                }
-            }
+            string onPlay = ApplyOnPlayEffects(instance);
+            if (onPlay.Length > 0)
+                effectSummary = $" [{onPlay}]";
         }
         else if (card.Type == CardType.Tamer)
         {
             State.Player.Tamers.Add(card);
             RecalculateFieldBuffs();
-            effectSummary = card.CardId == "ST1-12"
-                ? " [🎖️테이머 버프: 아군 전체 DP +1000 & 진화원 4장 이상 시큐어택 +1 활성!]"
-                : " [🎖️테이머 버프: 진화원 보유 아군 DP +1000 & 턴 시작 메모리 보정 활성!]";
+            effectSummary = string.IsNullOrWhiteSpace(card.EffectText)
+                ? string.Empty
+                : $" [🎖️테이머 효과: {card.EffectText.Split('\n')[0]}]";
             Log($"테이머 등장: [{card.Name}] (코스트 {card.PlayCost} 지불){effectSummary}");
         }
         else if (card.Type == CardType.Option)
         {
             effectSummary = " " + ApplyOptionEffect(card, target);
-            RecalculateFieldBuffs();
             State.Player.Trash.Add(card);
             Log($"옵션 사용: [{card.Name}] (코스트 {card.PlayCost} 지불 후 트래시 이동)");
         }
 
         CheckTurnEndAndAutoReset();
         return ActionResult.Success(validation.GuideMessage + effectSummary);
-    }
-
-    private string ApplyOptionEffect(CardData optionCard, CardInstance? target)
-    {
-        if (optionCard.CardId is "ST1-13" or "ST3-13" or "ST4-13") // 섀도우 윙 / 헤븐즈 게이트 / 일렉트릭 러시: 아군 디지몬 DP +3000
-        {
-            var ally = target ?? State.Player.BattleArea.FirstOrDefault();
-            if (ally != null)
-            {
-                ally.TemporaryDpBonus += 3000;
-                ally.ActiveSkillBuffLabels.Add($"✨{optionCard.Name} (DP +3,000)");
-                string msg = $"[{ally.TopCard.Name}]의 DP가 이번 턴 +3000 상승했습니다! (현재 DP: {ally.GetCurrentDP()})";
-                Log("[효과] " + msg);
-                return msg;
-            }
-        }
-        else if (optionCard.CardId == "ST1-14") // 스타라이트 익스플로전: 아군 DP +2000 & 시큐리티 어택 +1
-        {
-            var ally = target ?? State.Player.BattleArea.FirstOrDefault();
-            if (ally != null)
-            {
-                ally.TemporaryDpBonus += 2000;
-                ally.TemporarySecurityAttackBonus += 1;
-                ally.ActiveSkillBuffLabels.Add("✨스타라이트 (DP +2,000 / 시큐어택 +1)");
-                string msg = $"[{ally.TopCard.Name}]에게 DP +2000 및 ≪시큐리티 어택 +1≫ 부여!";
-                Log("[효과] " + msg);
-                return msg;
-            }
-        }
-        else if (optionCard.CardId is "ST1-16" or "ST3-16" or "ST4-16" or "ST5-16" or "ST6-15" or "ST6-16") // 가이아 포스 / 세븐 헤븐즈 / 기가 블래스터 / 인피니티 캐논 / 데스 클로 / 트럼프 소드
-        {
-            var enemy = (target != null && State.DummyOpponent.BattleArea.Contains(target))
-                ? target
-                : State.DummyOpponent.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
-
-            if (enemy != null)
-            {
-                DeleteOpponentDigimon(enemy);
-                string msg = $"🔥 [{optionCard.Name}] 발동! 상대 [{enemy.TopCard.Name}(DP {enemy.GetCurrentDP()})]를 즉시 소멸시켰습니다!";
-                Log("[효과] " + msg);
-                return msg;
-            }
-        }
-        else if (optionCard.CardId == "ST1-15") // 기가 디스트로이어: DP 4000 이하 상대 디지몬 최대 2체 소멸 (없으면 대상 1체 소멸)
-        {
-            var lowDpEnemies = State.DummyOpponent.BattleArea.Where(d => d.GetCurrentDP() <= 4000).Take(2).ToList();
-            if (lowDpEnemies.Count > 0)
-            {
-                foreach (var e in lowDpEnemies) DeleteOpponentDigimon(e);
-                string names = string.Join(", ", lowDpEnemies.Select(e => e.TopCard.Name));
-                string msg = $"💥 기가 디스트로이어 발동! 상대 [{names}] 소멸!";
-                Log("[효과] " + msg);
-                return msg;
-            }
-            else if (target != null && State.DummyOpponent.BattleArea.Contains(target))
-            {
-                DeleteOpponentDigimon(target);
-                string msg = $"💥 기가 디스트로이어로 상대 [{target.TopCard.Name}] 소멸!";
-                Log("[효과] " + msg);
-                return msg;
-            }
-        }
-        else if (optionCard.CardId == "ST2-13") // 해머 스파크: 메모리 +2
-        {
-            State.MemoryGauge += 2;
-            string msg = $"⚡ 해머 스파크로 메모리 +2 획득! (현재 메모리: {State.MemoryGauge})";
-            Log("[효과] " + msg);
-            return msg;
-        }
-        else if (optionCard.CardId is "ST2-14" or "ST4-14" or "ST5-15") // 소로우 블루 / 니들 스프레이 / 레이저 아이: 상대 디지몬 레스트(방어 무력화)
-        {
-            var enemy = (target != null && State.DummyOpponent.BattleArea.Contains(target))
-                ? target
-                : State.DummyOpponent.BattleArea.FirstOrDefault();
-
-            if (enemy != null)
-            {
-                enemy.IsSuspended = true;
-                string msg = $"❄️ [{optionCard.Name}] 발동! 상대 [{enemy.TopCard.Name}]을(를) 강제로 레스트(무력화)시켰습니다!";
-                Log("[효과] " + msg);
-                return msg;
-            }
-        }
-        else if (optionCard.CardId == "ST2-15") // 카이저 네일: 내 디지몬 진화원 1장을 배틀 에어리어에 분리 등장
-        {
-            var ally = (target != null && State.Player.BattleArea.Contains(target))
-                ? target
-                : State.Player.BattleArea.FirstOrDefault(d => d.EvolutionSources.Count > 0);
-
-            if (ally != null && ally.EvolutionSources.Count > 0)
-            {
-                var popped = ally.EvolutionSources.Pop();
-                if (popped.Type == CardType.Digimon)
-                {
-                    var newInst = new CardInstance(popped, State.CurrentTurn);
-                    State.Player.BattleArea.Add(newInst);
-                    string msg = $"❄️ 카이저 네일 발동! [{ally.TopCard.Name}]의 진화원에서 [{popped.Name}(Lv.{popped.Level})]이(가) 배틀 에어리어에 공짜로 등장했습니다!";
-                    Log("[효과] " + msg);
-                    return msg;
-                }
-            }
-        }
-        else if (optionCard.CardId == "ST2-16") // 코큐토스 브레스: 상대 디지몬 1체를 패로 바운스
-        {
-            var enemy = (target != null && State.DummyOpponent.BattleArea.Contains(target))
-                ? target
-                : State.DummyOpponent.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
-
-            if (enemy != null)
-            {
-                State.DummyOpponent.BattleArea.Remove(enemy);
-                State.DummyOpponent.Hand.Add(enemy.TopCard);
-                while (enemy.EvolutionSources.Count > 0)
-                    State.DummyOpponent.Trash.Add(enemy.EvolutionSources.Pop());
-
-                string msg = $"🌊 코큐토스 브레스 발동! 상대 [{enemy.TopCard.Name}]의 진화원을 모두 파기하고 패로 되돌렸습니다!";
-                Log("[효과] " + msg);
-                return msg;
-            }
-        }
-
-        return string.Empty;
     }
 
     /// <summary>
@@ -608,57 +551,9 @@ public class GoldfishEngine
             State.Lv6CompletedChains++;
         }
 
-        // [진화 시] 특수 효과 처리
-        if (evoCard.CardId == "ST1-08") // 가루다몬: 아군 DP +3000
-        {
-            target.TemporaryDpBonus += 3000;
-            target.ActiveSkillBuffLabels.Add("🔥가루다몬 진화스킬 (DP +3,000)");
-            Log($"[진화 시 효과] 가루다몬의 효과로 이번 턴 DP +3000! (현재 DP: {target.GetCurrentDP()})");
-        }
-        else if (evoCard.CardId == "ST2-09") // 쥬드몬: 상대 디지몬 진화원 2장 파기
-        {
-            var enemyWithSources = State.DummyOpponent.BattleArea.FirstOrDefault(d => d.EvolutionSources.Count > 0);
-            if (enemyWithSources != null)
-            {
-                int trashed = 0;
-                while (enemyWithSources.EvolutionSources.Count > 0 && trashed < 2)
-                {
-                    State.DummyOpponent.Trash.Add(enemyWithSources.EvolutionSources.Pop());
-                    trashed++;
-                }
-                Log($"[진화 시 효과] 쥬드몬이 상대 [{enemyWithSources.TopCard.Name}]의 진화원 {trashed}장을 파기했습니다!");
-            }
-        }
-        else if (evoCard.CardId is "BT1-084" or "BT3-112" or "BT5-086") // 오메가몬 / 알터-S / 즈와르트: 상대 최고 DP 디지몬 소멸 & 액티브 재기상!
-        {
-            target.IsSuspended = false;
-            target.ActiveSkillBuffLabels.Add($"👑[{evoCard.Name}] 초진화 각성 (액티브 재기상!)");
-            var topEnemy = State.DummyOpponent.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
-            if (topEnemy != null)
-            {
-                DeleteOpponentDigimon(topEnemy);
-                Log($"👑 [초궁극체 진화 효과] [{evoCard.Name}] 강림! 상대 [{topEnemy.TopCard.Name}]을(를) 즉시 소멸시키고 액티브 상태로 재기상했습니다!");
-            }
-            else
-            {
-                Log($"👑 [초궁극체 진화 효과] [{evoCard.Name}] 강림! 액티브 상태로 재기상했습니다!");
-            }
-        }
-        else if (evoCard.CardId == "BT3-031") // 황제드라몬: 진화 시 액티브 재기상
-        {
-            target.IsSuspended = false;
-            target.ActiveSkillBuffLabels.Add("⚡황제드라몬 [진화 시 액티브]");
-            Log("[진화 시 효과] 황제드라몬(드래곤 모드)이 스스로 액티브 상태로 재기상했습니다!");
-        }
-        else if (evoCard.CardId == "BT2-039") // 슬래쉬엔젤몬: 상대 DP 8000 이하 소멸
-        {
-            var enemy = State.DummyOpponent.BattleArea.Where(d => d.GetCurrentDP() <= 8000).OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
-            if (enemy != null)
-            {
-                DeleteOpponentDigimon(enemy);
-                Log($"⚡ [진화 시 효과] 슬래쉬엔젤몬의 권능으로 상대 [{enemy.TopCard.Name}]을(를) 소멸시켰습니다!");
-            }
-        }
+        // [진화 시] 효과 — 육성 에어리어의 디지몬은 효과를 발휘하지 않는다
+        if (State.Player.BattleArea.Contains(target))
+            ApplyWhenDigivolvingEffects(target, evoCard);
 
         var drawn = DrawCard();
         string drawText = drawn != null ? $"진화 보너스 드로우: [{drawn.Name}]" : "덱이 비어 진화 보너스 드로우 없음";
@@ -669,7 +564,7 @@ public class GoldfishEngine
     }
 
     /// <summary>
-    /// 4. 메인 페이즈 - 상대 레스트 상태 디지몬 직접 공격 (필드 제압)
+    /// 4. 메인 페이즈 - 상대 레스트 상태 디지몬 공격 (필드 제압). 상대 ≪블로커≫가 대신 막을 수 있다.
     /// </summary>
     public ActionResult AttackOpponentDigimon(CardInstance attacker, CardInstance defender)
     {
@@ -679,33 +574,43 @@ public class GoldfishEngine
 
         State.CanMulligan = false;
         attacker.IsSuspended = true;
-        TriggerWhenAttackingEffects(attacker);
+        TriggerWhenAttackingEffects(attacker, defender);
 
-        int myDp = attacker.GetCurrentDP();
-        int defDp = defender.GetCurrentDP();
         string resultMsg;
-
-        if (myDp > defDp)
+        if (!State.Player.BattleArea.Contains(attacker))
         {
-            DeleteOpponentDigimon(defender);
-            State.LastSecurityBattleWon = true;
-            resultMsg = $"⚔️ 필드 배틀 승리! 내 [{attacker.TopCard.Name}(DP {myDp})] > 상대 [{defender.TopCard.Name}(DP {defDp})] -> 상대 디지몬을 격파했습니다!";
+            resultMsg = $"[{attacker.TopCard.Name}]이(가) 필드를 떠나 어택이 종료되었습니다.";
         }
-        else if (myDp == defDp)
+        else if (!State.DummyOpponent.BattleArea.Contains(defender))
         {
-            DeleteOpponentDigimon(defender);
-            DeleteDigimon(attacker);
-            State.LastSecurityBattleWon = false;
-            resultMsg = $"💥 동귀어진! 내 [{attacker.TopCard.Name}(DP {myDp})] == 상대 [{defender.TopCard.Name}(DP {defDp})] -> 양쪽 디지몬이 모두 소멸했습니다!";
+            resultMsg = $"상대 [{defender.TopCard.Name}]이(가) [어택 시] 효과로 이미 필드를 떠나 배틀이 일어나지 않았습니다.";
         }
         else
         {
-            DeleteDigimon(attacker);
-            State.LastSecurityBattleWon = false;
-            resultMsg = $"💀 필드 배틀 패배! 내 [{attacker.TopCard.Name}(DP {myDp})] < 상대 [{defender.TopCard.Name}(DP {defDp})] -> 내 디지몬이 소멸했습니다!";
+            var blocker = EffectRules.ChooseOpponentBlocker(State, attacker, defender);
+            var battleTarget = blocker ?? defender;
+            string prefix = string.Empty;
+            if (blocker != null)
+            {
+                blocker.IsSuspended = true;
+                OnPlayerAttackBlocked(attacker);
+                prefix = $"🛡️ 상대 ≪블로커≫ [{blocker.TopCard.Name}]가 블록! ";
+            }
+
+            RecalculateFieldBuffs();
+            int myDp = attacker.GetCurrentDP();
+            int defDp = battleTarget.GetCurrentDP();
+            var (atkDeleted, defDeleted) = ResolveDigimonBattle(attacker, battleTarget);
+            resultMsg = prefix + DescribeBattle(attacker, myDp, battleTarget, defDp, atkDeleted, defDeleted);
+            State.LastSecurityBattleWon = defDeleted && !atkDeleted;
+
+            // ≪관통≫: 배틀에서 상대 디지몬만 소멸시켰을 때 시큐리티를 체크한다
+            if (defDeleted && !atkDeleted && HasPiercing(attacker))
+                resultMsg += " / ≪관통≫ " + RunSecurityChecks(attacker);
         }
 
         Log(resultMsg);
+        EndTurnIfMemoryNegative();
         return ActionResult.Success(resultMsg);
     }
 
@@ -720,63 +625,83 @@ public class GoldfishEngine
 
         State.CanMulligan = false;
         attacker.IsSuspended = true;
-        TriggerWhenAttackingEffects(attacker);
+        TriggerWhenAttackingEffects(attacker, null);
 
-        // 1) 상대 필드에 액티브 상태인 ≪블로커≫ 디지몬이 있으면 시큐리티 공격을 가로채 방어!
-        var activeBlocker = State.DummyOpponent.BattleArea.FirstOrDefault(d => d.TopCard.IsBlocker && !d.IsSuspended);
-        if (activeBlocker != null)
+        var result = ResolveSecurityAttack(attacker);
+        EndTurnIfMemoryNegative();
+        return result;
+    }
+
+    private ActionResult ResolveSecurityAttack(CardInstance attacker)
+    {
+        var opp = State.DummyOpponent;
+        if (!State.Player.BattleArea.Contains(attacker))
+            return ActionResult.Success($"[{attacker.TopCard.Name}]이(가) 필드를 떠나 어택이 종료되었습니다.");
+
+        // 1) 상대가 ≪블로커≫로 막기로 하면 시큐리티 어택을 가로채 블록 (실전 AI는 막을지 스스로 판단)
+        var blocker = EffectRules.ChooseOpponentBlocker(State, attacker, null);
+        if (blocker != null)
         {
-            activeBlocker.IsSuspended = true;
+            blocker.IsSuspended = true;
+            OnPlayerAttackBlocked(attacker);
+            RecalculateFieldBuffs();
             int myDp = attacker.GetCurrentDP();
-            int blkDp = activeBlocker.GetCurrentDP();
-            string blkMsg;
+            int blkDp = blocker.GetCurrentDP();
+            var (atkDeleted, blkDeleted) = ResolveDigimonBattle(attacker, blocker);
+            string blkMsg = $"🛡️ 상대 ≪블로커≫ [{blocker.TopCard.Name}(DP {blkDp})]가 공격을 가로챘습니다! " +
+                            DescribeBattle(attacker, myDp, blocker, blkDp, atkDeleted, blkDeleted);
+            State.LastSecurityBattleWon = blkDeleted && !atkDeleted;
 
-            if (myDp > blkDp)
-            {
-                DeleteOpponentDigimon(activeBlocker);
-                State.LastSecurityBattleWon = true;
-                blkMsg = $"🛡️💥 상대 ≪블로커≫ [{activeBlocker.TopCard.Name}(DP {blkDp})]가 공격을 가로챘으나, 내 [{attacker.TopCard.Name}(DP {myDp})]가 블로커를 격파했습니다! (시큐리티 체크는 방어됨)";
-            }
-            else if (myDp == blkDp)
-            {
-                DeleteOpponentDigimon(activeBlocker);
-                DeleteDigimon(attacker);
-                State.LastSecurityBattleWon = false;
-                blkMsg = $"🛡️💥 상대 ≪블로커≫ [{activeBlocker.TopCard.Name}(DP {blkDp})]와 동귀어진하여 양쪽 모두 소멸했습니다!";
-            }
-            else
-            {
-                DeleteDigimon(attacker);
-                State.LastSecurityBattleWon = false;
-                blkMsg = $"🛡️💀 상대 ≪블로커≫ [{activeBlocker.TopCard.Name}(DP {blkDp})]의 방어에 막혀 내 [{attacker.TopCard.Name}(DP {myDp})]가 소멸했습니다!";
-            }
+            if (blkDeleted && !atkDeleted && HasPiercing(attacker))
+                blkMsg += " / ≪관통≫ " + RunSecurityChecks(attacker);
 
             State.LastSecurityBattleResult = blkMsg;
             Log(blkMsg);
             return ActionResult.Success(blkMsg);
         }
 
+        // 공식 룰 11-5-1-2-1: 시큐리티 체크를 1장도 할 수 없는 디지몬의 어택으로는 이기지 못한다 (≪시큐리티 어택 -N≫ 등)
+        if (attacker.GetSecurityAttackCount() < 1)
+        {
+            string noCheck = $"[{attacker.TopCard.Name}]은(는) 시큐리티 체크를 할 수 없어 어택이 아무 일 없이 끝났습니다.";
+            Log(noCheck);
+            return ActionResult.Success(noCheck);
+        }
+
         // 2) 시큐리티가 0장인 상태에서 블로커도 없으면 -> 다이렉트 어택 승리!
-        if (State.DummyOpponent.SecurityStack.Count == 0)
+        if (opp.SecurityStack.Count == 0)
         {
             State.IsGameOver = true;
             State.IsVictory = true;
-            string timeAttackEval = State.CurrentTurn <= State.TargetTurns
-                ? $"목표 턴({State.TargetTurns}턴 이내) 달성 성공!"
-                : $"목표 턴({State.TargetTurns}턴) 초과 클리어";
+            State.GameOverReason = $"🎉 [{attacker.TopCard.Name}]의 다이렉트 어택 성공! {State.CurrentTurn}턴 만에 승리했습니다!";
 
-            State.GameOverReason =
-                $"🎉 [{attacker.TopCard.Name}]의 다이렉트 어택 성공! {State.CurrentTurn}턴 만에 승리했습니다! ({timeAttackEval})";
+            // 목표 턴 평가는 연습(타임어택) 모드에서만 — 실전 AI 대전에는 턴 제한이 없다
+            if (State.CurrentStage != PracticeStage.Stage3_AiBattle)
+            {
+                State.GameOverReason += State.CurrentTurn <= State.TargetTurns
+                    ? $" (목표 턴({State.TargetTurns}턴 이내) 달성 성공!)"
+                    : $" (목표 턴({State.TargetTurns}턴) 초과 클리어)";
+            }
             Log(State.GameOverReason);
             return ActionResult.Success(State.GameOverReason);
         }
 
-        // 3) 공식 룰에 따른 시큐리티 체크 수행 (디지몬 배틀 / 테이머 공짜 등장 / 옵션 [시큐리티] 효과 발동)
+        // 3) 공식 룰에 따른 시큐리티 체크
+        return ActionResult.Success(RunSecurityChecks(attacker));
+    }
+
+    /// <summary>
+    /// 상대 시큐리티를 체크 매수만큼 위에서부터 오픈한다 (디지몬 배틀 / 테이머 공짜 등장 / 옵션 [시큐리티] 효과)
+    /// </summary>
+    private string RunSecurityChecks(CardInstance attacker)
+    {
+        var opp = State.DummyOpponent;
+        RecalculateFieldBuffs();
         int checksToPerform = attacker.GetSecurityAttackCount();
         int attackerDp = attacker.GetCurrentDP();
         var battleSummaries = new List<string>();
 
-        Log($"[{attacker.TopCard.Name}(DP {attackerDp})] 시큐리티 어택 선언! (체크 예정 매수: {checksToPerform}장)");
+        Log($"[{attacker.TopCard.Name}(DP {attackerDp})] 시큐리티 체크! (체크 예정 매수: {checksToPerform}장)");
 
         for (int i = 0; i < checksToPerform; i++)
         {
@@ -786,22 +711,24 @@ public class GoldfishEngine
                 break;
             }
 
-            if (State.DummyOpponent.SecurityStack.Count == 0)
+            if (opp.SecurityStack.Count == 0)
             {
                 battleSummaries.Add("남은 시큐리티가 0장이 되어 추가 체크를 종료합니다.");
                 break;
             }
 
+            RecalculateFieldBuffs();
             attackerDp = attacker.GetCurrentDP();
-            var securityCard = State.DummyOpponent.SecurityStack[0];
-            State.DummyOpponent.SecurityStack.RemoveAt(0);
+            var securityCard = opp.SecurityStack[0];
+            opp.SecurityStack.RemoveAt(0);
             State.LastRevealedSecurityCard = securityCard;
 
-            // [공식 룰 A] 시큐리티에서 테이머 카드가 오픈된 경우 -> 배틀 없이 코스트 0으로 상대 테이머 존에 등장!
-            if (securityCard.Type == CardType.Tamer)
+            // [공식 룰 A] [시큐리티] 효과가 있는 테이머 → 배틀 없이 코스트 없이 상대 필드에 등장 (효과가 없으면 아래에서 트래시)
+            if (securityCard.Type == CardType.Tamer && EffectRules.HasSecurityEffect(securityCard))
             {
-                State.DummyOpponent.Tamers.Add(securityCard);
-                string msg = $"✨ [시큐리티 테이머 발동!] 오픈된 [{securityCard.Name}]이(가) 코스트 지불 없이 상대 필드에 등장! 내 [{attacker.TopCard.Name}]은(는) 생존합니다. (남은 시큐리티: {State.DummyOpponent.SecurityStack.Count}장)";
+                opp.Tamers.Add(securityCard);
+                RecalculateFieldBuffs();
+                string msg = $"✨ [시큐리티 테이머 발동!] 오픈된 [{securityCard.Name}]이(가) 코스트 지불 없이 상대 필드에 등장! 내 [{attacker.TopCard.Name}]은(는) 생존합니다. (남은 시큐리티: {opp.SecurityStack.Count}장)";
                 State.LastSecurityBattleResult = $"시큐리티 테이머 [{securityCard.Name}] 공짜 등장! (내 디지몬 생존)";
                 State.LastSecurityBattleWon = true;
                 State.SecurityCheckHistory.Add(new SecurityCheckHistoryItem(
@@ -811,36 +738,73 @@ public class GoldfishEngine
                 continue;
             }
 
-            // [공식 룰 B] 시큐리티에서 옵션 카드가 오픈된 경우 -> 배틀 없이 [시큐리티] 효과 즉시 발동 후 트래시행!
+            // [공식 룰 B] 옵션 → 배틀 없이 [시큐리티] 효과 발휘 후 트래시
             if (securityCard.Type == CardType.Option)
             {
-                State.DummyOpponent.Trash.Add(securityCard);
-                var (optMsg, optSummary, attackerRemoved) = ResolveOpponentSecurityOption(securityCard, attacker);
-                State.LastSecurityBattleResult = optSummary;
-                State.LastSecurityBattleWon = !attackerRemoved;
-                State.SecurityCheckHistory.Add(new SecurityCheckHistoryItem(
-                    securityCard, attacker.TopCard.Name, attackerDp, IsBattleWon: !attackerRemoved, OutcomeSummary: optSummary));
-                battleSummaries.Add(optMsg);
-                Log(optMsg);
-
-                if (attackerRemoved)
+                opp.Trash.Add(securityCard);
+                SecurityOptionOutcome outcome;
+                if (attacker.TopCard.CardId == "BT1-025") // 워그레이몬(BT1): 체크한 옵션 카드의 [시큐리티] 효과는 발휘하지 않는다
                 {
-                    break;
+                    outcome = new SecurityOptionOutcome(
+                        $"🔥 [워그레이몬] 체크한 옵션 [{securityCard.Name}]의 [시큐리티] 효과를 무효로 했습니다!",
+                        $"[시큐리티 {securityCard.Name}] 무효 (워그레이몬)", false, 0, false);
                 }
+                else
+                {
+                    outcome = ResolveSecurityOption(securityCard, opp, attacker);
+                    if (outcome.OwnerMemoryGain > 0)
+                        State.MemoryGauge -= outcome.OwnerMemoryGain;
+                    if (outcome.ReturnToHand && opp.Trash.Remove(securityCard))
+                        opp.Hand.Add(securityCard);
+                }
+
+                State.LastSecurityBattleResult = outcome.Summary;
+                State.LastSecurityBattleWon = !outcome.AttackerRemoved;
+                State.SecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    securityCard, attacker.TopCard.Name, attackerDp, IsBattleWon: !outcome.AttackerRemoved, OutcomeSummary: outcome.Summary));
+                battleSummaries.Add(outcome.Log);
+                Log(outcome.Log);
+
+                if (outcome.AttackerRemoved || !State.Player.BattleArea.Contains(attacker))
+                    break;
                 continue;
             }
 
-            // [공식 룰 C] 시큐리티에서 디지몬 카드가 오픈된 경우 -> 시큐리티 디지몬과 DP 배틀 후 트래시행!
-            State.DummyOpponent.Trash.Add(securityCard);
-            int securityDp = securityCard.DP;
+            // [시큐리티] 효과가 없는 디지몬 외 카드 → 배틀 없이 트래시 (공식 룰 13-1-8-4)
+            if (securityCard.Type != CardType.Digimon)
+            {
+                opp.Trash.Add(securityCard);
+                string msg = $"[{securityCard.Name}]이(가) 오픈되었지만 [시큐리티] 효과가 없어 그대로 트래시됩니다. (남은 시큐리티: {opp.SecurityStack.Count}장)";
+                State.LastSecurityBattleResult = $"[{securityCard.Name}] 효과 없음 → 트래시";
+                State.LastSecurityBattleWon = true;
+                State.SecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    securityCard, attacker.TopCard.Name, attackerDp, IsBattleWon: true, OutcomeSummary: "[시큐리티] 효과 없음 → 트래시"));
+                battleSummaries.Add(msg);
+                Log(msg);
+                continue;
+            }
+
+            // [공식 룰 C] 디지몬 → 시큐리티 디지몬과 DP 배틀 후 트래시
+            opp.Trash.Add(securityCard);
+            int securityDp = securityCard.DP + SecurityDigimonDpBonus(opp, ownersTurn: false);
 
             if (attackerDp > securityDp)
             {
-                string msg = $"✅ 배틀 승리! 공격자 [{attacker.TopCard.Name}(DP {attackerDp})] > 시큐리티 [{securityCard.Name}(DP {securityDp})] -> 내 디지몬 생존 & 시큐리티 파괴! (남은 시큐리티: {State.DummyOpponent.SecurityStack.Count}장)";
+                string msg = $"✅ 배틀 승리! 공격자 [{attacker.TopCard.Name}(DP {attackerDp})] > 시큐리티 [{securityCard.Name}(DP {securityDp})] -> 내 디지몬 생존 & 시큐리티 파괴! (남은 시큐리티: {opp.SecurityStack.Count}장)";
                 State.LastSecurityBattleResult = $"배틀 승리! ({attacker.TopCard.Name} DP {attackerDp} > {securityCard.Name} DP {securityDp})";
                 State.LastSecurityBattleWon = true;
                 State.SecurityCheckHistory.Add(new SecurityCheckHistoryItem(
                     securityCard, attacker.TopCard.Name, attackerDp, IsBattleWon: true, OutcomeSummary: $"✅ 배틀 승리 (DP {attackerDp} > {securityDp})"));
+                battleSummaries.Add(msg);
+                Log(msg);
+            }
+            else if (HasJamming(attacker))
+            {
+                string msg = $"🛡️ ≪재밍≫! [{attacker.TopCard.Name}(DP {attackerDp})]은(는) 시큐리티 디지몬 [{securityCard.Name}(DP {securityDp})]과의 배틀로는 소멸하지 않습니다. (남은 시큐리티: {opp.SecurityStack.Count}장)";
+                State.LastSecurityBattleResult = $"≪재밍≫으로 생존 ({securityCard.Name} DP {securityDp})";
+                State.LastSecurityBattleWon = true;
+                State.SecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    securityCard, attacker.TopCard.Name, attackerDp, IsBattleWon: true, OutcomeSummary: "🛡️ ≪재밍≫ 생존"));
                 battleSummaries.Add(msg);
                 Log(msg);
             }
@@ -858,170 +822,37 @@ public class GoldfishEngine
             }
         }
 
-        // 공격 도중 시큐리티 해머 스파크 등으로 메모리가 0 미만이 되었다면, 공식 룰에 따라 어택 종료 후 턴이 넘어갑니다.
-        if (State.MemoryGauge < 0)
+        return string.Join(" / ", battleSummaries);
+    }
+
+    /// <summary>내 디지몬의 어택이 블록당했을 때 (메탈그레이몬 ST1-09 진화원: 메모리 +3)</summary>
+    private void OnPlayerAttackBlocked(CardInstance attacker)
+    {
+        if (attacker.HasSource("ST1-09"))
         {
+            State.MemoryGauge += 3;
+            Log($"[진화원 효과] 메탈그레이몬: 블록당했을 때 메모리 +3 (현재 메모리: {State.MemoryGauge})");
+        }
+    }
+
+    private static string DescribeBattle(CardInstance attacker, int atkDp, CardInstance defender, int defDp, bool atkDeleted, bool defDeleted)
+    {
+        string a = $"[{attacker.TopCard.Name}(DP {atkDp})]";
+        string d = $"[{defender.TopCard.Name}(DP {defDp})]";
+        if (defDeleted && !atkDeleted)
+            return $"⚔️ 배틀 승리! {a} > {d} -> {d}을(를) 격파했습니다!";
+        if (defDeleted && atkDeleted)
+            return atkDp == defDp
+                ? $"💥 동귀어진! {a} == {d} -> 양쪽 디지몬이 모두 소멸했습니다!"
+                : $"💥 {a} vs {d} -> ≪길동무≫로 양쪽 디지몬이 모두 소멸했습니다!";
+        return $"💀 배틀 패배! {a} < {d} -> {a}이(가) 소멸했습니다!";
+    }
+
+    /// <summary>어택 중 [어택 시] 효과 등으로 메모리가 0 미만이 되었다면, 어택이 끝난 뒤 턴이 넘어간다</summary>
+    private void EndTurnIfMemoryNegative()
+    {
+        if (!State.IsGameOver && State.MemoryGauge < 0)
             CheckTurnEndAndAutoReset();
-        }
-
-        return ActionResult.Success(string.Join(" / ", battleSummaries));
-    }
-
-    private (string LogMessage, string ShortSummary, bool AttackerRemoved) ResolveOpponentSecurityOption(CardData optionCard, CardInstance attacker)
-    {
-        switch (optionCard.CardId)
-        {
-            case "ST1-16": // 가이아 포스: [시큐리티] 상대 디지몬 1체를 소멸시킨다
-            {
-                DeleteDigimon(attacker);
-                return (
-                    $"💥 [상대 시큐리티 가이아 포스 발동!] 시큐리티에서 오픈된 [가이아 포스]의 [시큐리티] 효과로 공격하던 내 [{attacker.TopCard.Name}]이(가) 즉시 소멸했습니다!",
-                    $"💥 [시큐리티 가이아 포스] 내 [{attacker.TopCard.Name}] 소멸!",
-                    true);
-            }
-            case "ST2-16": // 코큐토스 브레스: [시큐리티] 상대 디지몬 1체를 패로 되돌린다
-            {
-                if (State.Player.BattleArea.Remove(attacker))
-                {
-                    while (attacker.EvolutionSources.Count > 0)
-                    {
-                        State.Player.Trash.Add(attacker.EvolutionSources.Pop());
-                    }
-                    State.Player.Hand.Add(attacker.TopCard);
-                }
-                return (
-                    $"🌊 [상대 시큐리티 코큐토스 브레스 발동!] 시큐리티에서 오픈된 [코큐토스 브레스] 효과로 공격하던 내 [{attacker.TopCard.Name}]이(가) 패로 바운스되었습니다!",
-                    $"🌊 [시큐리티 코큐토스 브레스] 내 [{attacker.TopCard.Name}] 패로 바운스!",
-                    true);
-            }
-            case "ST1-15": // 기가 디스트로이어: [시큐리티] DP 4000 이하 디지몬 2체까지 소멸
-            {
-                var lowTargets = State.Player.BattleArea.Where(d => d.GetCurrentDP() <= 4000).Take(2).ToList();
-                bool removedAttacker = false;
-                foreach (var t in lowTargets)
-                {
-                    if (ReferenceEquals(t, attacker)) removedAttacker = true;
-                    DeleteDigimon(t);
-                }
-                return (
-                    $"🔥 [상대 시큐리티 기가 디스트로이어 발동!] 내 필드의 DP 4000 이하 디지몬 {lowTargets.Count}체가 소멸했습니다!",
-                    $"🔥 [시큐리티 기가 디스트로이어] DP 4000↓ {lowTargets.Count}체 소멸",
-                    removedAttacker);
-            }
-            case "ST2-13": // 해머 스파크: [시큐리티] 메모리를 +2 얻는다 (상대 시점이므로 내 메모리 -2)
-            {
-                State.MemoryGauge -= 2;
-                return (
-                    $"⚡ [상대 시큐리티 해머 스파크 발동!] 상대가 메모리를 +2 얻어 내 메모리가 2 감소했습니다! (현재 메모리: {State.MemoryGauge})",
-                    $"⚡ [시큐리티 해머 스파크] 내 메모리 -2 감소!",
-                    false);
-            }
-            case "ST2-14": // 소로우 블루: [시큐리티] 상대 디지몬 1체를 레스트시킨다
-            {
-                var unsuspended = State.Player.BattleArea.FirstOrDefault(d => !d.IsSuspended);
-                if (unsuspended != null)
-                {
-                    unsuspended.IsSuspended = true;
-                }
-                return (
-                    $"❄️ [상대 시큐리티 소로우 블루 발동!] {(unsuspended != null ? $"내 [{unsuspended.TopCard.Name}]이(가) 레스트되었습니다!" : "레스트할 추가 디지몬이 없어 통과합니다.")}",
-                    "❄️ [시큐리티 소로우 블루] 디지몬 레스트 발동",
-                    false);
-            }
-            case "ST1-13": // 섀도우 윙
-            case "ST1-14": // 스타라이트 익스플로전
-            {
-                int buff = optionCard.CardId == "ST1-14" ? 7000 : 3000;
-                foreach (var opp in State.DummyOpponent.BattleArea)
-                {
-                    opp.TemporaryDpBonus += buff;
-                }
-                return (
-                    $"✨ [상대 시큐리티 {optionCard.Name} 발동!] 이번 턴 동안 상대 필드의 모든 디지몬 DP가 +{buff:N0} 증가했습니다!",
-                    $"✨ [시큐리티 {optionCard.Name}] 상대 디지몬 DP +{buff:N0}",
-                    false);
-            }
-            case "ST2-15": // 카이저 네일: 진화원 1장 공짜 등장
-            {
-                var oppWithSrc = State.DummyOpponent.BattleArea.FirstOrDefault(d => d.EvolutionSources.Any(s => s.Type == CardType.Digimon));
-                if (oppWithSrc != null)
-                {
-                    var temp = new Stack<CardData>();
-                    CardData? extracted = null;
-                    while (oppWithSrc.EvolutionSources.Count > 0)
-                    {
-                        var top = oppWithSrc.EvolutionSources.Pop();
-                        if (extracted == null && top.Type == CardType.Digimon) extracted = top;
-                        else temp.Push(top);
-                    }
-                    while (temp.Count > 0) oppWithSrc.EvolutionSources.Push(temp.Pop());
-                    if (extracted != null)
-                    {
-                        State.DummyOpponent.BattleArea.Add(new CardInstance(extracted, State.CurrentTurn));
-                        return (
-                            $"❄️ [상대 시큐리티 카이저 네일 발동!] 상대 진화원에서 [{extracted.Name}]이(가) 필드에 공짜 등장했습니다!",
-                            $"❄️ [시큐리티 카이저 네일] [{extracted.Name}] 등장!",
-                            false);
-                    }
-                }
-                return (
-                    $"❄️ [상대 시큐리티 카이저 네일] 발동 가능한 진화원이 없어 불발로 트래시되었습니다.",
-                    "❄️ [시큐리티 카이저 네일] 효과 불발",
-                    false);
-            }
-            default:
-                return (
-                    $"✨ [상대 시큐리티 옵션 [{optionCard.Name}] 오픈!] [시큐리티] 효과 처리 후 트래시로 이동합니다.",
-                    $"✨ [시큐리티 옵션] {optionCard.Name} 발동",
-                    false);
-        }
-    }
-
-    private void TriggerWhenAttackingEffects(CardInstance attacker)
-    {
-        // ST2-11 메탈가루몬: [어택 시] (턴당 1회) 이 디지몬을 액티브 상태로 전환 (재행동)
-        if (attacker.TopCard.CardId == "ST2-11" && !attacker.HasUsedOncePerTurnEffect)
-        {
-            attacker.HasUsedOncePerTurnEffect = true;
-            attacker.IsSuspended = false;
-            Log("❄️ [어택 시 효과] 메탈가루몬이 액티브 상태로 전환되어 이번 턴 한 번 더 공격할 수 있습니다!");
-        }
-
-        // ST2-03 파피몬 / ST2-06 가루몬 진화원 효과: [어택 시] 상대 디지몬 진화원 1장 파기
-        if (attacker.EvolutionSources.Any(s => s.CardId is "ST2-03" or "ST2-06"))
-        {
-            var enemyWithSource = State.DummyOpponent.BattleArea.FirstOrDefault(d => d.EvolutionSources.Count > 0);
-            if (enemyWithSource != null)
-            {
-                var trashed = enemyWithSource.EvolutionSources.Pop();
-                State.DummyOpponent.Trash.Add(trashed);
-                Log($"❄️ [진화원 효과] 상대 [{enemyWithSource.TopCard.Name}]의 진화원 [{trashed.Name}]을(를) 파기했습니다!");
-            }
-        }
-    }
-
-    private void DeleteDigimon(CardInstance instance)
-    {
-        if (State.Player.BattleArea.Remove(instance))
-        {
-            State.Player.Trash.Add(instance.TopCard);
-            while (instance.EvolutionSources.Count > 0)
-            {
-                State.Player.Trash.Add(instance.EvolutionSources.Pop());
-            }
-        }
-    }
-
-    private void DeleteOpponentDigimon(CardInstance instance)
-    {
-        if (State.DummyOpponent.BattleArea.Remove(instance))
-        {
-            State.DummyOpponent.Trash.Add(instance.TopCard);
-            while (instance.EvolutionSources.Count > 0)
-            {
-                State.DummyOpponent.Trash.Add(instance.EvolutionSources.Pop());
-            }
-        }
     }
 
     /// <summary>
@@ -1031,12 +862,18 @@ public class GoldfishEngine
     {
         if (State.IsGameOver)
             return ActionResult.Fail("이미 종료된 게임입니다.");
+        if (State.PendingBlock != null)
+            return ActionResult.Fail("상대의 어택을 블록할지 먼저 선택하세요.");
+        if (State.CurrentPhase is Phase.Setup or Phase.TurnEnd)
+            return ActionResult.Fail("지금은 내 턴이 아닙니다.");
 
         State.CanMulligan = false;
         State.MemoryGauge = -3;
         Log("플레이어가 턴 종료(Pass)를 선언했습니다.");
         CheckTurnEndAndAutoReset();
-        return ActionResult.Success($"턴을 종료했습니다. 상대 턴 진행 후 {State.CurrentTurn}턴(메모리 +{State.MemoryGauge})이 시작됩니다.");
+        return State.PendingBlock != null
+            ? ActionResult.Success("턴을 종료했습니다. 상대가 어택해 왔습니다 — 블록할지 선택하세요!")
+            : ActionResult.Success($"턴을 종료했습니다. 상대 턴 진행 후 {State.CurrentTurn}턴(메모리 +{State.MemoryGauge})이 시작됩니다.");
     }
 
     /// <summary>
@@ -1049,62 +886,62 @@ public class GoldfishEngine
             return false;
 
         State.CurrentPhase = Phase.TurnEnd;
-        int memoryPassedToOpponent = Math.Abs(State.MemoryGauge);
-        Log($"메모리가 {State.MemoryGauge}(0 미만)이 되어 플레이어 턴이 종료됩니다. (상대에게 넘어간 메모리: +{memoryPassedToOpponent})");
+        Log($"메모리가 {State.MemoryGauge}(0 미만)이 되어 플레이어 턴이 종료됩니다.");
 
-        int nextPlayerStartingMemory = 3;
+        // [이 턴 종료 시] 메모리 -N 효과 (메탈그레이몬 BT1-021 등): 상대에게 그만큼 더 넘어간다
+        if (State.PendingEndOfTurnMemoryLoss > 0)
+        {
+            State.MemoryGauge -= State.PendingEndOfTurnMemoryLoss;
+            Log($"[이 턴 종료 시] 메모리 -{State.PendingEndOfTurnMemoryLoss} → {State.MemoryGauge}");
+            State.PendingEndOfTurnMemoryLoss = 0;
+        }
+        int memoryPassedToOpponent = Math.Min(10, Math.Abs(State.MemoryGauge));
+        Log($"상대에게 넘어간 메모리: +{memoryPassedToOpponent}");
+
+        if (State.CurrentStage == PracticeStage.Stage3_AiBattle)
+        {
+            // AI 턴이 끝나면 FinishAiTurn이 내 다음 턴을 시작한다 (블록 선택을 기다리면 그 전에 멈춘다)
+            BeginAiTurn(memoryPassedToOpponent, isOpeningTurn: false);
+            return true;
+        }
 
         if (State.CurrentStage == PracticeStage.Stage2_BlockerDefense)
         {
             ExecuteStage2OpponentWave();
         }
-        else if (State.CurrentStage == PracticeStage.Stage3_AiBattle)
-        {
-            nextPlayerStartingMemory = ExecuteStage3AiTurn(memoryPassedToOpponent);
-            if (State.IsGameOver)
-                return true;
-        }
 
+        // 연습 모드는 상대가 메모리를 쓰지 않으므로 매 턴 3으로 시작한다
+        StartNextPlayerTurn(3);
+        return true;
+    }
+
+    /// <summary>
+    /// [공식 룰] 상대가 넘겨준 메모리(상대 쪽 마이너스 값의 절댓값)로 내 다음 턴을 시작한다.
+    /// </summary>
+    private void StartNextPlayerTurn(int handedOver)
+    {
         State.CurrentTurn++;
         State.BreedingActionTaken = false;
 
-        if (State.CurrentStage == PracticeStage.Stage3_AiBattle)
+        var (startMemory, tamerNote) = ApplyStartOfTurnTamerMemory(handedOver, State.Player.Tamers, State.DummyOpponent);
+        State.MemoryGauge = startMemory;
+
+        if (tamerNote != null)
         {
-            // [공식 룰] AI가 마이너스(-)로 넘긴 메모리 절대값만큼 내 턴 시작 메모리가 됩니다! (무조건 3 고정 아님)
-            int mem = nextPlayerStartingMemory;
-
-            // 신태일(ST1-12): 내 턴 시작 시 메모리가 2 이하라면 3으로 보정
-            if (State.Player.Tamers.Any(t => t.CardId == "ST1-12") && mem < 3)
-            {
-                mem = 3;
-                Log("🎖️ [테이머 신태일 효과] 시작 메모리가 2 이하이므로 3메모리로 보정되었습니다!");
-            }
-
-            // 매튜(ST2-12): 내 턴 시작 시 메모리 +1 추가
-            int mattBonus = State.Player.Tamers.Count(t => t.CardId == "ST2-12");
-            if (mattBonus > 0)
-            {
-                mem += mattBonus;
-                Log($"🎖️ [테이머 매튜 효과] 시작 메모리를 +{mattBonus} 추가 확보했습니다!");
-            }
-
-            State.MemoryGauge = mem;
-        }
-        else
-        {
-            // Stage 1 & 2 연습 모드: 기본 3메모리 + 테이머 보너스
-            int tamerBonus = State.Player.Tamers.Count(t => t.CardId is "ST1-12" or "ST2-12");
-            State.MemoryGauge = Math.Max(nextPlayerStartingMemory, 3) + tamerBonus;
+            Log($"🎖️ [내 테이머 효과] {tamerNote} → 시작 메모리 +{startMemory}");
+            if (State.CurrentStage == PracticeStage.Stage3_AiBattle)
+                AddOpponentEvent(OpponentActionKind.TurnEnd, "내 테이머 효과", $"넘겨받은 메모리 +{handedOver} · {tamerNote} → 시작 메모리 +{startMemory}");
         }
 
-        Log($"=== {State.CurrentTurn}턴 시작! (내 시작 메모리: +{State.MemoryGauge}) ===");
+        Log(State.CurrentStage == PracticeStage.Stage3_AiBattle
+            ? $"=== {State.CurrentTurn}턴 시작! (상대가 넘겨준 메모리 +{handedOver} → 내 시작 메모리: +{State.MemoryGauge}) ==="
+            : $"=== {State.CurrentTurn}턴 시작! (내 시작 메모리: +{State.MemoryGauge}) ===");
         ExecuteActivePhase();
         ExecuteDrawPhase();
         if (!State.IsGameOver)
         {
             State.CurrentPhase = Phase.Breeding;
         }
-        return true;
     }
 
     private void ExecuteStage2OpponentWave()
@@ -1129,26 +966,11 @@ public class GoldfishEngine
         }
     }
 
-    /// <summary>
-    /// 코인 토스에서 상대 AI가 선공이 되었을 때 호출 (실전 AI 대전 전용).
-    /// AI가 선공 1턴(드로우 없음)을 진행한 뒤, 후공인 플레이어의 1턴(드로우 있음)을 시작한다.
-    /// </summary>
-    public ActionResult GiveFirstTurnToOpponent()
+    /// <summary>후공 플레이어의 1턴 시작 (AI 선공 턴은 0번째 턴 → 내 첫 턴이 1턴)</summary>
+    private void StartFirstPlayerTurnAfterOpponent(int handedOver)
     {
-        if (State.CurrentStage != PracticeStage.Stage3_AiBattle)
-            return ActionResult.Fail("상대 선공은 실전 AI 대전에서만 사용할 수 있습니다.");
-        if (State.IsGameOver || State.CurrentTurn != 1 || !State.PlayerGoesFirst)
-            return ActionResult.Fail("게임 시작 직후에만 선공을 넘길 수 있습니다.");
-
-        State.PlayerGoesFirst = false;
-        Log("🎲 코인 토스 결과: 상대 AI 선공 / 플레이어 후공");
-
-        State.CurrentPhase = Phase.TurnEnd;
-        int playerStartingMemory = ExecuteStage3AiTurn(3, isOpeningTurn: true);
-        if (State.IsGameOver)
-            return ActionResult.Success(State.GameOverReason);
-
-        State.MemoryGauge = playerStartingMemory;
+        State.CurrentTurn = 1;
+        State.MemoryGauge = handedOver;
         State.BreedingActionTaken = false;
         Log($"=== 1턴 시작! (후공 · 내 시작 메모리: +{State.MemoryGauge}) ===");
         ExecuteActivePhase();
@@ -1157,36 +979,91 @@ public class GoldfishEngine
         {
             State.CurrentPhase = Phase.Breeding;
         }
-        return ActionResult.Success($"상대 AI 선공 턴이 끝났습니다. 후공 1턴 시작 (메모리 +{State.MemoryGauge}, 1장 드로우)");
     }
 
-    private int ExecuteStage3AiTurn(int aiStartingMemory, bool isOpeningTurn = false)
+    /// <summary>
+    /// AI 턴 시작: 액티브 → 드로우 → 육성 → 어택 전 진화까지 진행하고 어택할 디지몬을 정한 뒤 RunAiTurn으로 넘긴다.
+    /// </summary>
+    private void BeginAiTurn(int aiStartingMemory, bool isOpeningTurn)
     {
-        // [공식 룰] 플레이어가 넘겨준 메모리(예: -1이면 +1, -2이면 +2)로 AI 턴을 시작합니다!
-        int aiMemory = aiStartingMemory;
-        if (State.DummyOpponent.Tamers.Any(t => t.CardId == "ST1-12") && aiMemory < 3)
-        {
-            aiMemory = 3;
-        }
-        aiMemory += State.DummyOpponent.Tamers.Count(t => t.CardId == "ST2-12");
+        // [공식 룰] 플레이어가 넘겨준 메모리(예: -1이면 +1, -2이면 +2)로 AI 턴을 시작한다. 선공 첫 턴은 0.
+        var (aiMemory, aiTamerNote) = ApplyStartOfTurnTamerMemory(aiStartingMemory, State.DummyOpponent.Tamers, State.Player);
 
-        Log($"🤖 === [AI 상대 턴 시작 | 플레이어가 넘겨준 AI 시작 메모리: +{aiMemory}] ===");
+        string memoryText = isOpeningTurn
+            ? $"선공 첫 턴 · 메모리 {aiMemory}"
+            : $"넘겨받은 메모리 +{aiStartingMemory}";
+        if (aiTamerNote != null)
+            memoryText += $" · 상대 테이머 효과: {aiTamerNote}";
 
-        // 1. AI 액티브 페이즈
-        foreach (var d in State.DummyOpponent.BattleArea)
+        Log($"🤖 === [AI 상대 턴 시작 | {memoryText} → AI 시작 메모리: +{aiMemory}] ===");
+        State.OpponentTurnEvents.Clear();
+        AddOpponentEvent(OpponentActionKind.TurnStart, "상대 턴",
+            isOpeningTurn ? $"{memoryText} (드로우 · 공격 없음)" : $"{memoryText} → 시작 메모리 +{aiMemory}");
+
+        int aiEndOfTurnMemoryLoss = 0;
+
+        // 1. AI 액티브 페이즈 (턴 순번 증가 → "다음 상대의 턴 종료 시까지" 같은 기간 효과의 기준)
+        State.TurnSequence++;
+        State.OpponentAttackedThisTurn = false;
+        foreach (var d in AllInstances(State.DummyOpponent))
         {
             d.IsSuspended = false;
+            ResetTurnScopedState(d);
+        }
+        // 내 디지몬의 "이 턴 동안" 효과는 내 턴이 끝나면 사라진다
+        foreach (var d in AllInstances(State.Player))
+        {
             d.TemporaryDpBonus = 0;
             d.TemporarySecurityAttackBonus = 0;
-            d.HasUsedOncePerTurnEffect = false;
+            d.ActiveSkillBuffLabels.Clear();
         }
+        // ≪재기동≫: 상대의 액티브 페이즈에 내 디지몬도 액티브가 된다
+        foreach (var d in State.Player.BattleArea.Where(d => d.IsSuspended && HasReboot(d)))
+        {
+            d.IsSuspended = false;
+            Log($"[≪재기동≫] 내 [{d.TopCard.Name}]이(가) 상대의 액티브 페이즈에 액티브 상태가 되었습니다.");
+        }
+        PruneExpiredBuffs();
+        SetTurnOwner(playerTurn: false);
 
         // 2. AI 드로우 페이즈 (AI가 선공인 게임 첫 턴은 드로우 없음)
-        if (!isOpeningTurn && State.DummyOpponent.MainDeck.Count > 0)
+        //    공식 룰: 드로우 페이즈에 덱이 0장이라 드로우할 수 없으면 그 플레이어가 패배한다 (AI도 동일)
+        if (!isOpeningTurn && State.DummyOpponent.MainDeck.Count == 0)
+        {
+            State.IsGameOver = true;
+            State.IsVictory = true;
+            State.GameOverReason = "🎉 상대 AI가 드로우 페이즈에 덱이 0장이 되어 승리했습니다!";
+            Log(State.GameOverReason);
+            AddOpponentEvent(OpponentActionKind.TurnEnd, "덱 아웃", "상대 덱 0장 — 드로우할 수 없어 패배");
+            return;
+        }
+        if (!isOpeningTurn)
         {
             var drawn = State.DummyOpponent.MainDeck[0];
             State.DummyOpponent.MainDeck.RemoveAt(0);
             State.DummyOpponent.Hand.Add(drawn);
+        }
+
+        // 3. AI 육성 페이즈 (부화 / 배틀 이동 중 하나): 비어 있으면 디지타마 부화, Lv.3 이상이 자라 있으면 배틀 에어리어로 이동
+        var aiBreeding = State.DummyOpponent.BreedingArea;
+        if (aiBreeding == null)
+        {
+            if (State.DummyOpponent.DigitamaDeck.Count > 0)
+            {
+                var egg = State.DummyOpponent.DigitamaDeck.Pop();
+                State.DummyOpponent.BreedingArea = new CardInstance(egg, State.CurrentTurn);
+                Log($"🤖 [AI 육성] 디지타마 부화: [{egg.Name}(Lv.{egg.Level})]");
+                AddOpponentEvent(OpponentActionKind.Breeding, "디지타마 부화", $"{egg.Name} (Lv.{egg.Level}) → 상대 육성 에어리어", egg);
+            }
+        }
+        else if (aiBreeding.TopCard.Type == CardType.Digimon && aiBreeding.TopCard.Level >= 3)
+        {
+            State.DummyOpponent.BreedingArea = null;
+            // 육성 에어리어에서 이동한 디지몬은 등장한 것이 아니므로 이번 턴에 바로 공격 가능 (플레이어와 동일)
+            aiBreeding.TurnPlayed = Math.Min(aiBreeding.TurnPlayed, State.CurrentTurn - 1);
+            State.DummyOpponent.BattleArea.Add(aiBreeding);
+            Log($"🤖 [AI 육성] 육성 에어리어 이동: [{aiBreeding.TopCard.Name}(Lv.{aiBreeding.TopCard.Level})] -> 배틀 에어리어");
+            AddOpponentEvent(OpponentActionKind.Breeding, "배틀 에어리어로 이동", $"육성 에어리어의 {aiBreeding.TopCard.Name} (Lv.{aiBreeding.TopCard.Level}) 출격", aiBreeding.TopCard);
         }
 
         // 3-A. [어택 전 메인 페이즈] 메모리가 0 이상으로 유지되는 선에서 먼저 진화 (진화 직후 바로 어택 가능!)
@@ -1194,12 +1071,10 @@ public class GoldfishEngine
         while (aiMemory >= 0 && preAttackEvolved)
         {
             preAttackEvolved = false;
-            foreach (var fieldDigimon in State.DummyOpponent.BattleArea.ToList())
+            foreach (var fieldDigimon in AiEvolutionBases())
             {
                 var safeEvo = State.DummyOpponent.Hand
-                    .FirstOrDefault(c => c.Type == CardType.Digimon
-                                         && c.EvoRequirementLevel == fieldDigimon.TopCard.Level
-                                         && c.EvoCost <= aiMemory);
+                    .FirstOrDefault(c => c.EvoCost <= aiMemory && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
 
                 if (safeEvo != null)
                 {
@@ -1214,6 +1089,7 @@ public class GoldfishEngine
                         State.DummyOpponent.MainDeck.RemoveAt(0);
                     }
                     Log($"🤖 [AI 진화] [{prev}] -> [{safeEvo.Name}(Lv.{safeEvo.Level}, 코스트 {safeEvo.EvoCost})] (AI 메모리: +{beforeMem} → +{aiMemory})");
+                    AddOpponentEvent(OpponentActionKind.Evolve, "진화", $"{prev} → {safeEvo.Name} (Lv.{safeEvo.Level}) · 메모리 {beforeMem} → {aiMemory}", safeEvo);
                     preAttackEvolved = true;
                     break;
                 }
@@ -1221,112 +1097,259 @@ public class GoldfishEngine
         }
 
         // 3-B. [AI 어택 선언] 공식 룰상 메모리가 0 이상일 때만 공격할 수 있습니다!
-        var attackers = State.DummyOpponent.BattleArea
-            .Where(d => !d.IsSuspended && d.TurnPlayed < State.CurrentTurn && (!d.TopCard.IsBlocker || State.DummyOpponent.BattleArea.Count >= 2))
-            .OrderByDescending(d => d.GetCurrentDP())
-            .ToList();
+        //      선공 첫 턴은 공격하지 않는다 (실제 게임은 첫 턴에 필드 디지몬이 없으므로 공격이 불가능)
+        var ctx = new AiTurnContext { Memory = aiMemory, EndOfTurnMemoryLoss = aiEndOfTurnMemoryLoss, IsOpeningTurn = isOpeningTurn };
+        if (!isOpeningTurn)
+        {
+            foreach (var d in State.DummyOpponent.BattleArea
+                         .Where(d => !d.IsSuspended && d.TurnPlayed < State.CurrentTurn && !EffectRules.IsAttackLocked(State, d) && (!d.HasBlocker || State.DummyOpponent.BattleArea.Count >= 2))
+                         .OrderByDescending(d => d.GetCurrentDP()))
+                ctx.Attackers.Enqueue(d);
+        }
 
-        foreach (var aiAttacker in attackers)
+        _aiTurn = ctx;
+        RunAiTurn();
+    }
+
+    /// <summary>
+    /// 남은 AI 어택을 차례로 처리한다. 플레이어가 블록 여부를 골라야 하면 State.PendingBlock을 세우고 멈춘다
+    /// (ResolvePendingBlock이 이어서 부른다). 어택이 모두 끝나면 FinishAiTurn으로 넘어간다.
+    /// </summary>
+    private void RunAiTurn()
+    {
+        var ctx = _aiTurn;
+        if (ctx == null)
+            return;
+
+        while (ctx.Attackers.Count > 0)
         {
             // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료!
-            if (aiMemory < 0)
+            if (ctx.Memory < 0)
             {
-                Log($"⚡ AI 메모리가 {aiMemory}(0 미만)이 되어 AI의 추가 공격 및 메인 페이즈가 즉시 종료됩니다!");
+                Log($"⚡ AI 메모리가 {ctx.Memory}(0 미만)이 되어 AI의 추가 공격 및 메인 페이즈가 즉시 종료됩니다!");
+                ctx.Attackers.Clear();
                 break;
             }
 
-            if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || aiAttacker.IsSuspended)
+            var aiAttacker = ctx.Attackers.Dequeue();
+            if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || aiAttacker.IsSuspended || EffectRules.IsAttackLocked(State, aiAttacker))
                 continue;
 
             aiAttacker.IsSuspended = true;
+            State.OpponentAttackedThisTurn = true;
+
+            // AI 디지몬의 [어택 시] 메모리 효과
+            if (LoseTwoMemoryOnAttackIds.Contains(aiAttacker.TopCard.CardId))
+            {
+                ctx.Memory -= 2;
+                Log($"🤖 [어택 시] {aiAttacker.TopCard.Name}: AI 메모리 -2 → {ctx.Memory}");
+            }
+            if (aiAttacker.TopCard.CardId is "BT1-021" or "BT1-040")
+            {
+                ctx.Memory += 3;
+                ctx.EndOfTurnMemoryLoss += 3;
+                Log($"🤖 [어택 시] {aiAttacker.TopCard.Name}: AI 메모리 +3 (이 턴 종료 시 -3) → {ctx.Memory}");
+            }
+
+            RecalculateFieldBuffs();
             int aiDp = aiAttacker.GetCurrentDP();
             int aiChecks = aiAttacker.GetSecurityAttackCount();
+            AddOpponentEvent(OpponentActionKind.Attack, "공격 선언", $"{aiAttacker.TopCard.Name} (DP {aiDp:N0}) → 내 시큐리티 {aiChecks}장", aiAttacker.TopCard);
 
-            // 플레이어에게 액티브 블로커가 있으면 자동 블록!
-            var playerBlocker = State.Player.BattleArea.FirstOrDefault(d => d.TopCard.IsBlocker && !d.IsSuspended);
-            if (playerBlocker != null)
+            // [공식 룰] ≪블로커≫로 막을지는 방어하는 플레이어가 고른다
+            var candidates = EffectRules.BlockCandidates(State, State.Player.BattleArea, aiAttacker);
+            if (candidates.Count > 0 && PlayerChoosesBlocks)
             {
-                playerBlocker.IsSuspended = true;
-                int myBlkDp = playerBlocker.GetCurrentDP();
-                if (myBlkDp > aiDp)
-                {
-                    DeleteOpponentDigimon(aiAttacker);
-                    Log($"🛡️ [내 블로커 방어 성공!] 내 [{playerBlocker.TopCard.Name}(DP {myBlkDp})]이(가) AI의 [{aiAttacker.TopCard.Name}(DP {aiDp})]을(를) 블록하여 격파했습니다!");
-                }
-                else
-                {
-                    DeleteDigimon(playerBlocker);
-                    if (myBlkDp == aiDp) DeleteOpponentDigimon(aiAttacker);
-                    Log($"🛡️ [내 블로커 희생 방어] 내 [{playerBlocker.TopCard.Name}]이(가) AI의 [{aiAttacker.TopCard.Name}] 공격을 대신 막고 소멸했습니다!");
-                }
+                State.PendingBlock = new PendingBlockDecision(aiAttacker, candidates, aiDp, aiChecks);
+                Log($"🛡️ AI [{aiAttacker.TopCard.Name}(DP {aiDp})]의 어택! 내 ≪블로커≫ {candidates.Count}체로 블록할 수 있습니다 — 블록 여부를 선택하세요.");
+                return;
+            }
+
+            ResolveAiAttack(aiAttacker, candidates.FirstOrDefault());
+            if (State.IsGameOver)
+            {
+                _aiTurn = null;
+                return;
+            }
+        }
+
+        FinishAiTurn(ctx);
+    }
+
+    /// <summary>
+    /// AI의 어택을 막을지 플레이어가 고른 결과 (blocker = null이면 블록하지 않음). 남은 AI 턴을 이어서 진행한다.
+    /// </summary>
+    public ActionResult ResolvePendingBlock(CardInstance? blocker)
+    {
+        var pending = State.PendingBlock;
+        if (pending == null || _aiTurn == null)
+            return ActionResult.Fail("지금은 블록을 선택할 차례가 아닙니다.");
+        if (blocker != null && (!pending.Candidates.Contains(blocker) || !EffectRules.CanBlock(State, blocker)))
+            return ActionResult.Fail($"[{blocker.TopCard.Name}]은(는) 이 어택을 블록할 수 없습니다.");
+
+        State.PendingBlock = null;
+        string attackerName = pending.Attacker.TopCard.Name;
+        Log(blocker != null
+            ? $"🛡️ 블록 선언: 내 [{blocker.TopCard.Name}]으로 AI [{attackerName}]의 어택을 막습니다."
+            : $"블록하지 않음: AI [{attackerName}]의 어택을 그대로 받습니다.");
+
+        ResolveAiAttack(pending.Attacker, blocker);
+        if (State.IsGameOver)
+        {
+            _aiTurn = null;
+            return ActionResult.Success(State.GameOverReason);
+        }
+
+        RunAiTurn();
+        if (State.PendingBlock != null)
+            return ActionResult.Success($"AI [{State.PendingBlock.Attacker.TopCard.Name}]이(가) 이어서 어택합니다 — 블록할지 선택하세요!");
+        if (State.IsGameOver)
+            return ActionResult.Success(State.GameOverReason);
+        return ActionResult.Success($"상대 턴이 끝났습니다. {State.CurrentTurn}턴 시작 (메모리 +{State.MemoryGauge})");
+    }
+
+    /// <summary>
+    /// 선언된 AI 어택 1회를 처리한다: 블록 배틀, 또는 시큐리티 체크 / 다이렉트 어택.
+    /// </summary>
+    private void ResolveAiAttack(CardInstance aiAttacker, CardInstance? playerBlocker)
+    {
+        var ctx = _aiTurn!;
+        if (!State.DummyOpponent.BattleArea.Contains(aiAttacker))
+            return;
+
+        RecalculateFieldBuffs();
+        int aiDp = aiAttacker.GetCurrentDP();
+        int aiChecks = aiAttacker.GetSecurityAttackCount();
+
+        if (playerBlocker != null)
+        {
+            playerBlocker.IsSuspended = true;
+            int myBlkDp = playerBlocker.GetCurrentDP();
+            var (aiDeleted, blkDeleted) = ResolveDigimonBattle(aiAttacker, playerBlocker);
+            string ai = aiAttacker.TopCard.Name, blk = playerBlocker.TopCard.Name;
+            if (aiDeleted && !blkDeleted)
+            {
+                Log($"🛡️ [내 블로커 방어 성공!] 내 [{blk}(DP {myBlkDp})]이(가) AI의 [{ai}(DP {aiDp})]을(를) 블록하여 격파했습니다!");
+                AddOpponentEvent(OpponentActionKind.Block, "내 블로커 방어 성공!", $"내 {blk} (DP {myBlkDp:N0})가 막고 {ai} 격파", aiAttacker.TopCard, playerBlocker.TopCard);
+            }
+            else if (blkDeleted && !aiDeleted)
+            {
+                Log($"🛡️ [내 블로커 희생 방어] 내 [{blk}]이(가) AI의 [{ai}] 공격을 대신 막고 소멸했습니다!");
+                AddOpponentEvent(OpponentActionKind.Block, "내 블로커가 대신 막음", $"내 {blk} 소멸 (시큐리티는 지켜짐)", aiAttacker.TopCard, playerBlocker.TopCard);
+            }
+            else
+            {
+                Log($"🛡️ [블록] 내 [{blk}]과(와) AI의 [{ai}]이(가) 함께 소멸했습니다!");
+                AddOpponentEvent(OpponentActionKind.Block, "블록 — 양쪽 소멸", $"내 {blk}와 {ai} 모두 소멸 (시큐리티는 지켜짐)", aiAttacker.TopCard, playerBlocker.TopCard);
+            }
+            return;
+        }
+
+        // 공식 룰 11-5-1-2-1: 시큐리티 체크를 할 수 없는 디지몬의 어택은 아무 일 없이 끝난다
+        if (aiChecks < 1)
+        {
+            Log($"🤖 AI [{aiAttacker.TopCard.Name}]은(는) 시큐리티 체크를 할 수 없어 어택이 아무 일 없이 끝났습니다.");
+            return;
+        }
+
+        // 플레이어 시큐리티가 0장이면 AI의 다이렉트 어택 -> 플레이어 패배!
+        if (State.Player.SecurityStack.Count == 0)
+        {
+            State.IsGameOver = true;
+            State.IsVictory = false;
+            State.GameOverReason = $"💀 AI의 [{aiAttacker.TopCard.Name}]에게 다이렉트 어택을 허용하여 패배했습니다! (블로커를 세우거나 먼저 시큐리티를 돌파하세요)";
+            Log(State.GameOverReason);
+            AddOpponentEvent(OpponentActionKind.DirectAttack, "다이렉트 어택!", $"{aiAttacker.TopCard.Name}의 공격 — 내 시큐리티 0장", aiAttacker.TopCard);
+            return;
+        }
+
+        // AI 디지몬의 시큐리티 어택 매수만큼 내 시큐리티를 공식 룰대로 오픈!
+        for (int c = 0; c < aiChecks; c++)
+        {
+            if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || State.Player.SecurityStack.Count == 0)
+                break;
+
+            RecalculateFieldBuffs();
+            aiDp = aiAttacker.GetCurrentDP();
+            var mySec = State.Player.SecurityStack[0];
+            State.Player.SecurityStack.RemoveAt(0);
+
+            // 1) 내 시큐리티에서 [시큐리티] 효과가 있는 [테이머]가 나온 경우 -> 코스트 지불 없이 내 테이머 존에 무료 등장!
+            if (mySec.Type == CardType.Tamer && EffectRules.HasSecurityEffect(mySec))
+            {
+                State.Player.Tamers.Add(mySec);
+                RecalculateFieldBuffs();
+                string tamerMsg = $"✨ [내 시큐리티 테이머 발동!] AI [{aiAttacker.TopCard.Name}]의 공격으로 오픈된 내 시큐리티 [{mySec.Name}]이(가) 코스트 없이 내 필드에 무료 등장했습니다! (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
+                State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: true, OutcomeSummary: "🎖️ 내 테이머 무료 등장!"));
+                Log(tamerMsg);
+                AddOpponentEvent(OpponentActionKind.SecurityResult, "내 시큐리티 오픈: 테이머", $"{mySec.Name} 무료 등장 · 남은 시큐리티 {State.Player.SecurityStack.Count}장", aiAttacker.TopCard, mySec);
                 continue;
             }
 
-            // 플레이어 시큐리티가 0장이면 AI의 다이렉트 어택 -> 플레이어 패배!
-            if (State.Player.SecurityStack.Count == 0)
+            // 2) 내 시큐리티에서 [옵션]이 나온 경우 -> 공식 룰: [시큐리티] 효과를 즉시 무료 발동 후 트래시행!
+            if (mySec.Type == CardType.Option)
             {
-                State.IsGameOver = true;
-                State.IsVictory = false;
-                State.GameOverReason = $"💀 AI의 [{aiAttacker.TopCard.Name}]에게 다이렉트 어택을 허용하여 패배했습니다! (블로커를 세우거나 먼저 시큐리티를 돌파하세요)";
-                Log(State.GameOverReason);
-                return 3;
+                State.Player.Trash.Add(mySec);
+                var outcome = ResolveSecurityOption(mySec, State.Player, aiAttacker);
+                if (outcome.OwnerMemoryGain > 0)
+                    ctx.Memory -= outcome.OwnerMemoryGain;
+                if (outcome.ReturnToHand && State.Player.Trash.Remove(mySec))
+                    State.Player.Hand.Add(mySec);
+                bool aiRemoved = outcome.AttackerRemoved || !State.DummyOpponent.BattleArea.Contains(aiAttacker);
+                State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: aiRemoved, OutcomeSummary: outcome.Summary));
+                Log(outcome.Log);
+                AddOpponentEvent(OpponentActionKind.SecurityResult, "내 시큐리티 오픈: 옵션 발동", $"{mySec.Name} — {outcome.Summary} · 남은 시큐리티 {State.Player.SecurityStack.Count}장", aiAttacker.TopCard, mySec);
+                if (aiRemoved)
+                    break;
+                continue;
             }
 
-            // AI 디지몬의 시큐리티 어택 매수만큼 내 시큐리티를 공식 룰대로 오픈!
-            for (int c = 0; c < aiChecks; c++)
+            // [시큐리티] 효과가 없는 디지몬 외 카드 → 배틀 없이 트래시 (공식 룰 13-1-8-4)
+            if (mySec.Type != CardType.Digimon)
             {
-                if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || State.Player.SecurityStack.Count == 0)
-                    break;
-
-                aiDp = aiAttacker.GetCurrentDP();
-                var mySec = State.Player.SecurityStack[0];
-                State.Player.SecurityStack.RemoveAt(0);
-
-                // 1) 내 시큐리티에서 [테이머]가 나온 경우 -> 공식 룰: 코스트 지불 없이 내 테이머 존에 무료 등장!
-                if (mySec.Type == CardType.Tamer)
-                {
-                    State.Player.Tamers.Add(mySec);
-                    RecalculateFieldBuffs();
-                    string tamerMsg = $"✨ [내 시큐리티 테이머 발동!] AI [{aiAttacker.TopCard.Name}]의 공격으로 오픈된 내 시큐리티 [{mySec.Name}]이(가) 코스트 없이 내 필드에 무료 등장했습니다! (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
-                    State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
-                        mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: true, OutcomeSummary: "🎖️ 내 테이머 무료 등장!"));
-                    Log(tamerMsg);
-                    continue;
-                }
-
-                // 2) 내 시큐리티에서 [옵션]이 나온 경우 -> 공식 룰: [시큐리티] 효과를 즉시 무료 발동 후 트래시행!
-                if (mySec.Type == CardType.Option)
-                {
-                    State.Player.Trash.Add(mySec);
-                    var (optLog, optSummary, aiRemoved) = ResolvePlayerSecurityOptionAgainstAi(mySec, aiAttacker, ref aiMemory);
-                    State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
-                        mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: aiRemoved, OutcomeSummary: optSummary));
-                    Log(optLog);
-                    if (aiRemoved)
-                        break;
-                    continue;
-                }
-
-                // 3) 내 시큐리티에서 [디지몬]이 나온 경우 -> 공식 룰: 시큐리티 DP 배틀 후 트래시행!
                 State.Player.Trash.Add(mySec);
-                if (mySec.DP >= aiDp)
-                {
-                    DeleteOpponentDigimon(aiAttacker);
-                    string winMsg = $"🛡️💥 [내 시큐리티 역격파!] AI [{aiAttacker.TopCard.Name}(DP {aiDp})]가 내 시큐리티 디지몬 [{mySec.Name}(DP {mySec.DP})]와 배틀하여 역으로 소멸했습니다! (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
-                    State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
-                        mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: true, OutcomeSummary: $"💥 AI [{aiAttacker.TopCard.Name}] 역격파!"));
-                    Log(winMsg);
-                    break;
-                }
-                else
-                {
-                    string loseMsg = $"🤖⚔️ AI [{aiAttacker.TopCard.Name}(DP {aiDp})]의 공격으로 내 시큐리티 [{mySec.Name}(DP {mySec.DP})]이(가) 파괴되었습니다! (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
-                    State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
-                        mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: false, OutcomeSummary: $"⚔️ 시큐리티 돌파됨 (내 DP {mySec.DP} < AI {aiDp})"));
-                    Log(loseMsg);
-                }
+                State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: false, OutcomeSummary: "[시큐리티] 효과 없음 → 트래시"));
+                Log($"내 시큐리티 [{mySec.Name}]이(가) 오픈되었지만 [시큐리티] 효과가 없어 그대로 트래시됩니다. (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)");
+                AddOpponentEvent(OpponentActionKind.SecurityResult, "내 시큐리티 오픈", $"{mySec.Name} — [시큐리티] 효과 없음 · 남은 시큐리티 {State.Player.SecurityStack.Count}장", aiAttacker.TopCard, mySec);
+                continue;
+            }
+
+            // 3) 내 시큐리티에서 [디지몬]이 나온 경우 -> 공식 룰: 시큐리티 DP 배틀 후 트래시행!
+            State.Player.Trash.Add(mySec);
+            int mySecDp = mySec.DP + SecurityDigimonDpBonus(State.Player, ownersTurn: false);
+            if (mySecDp >= aiDp && !HasJamming(aiAttacker))
+            {
+                DeleteOpponentDigimon(aiAttacker);
+                string winMsg = $"🛡️💥 [내 시큐리티 역격파!] AI [{aiAttacker.TopCard.Name}(DP {aiDp})]가 내 시큐리티 디지몬 [{mySec.Name}(DP {mySecDp})]와 배틀하여 역으로 소멸했습니다! (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
+                State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: true, OutcomeSummary: $"💥 AI [{aiAttacker.TopCard.Name}] 역격파!"));
+                Log(winMsg);
+                AddOpponentEvent(OpponentActionKind.SecurityResult, "내 시큐리티 역격파!", $"내 {mySec.Name} (DP {mySecDp:N0}) ≥ {aiAttacker.TopCard.Name} (DP {aiDp:N0}) · 남은 시큐리티 {State.Player.SecurityStack.Count}장", aiAttacker.TopCard, mySec);
+                break;
+            }
+            else
+            {
+                string why = mySecDp >= aiDp ? " (≪재밍≫으로 소멸하지 않음)" : string.Empty;
+                string loseMsg = $"🤖⚔️ AI [{aiAttacker.TopCard.Name}(DP {aiDp})]의 공격으로 내 시큐리티 [{mySec.Name}(DP {mySecDp})]이(가) 파괴되었습니다!{why} (내 남은 시큐리티: {State.Player.SecurityStack.Count}장)";
+                State.PlayerSecurityCheckHistory.Add(new SecurityCheckHistoryItem(
+                    mySec, aiAttacker.TopCard.Name, aiDp, IsBattleWon: false, OutcomeSummary: $"⚔️ 시큐리티 돌파됨 (내 DP {mySecDp} vs AI {aiDp}){why}"));
+                Log(loseMsg);
+                AddOpponentEvent(OpponentActionKind.SecurityResult, "내 시큐리티 파괴", $"내 {mySec.Name} (DP {mySecDp:N0}) vs {aiAttacker.TopCard.Name} (DP {aiDp:N0}){why} · 남은 시큐리티 {State.Player.SecurityStack.Count}장", aiAttacker.TopCard, mySec);
             }
         }
+    }
+
+    /// <summary>
+    /// AI 어택이 모두 끝난 뒤: 어택 후 메인 페이즈 → 턴 종료 처리 → 넘겨받은 메모리로 내 턴을 시작한다.
+    /// </summary>
+    private void FinishAiTurn(AiTurnContext ctx)
+    {
+        _aiTurn = null;
+        int aiMemory = ctx.Memory;
+        int aiEndOfTurnMemoryLoss = ctx.EndOfTurnMemoryLoss;
 
         // 3-C. [어택 후 메인 페이즈] AI가 남은 메모리를 사용하여 진화/등장 (메모리가 마이너스(-)로 넘어가면 그 절대값이 플레이어의 다음 턴 메모리가 됨!)
         bool acted = true;
@@ -1335,10 +1358,10 @@ public class GoldfishEngine
             acted = false;
 
             // 1) 진화 가능한 카드가 있으면 진화 (코스트를 지불하여 aiMemory가 음수로 내려갈 수 있음)
-            foreach (var fieldDigimon in State.DummyOpponent.BattleArea.ToList())
+            foreach (var fieldDigimon in AiEvolutionBases())
             {
                 var evoCandidate = State.DummyOpponent.Hand
-                    .FirstOrDefault(c => c.Type == CardType.Digimon && c.EvoRequirementLevel == fieldDigimon.TopCard.Level);
+                    .FirstOrDefault(c => c.EvoCost <= aiMemory + MaxAiMemoryHandOver && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
 
                 if (evoCandidate != null)
                 {
@@ -1353,6 +1376,7 @@ public class GoldfishEngine
                         State.DummyOpponent.MainDeck.RemoveAt(0);
                     }
                     Log($"🤖 [AI 진화] [{prev}] -> [{evoCandidate.Name}(Lv.{evoCandidate.Level}, 코스트 {evoCandidate.EvoCost})] (AI 메모리: +{beforeMem} → {aiMemory})");
+                    AddOpponentEvent(OpponentActionKind.Evolve, "진화", $"{prev} → {evoCandidate.Name} (Lv.{evoCandidate.Level}) · 메모리 {beforeMem} → {aiMemory}", evoCandidate);
                     acted = true;
                     break;
                 }
@@ -1369,18 +1393,19 @@ public class GoldfishEngine
                 State.DummyOpponent.Tamers.Add(tamerCandidate);
                 aiMemory -= tamerCandidate.PlayCost;
                 Log($"🤖 [AI 테이머 등장] [{tamerCandidate.Name}(코스트 {tamerCandidate.PlayCost})] 배치! (AI 메모리: +{beforeMem} → {aiMemory})");
+                AddOpponentEvent(OpponentActionKind.Tamer, "테이머 등장", $"{tamerCandidate.Name} · 메모리 {beforeMem} → {aiMemory}", tamerCandidate);
                 acted = true;
                 if (aiMemory < 0) break;
             }
 
             // 3) 패에서 디지몬 등장 (메모리가 0 미만이 되어 플레이어에게 1~6 메모리가 넘어가도록 코스트 지불!)
             var playCandidate = State.DummyOpponent.Hand
-                .Where(c => c.Type == CardType.Digimon && c.PlayCost <= aiMemory + 5)
+                .Where(c => c.Type == CardType.Digimon && c.PlayCost <= aiMemory + MaxAiMemoryHandOver)
                 .OrderByDescending(c => c.Level <= 4 ? c.PlayCost : 0)
                 .ThenBy(c => c.PlayCost)
                 .FirstOrDefault();
 
-            if (playCandidate != null && State.DummyOpponent.BattleArea.Count < 5)
+            if (playCandidate != null)
             {
                 State.DummyOpponent.Hand.Remove(playCandidate);
                 int beforeMem = aiMemory;
@@ -1388,6 +1413,7 @@ public class GoldfishEngine
                 State.DummyOpponent.BattleArea.Add(summoned);
                 aiMemory -= playCandidate.PlayCost;
                 Log($"🤖 [AI 등장] [{playCandidate.Name}(Lv.{playCandidate.Level}, 코스트 {playCandidate.PlayCost})] 소환! (AI 메모리: +{beforeMem} → {aiMemory})");
+                AddOpponentEvent(OpponentActionKind.Play, "등장", $"{playCandidate.Name} (Lv.{playCandidate.Level}) · 메모리 {beforeMem} → {aiMemory}", playCandidate);
                 acted = true;
             }
         }
@@ -1403,116 +1429,69 @@ public class GoldfishEngine
             Log($"🤖 [AI 턴 종료] AI 메모리가 {aiMemory}(0 미만)이 되어 내 턴(시작 메모리 +{Math.Abs(aiMemory)})으로 넘어옵니다!");
         }
 
-        return Math.Abs(aiMemory);
-    }
-
-    private (string LogMessage, string ShortSummary, bool AiAttackerRemoved) ResolvePlayerSecurityOptionAgainstAi(
-        CardData myOption,
-        CardInstance aiAttacker,
-        ref int aiMemory)
-    {
-        switch (myOption.CardId)
+        // [이 턴 종료 시] 메모리 -3 (AI의 메탈그레이몬 BT1-021 등)
+        if (aiEndOfTurnMemoryLoss > 0)
         {
-            case "ST1-16": // 가이아 포스: AI 공격 디지몬 즉시 소멸!
-                DeleteOpponentDigimon(aiAttacker);
-                return (
-                    $"🔥 [내 시큐리티 가이아 포스 발동!] 내 시큐리티에서 [가이아 포스]가 오픈되어 공격해 온 AI의 [{aiAttacker.TopCard.Name}]을(를) 즉시 소멸시켰습니다!",
-                    $"🔥 [시큐리티 가이아 포스] AI [{aiAttacker.TopCard.Name}] 소멸!",
-                    true);
-
-            case "ST2-16": // 코큐토스 브레스: AI 공격 디지몬 패로 바운스!
-                if (State.DummyOpponent.BattleArea.Remove(aiAttacker))
-                {
-                    while (aiAttacker.EvolutionSources.Count > 0)
-                        State.DummyOpponent.Trash.Add(aiAttacker.EvolutionSources.Pop());
-                    State.DummyOpponent.Hand.Add(aiAttacker.TopCard);
-                }
-                return (
-                    $"🌊 [내 시큐리티 코큐토스 브레스 발동!] 내 시큐리티에서 [코큐토스 브레스]가 오픈되어 공격해 온 AI의 [{aiAttacker.TopCard.Name}]을(를) 패로 되돌렸습니다!",
-                    $"🌊 [시큐리티 코큐토스 브레스] AI [{aiAttacker.TopCard.Name}] 바운스!",
-                    true);
-
-            case "ST1-15": // 기가 디스트로이어: DP 4000 이하 AI 디지몬 최대 2체 소멸
-            {
-                var targets = State.DummyOpponent.BattleArea.Where(d => d.GetCurrentDP() <= 4000).Take(2).ToList();
-                bool removedAttacker = false;
-                foreach (var t in targets)
-                {
-                    if (ReferenceEquals(t, aiAttacker)) removedAttacker = true;
-                    DeleteOpponentDigimon(t);
-                }
-                return (
-                    $"🔥 [내 시큐리티 기가 디스트로이어 발동!] AI 필드의 DP 4000 이하 디지몬 {targets.Count}체를 소멸시켰습니다!",
-                    $"🔥 [시큐리티 기가 디스트로이어] AI {targets.Count}체 소멸!",
-                    removedAttacker);
-            }
-
-            case "ST2-13": // 해머 스파크: [시큐리티] 메모리를 +2 얻는다 (AI 메모리 -2 차감 -> 내 다음 턴 시작 메모리 증가!)
-                aiMemory -= 2;
-                return (
-                    $"⚡ [내 시큐리티 해머 스파크 발동!] 내가 메모리를 +2 얻어 AI의 남은 메모리를 2 빼앗았습니다! (AI 현재 메모리: {aiMemory})",
-                    "⚡ [시큐리티 해머 스파크] 메모리 +2 확보!",
-                    false);
-
-            case "ST2-14": // 소로우 블루: AI 디지몬 1체 레스트
-            {
-                var activeAi = State.DummyOpponent.BattleArea.FirstOrDefault(d => !d.IsSuspended);
-                if (activeAi != null) activeAi.IsSuspended = true;
-                return (
-                    $"❄️ [내 시큐리티 소로우 블루 발동!] {(activeAi != null ? $"AI의 [{activeAi.TopCard.Name}]을(를) 강제 레스트시켜 추가 공격을 봉쇄했습니다!" : "레스트할 추가 AI 디지몬이 없습니다.")}",
-                    "❄️ [시큐리티 소로우 블루] AI 디지몬 레스트!",
-                    false);
-            }
-
-            case "ST1-13": // 섀도우 윙
-            case "ST1-14": // 스타라이트 익스플로전
-            {
-                int dpBuff = myOption.CardId == "ST1-14" ? 7000 : 3000;
-                foreach (var ally in State.Player.BattleArea)
-                {
-                    ally.TemporaryDpBonus += dpBuff;
-                }
-                return (
-                    $"✨ [내 시큐리티 {myOption.Name} 발동!] 내 필드의 모든 디지몬 DP가 +{dpBuff:N0} 증가했습니다!",
-                    $"✨ [시큐리티 {myOption.Name}] 아군 전체 DP +{dpBuff:N0}!",
-                    false);
-            }
-
-            case "ST2-15": // 카이저 네일: 내 디지몬 진화원 1장 무료 등장
-            {
-                var allyWithSrc = State.Player.BattleArea.FirstOrDefault(d => d.EvolutionSources.Any(s => s.Type == CardType.Digimon));
-                if (allyWithSrc != null)
-                {
-                    var temp = new Stack<CardData>();
-                    CardData? extracted = null;
-                    while (allyWithSrc.EvolutionSources.Count > 0)
-                    {
-                        var top = allyWithSrc.EvolutionSources.Pop();
-                        if (extracted == null && top.Type == CardType.Digimon) extracted = top;
-                        else temp.Push(top);
-                    }
-                    while (temp.Count > 0) allyWithSrc.EvolutionSources.Push(temp.Pop());
-                    if (extracted != null)
-                    {
-                        State.Player.BattleArea.Add(new CardInstance(extracted, State.CurrentTurn));
-                        RecalculateFieldBuffs();
-                        return (
-                            $"❄️ [내 시큐리티 카이저 네일 발동!] 내 진화원에서 [{extracted.Name}]이(가) 코스트 없이 배틀 에어리어에 등장했습니다!",
-                            $"❄️ [시큐리티 카이저 네일] [{extracted.Name}] 무료 등장!",
-                            false);
-                    }
-                }
-                return (
-                    "❄️ [내 시큐리티 카이저 네일] 꺼낼 진화원이 없어 트래시로 이동합니다.",
-                    "❄️ [시큐리티 카이저 네일] 불발",
-                    false);
-            }
-
-            default:
-                return (
-                    $"✨ [내 시큐리티 [{myOption.Name}] 발동!] 시큐리티 효과 처리 후 트래시로 이동합니다.",
-                    $"✨ [시큐리티 {myOption.Name}] 발동",
-                    false);
+            aiMemory -= aiEndOfTurnMemoryLoss;
+            Log($"🤖 [이 턴 종료 시] AI 메모리 -{aiEndOfTurnMemoryLoss} → 내 시작 메모리 +{Math.Abs(aiMemory)}");
         }
+        aiMemory = Math.Max(aiMemory, -10);
+
+        // [상대의 턴 종료 시] 토이아구몬 · 그레이몬(흑) 진화원: 이 턴에 상대가 한 번도 어택하지 않았다면 ≪1 드로우≫
+        if (!State.OpponentAttackedThisTurn)
+        {
+            foreach (var mine in State.Player.BattleArea)
+            {
+                foreach (var id in new[] { "ST5-04", "ST5-06" })
+                {
+                    if (!mine.HasSource(id)) continue;
+                    var drawn = DrawCard();
+                    if (drawn == null) continue;
+                    Log($"[진화원 효과] 상대가 어택하지 않아 ≪1 드로우≫: [{drawn.Name}]");
+                    AddOpponentEvent(OpponentActionKind.TurnEnd, "내 진화원 효과", $"상대가 어택하지 않아 1장 드로우 ({mine.TopCard.Name})");
+                }
+            }
+        }
+
+        AddOpponentEvent(OpponentActionKind.TurnEnd, "상대 턴 종료", $"내 턴 시작 · 메모리 +{Math.Abs(aiMemory)}");
+
+        if (ctx.IsOpeningTurn)
+            StartFirstPlayerTurnAfterOpponent(Math.Abs(aiMemory));
+        else
+            StartNextPlayerTurn(Math.Abs(aiMemory));
     }
+
+    /// <summary>
+    /// [자신의 턴 개시 시] 테이머 효과로 메모리를 보정한다 (플레이어 · AI 공통, 공식 카드 텍스트 기준).
+    /// 매튜(ST2-12): 진화원을 갖지 않은 상대의 디지몬이 있을 때 메모리 +1 (장마다)
+    /// </summary>
+    private static (int Memory, string? Note) ApplyStartOfTurnTamerMemory(int handedOver, IReadOnlyCollection<CardData> tamers, PlayerZones enemy)
+    {
+        int memory = handedOver;
+        var notes = new List<string>();
+
+        int mattCount = tamers.Count(t => t.CardId == "ST2-12");
+        if (mattCount > 0 && enemy.BattleArea.Any(d => d.EvolutionSources.Count == 0))
+        {
+            memory += mattCount;
+            notes.Add($"매튜 효과 +{mattCount} (진화원 없는 상대 디지몬 있음)" + (mattCount > 1 ? $" (매튜 {mattCount}장)" : ""));
+        }
+
+        return (memory, notes.Count > 0 ? string.Join(", ", notes) : null);
+    }
+
+    /// <summary>AI가 턴을 넘기며 상대(플레이어)에게 넘겨줄 수 있는 메모리 상한 — 비싼 카드를 무리하게 내서 큰 메모리를 넘기지 않는다</summary>
+    private const int MaxAiMemoryHandOver = 3;
+
+    /// <summary>AI가 진화시킬 수 있는 디지몬: 배틀 에어리어 + 육성 에어리어 (육성 중인 Lv.2 → Lv.3 진화 포함)</summary>
+    private List<CardInstance> AiEvolutionBases()
+    {
+        var bases = State.DummyOpponent.BattleArea.ToList();
+        if (State.DummyOpponent.BreedingArea != null)
+            bases.Add(State.DummyOpponent.BreedingArea);
+        return bases;
+    }
+
+    private void AddOpponentEvent(OpponentActionKind kind, string title, string detail, CardData? card = null, CardData? subCard = null) =>
+        State.OpponentTurnEvents.Add(new OpponentActionEvent(kind, title, detail, card, subCard));
 }

@@ -25,7 +25,8 @@ public enum Phase
     Draw,
     Breeding,
     Main,
-    TurnEnd
+    TurnEnd,
+    Setup      // 게임 준비 (손패 5장 → 멀리건 → 시큐리티 5장 전, 공식 룰 5-2)
 }
 
 public enum PracticeStage

@@ -29,9 +29,8 @@ public static class ActionValidator
         if (card.Type == CardType.Digitama)
             return ActionResult.Fail("디지타마 카드는 패에서 등장시킬 수 없으며 육성 페이즈에 부화해야 합니다.");
 
-        int projectedMemory = state.MemoryGauge - card.PlayCost;
-        if (projectedMemory < -10)
-            return ActionResult.Fail($"메모리가 -10 미만이 되는 코스트({card.PlayCost})는 지불할 수 없습니다.");
+        // 공식 룰: 10을 넘는 코스트도 지불할 수 있다 (메모리는 상대 쪽 10에서 멈춘다)
+        int projectedMemory = Math.Max(state.MemoryGauge - card.PlayCost, -10);
 
         string guide = $"[{card.Name}] 등장 코스트 {card.PlayCost}를 사용합니다.";
 
@@ -57,8 +56,8 @@ public static class ActionValidator
 
         bool colorMatches = target.TopCard.Color == evoCard.EvoRequirementColor
             || (evoCard.Color == CardColor.White && evoCard.Level == 7 && (
-                (evoCard.CardId is "BT1-084" or "BT3-112" && target.TopCard.Color is CardColor.Red or CardColor.Blue or CardColor.Black) ||
-                (evoCard.CardId == "BT5-086" && target.TopCard.Color is CardColor.Black or CardColor.Purple or CardColor.Blue)));
+                (evoCard.CardId is "BT1-084" or "BT5-086" && target.TopCard.Color is CardColor.Red or CardColor.Blue) ||   // 오메가몬: Lv.6 레드 · 블루에서
+                (evoCard.CardId == "BT3-112" && target.TopCard.Color is CardColor.Red or CardColor.Black)));
 
         if (!colorMatches)
             return ActionResult.Fail($"색상이 일치하지 않습니다. ({evoCard.EvoRequirementColor} 필요)");
@@ -76,13 +75,14 @@ public static class ActionValidator
         if (state.CurrentPhase != Phase.Main)
             return ActionResult.Fail("메인 페이즈에만 진화할 수 있습니다.");
 
+        if (target != null && !state.Player.BattleArea.Contains(target) && !ReferenceEquals(state.Player.BreedingArea, target))
+            return ActionResult.Fail("필드에 없는 디지몬은 진화시킬 수 없습니다.");
+
         var baseCheck = ValidateEvolution(target, evoCard);
         if (!baseCheck.CanExecute)
             return baseCheck;
 
-        int projectedMemory = state.MemoryGauge - evoCard.EvoCost;
-        if (projectedMemory < -10)
-            return ActionResult.Fail($"메모리가 -10 미만이 되는 진화 코스트({evoCard.EvoCost})는 지불할 수 없습니다.");
+        int projectedMemory = Math.Max(state.MemoryGauge - evoCard.EvoCost, -10);
 
         string guide = baseCheck.GuideMessage;
         if (projectedMemory < 0)
@@ -112,13 +112,16 @@ public static class ActionValidator
         if (attacker.TurnPlayed == state.CurrentTurn)
             return ActionResult.Fail("이번 턴에 등장한 디지몬은 소환 멀미로 인해 공격할 수 없습니다. (진화한 경우에도 등장 턴에는 공격 불가)");
 
+        if (EffectRules.IsAttackLocked(state, attacker))
+            return ActionResult.Fail("이 디지몬은 카드 효과로 지금은 어택할 수 없습니다.");
+
         if (defenderTarget != null && !defenderTarget.IsSuspended)
             return ActionResult.Fail("상대의 스탠드(Active) 상태 디지몬은 공격할 수 없습니다.");
 
         string guide;
         if (defenderTarget == null)
         {
-            var activeBlocker = state.DummyOpponent.BattleArea.Find(d => d.TopCard.IsBlocker && !d.IsSuspended);
+            var activeBlocker = EffectRules.FindBlocker(state, state.DummyOpponent.BattleArea, attacker);
             if (activeBlocker != null)
             {
                 int myDp = attacker.GetCurrentDP();
@@ -127,19 +130,30 @@ public static class ActionValidator
                     ? $"✅ 블로커 격파 가능! (내 DP {myDp} > 블로커 DP {blkDp})"
                     : $"⚠️ 주의: 블로커에게 막혀 내 디지몬이 소멸합니다! (내 DP {myDp} <= 블로커 DP {blkDp})";
 
-                guide = $"🛡️ 상대 필드에 액티브 ≪블로커≫ [{activeBlocker.TopCard.Name}(DP {blkDp})]가 있어 시큐리티 공격을 가로채 방어합니다! — {blkOutcome}";
+                guide = state.CurrentStage == PracticeStage.Stage3_AiBattle
+                    ? $"🛡️ 상대 필드에 블록할 수 있는 ≪블로커≫ [{activeBlocker.TopCard.Name}(DP {blkDp})]가 있습니다. 상대가 블록하면 — {blkOutcome}"
+                    : $"🛡️ 상대 필드에 액티브 ≪블로커≫ [{activeBlocker.TopCard.Name}(DP {blkDp})]가 있어 시큐리티 공격을 가로채 방어합니다! — {blkOutcome}";
             }
             else if (state.DummyOpponent.SecurityStack.Count > 0)
             {
                 var nextSec = state.DummyOpponent.SecurityStack[0];
                 int myDp = attacker.GetCurrentDP();
                 int checks = attacker.GetSecurityAttackCount();
-                int cleared = state.DummyOpponent.Trash.Count;
-                string outcome = myDp > nextSec.DP
-                    ? $"✅ 격파 가능! (내 DP {myDp} > 시큐리티 DP {nextSec.DP})"
-                    : $"⚠️ 주의: 내 디지몬 소멸 위험! (내 DP {myDp} <= 시큐리티 DP {nextSec.DP})";
+                int cleared = state.SecurityCheckHistory.Count;
 
-                guide = $"시큐리티 #{cleared + 1} [{nextSec.Name}(Lv.{nextSec.Level}, DP {nextSec.DP})] 공격! (체크 매수: {checks}장) — {outcome}";
+                if (state.CurrentStage == PracticeStage.Stage3_AiBattle)
+                {
+                    // 공식 룰: 상대 시큐리티는 뒷면(비공개)이므로 체크해서 오픈하기 전에는 카드 정보를 알려 주지 않는다
+                    guide = $"시큐리티 #{cleared + 1} 공격! (내 DP {myDp:N0} · 체크 매수: {checks}장 · 상대 남은 시큐리티 {state.DummyOpponent.SecurityStack.Count}장)";
+                }
+                else
+                {
+                    string outcome = myDp > nextSec.DP
+                        ? $"✅ 격파 가능! (내 DP {myDp} > 시큐리티 DP {nextSec.DP})"
+                        : $"⚠️ 주의: 내 디지몬 소멸 위험! (내 DP {myDp} <= 시큐리티 DP {nextSec.DP})";
+
+                    guide = $"시큐리티 #{cleared + 1} [{nextSec.Name}(Lv.{nextSec.Level}, DP {nextSec.DP})] 공격! (체크 매수: {checks}장) — {outcome}";
+                }
             }
             else
             {
