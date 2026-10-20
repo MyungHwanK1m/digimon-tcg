@@ -26,3 +26,6 @@ src/DigimonSurvivors/Assets/**/*.png
 src/DigimonSurvivors/Assets/**/*.jpg
 src/DigimonSurvivors/Assets/**/*.gif
 !src/DigimonSurvivors/Assets/app_icon.png
+
+## 앱이 저장하는 개인 덱 데이터 (로컬 전용)
+data/saved_decks.json
