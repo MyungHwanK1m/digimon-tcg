@@ -1043,8 +1043,7 @@ public partial class GoldfishEngine
         foreach (var ability in GetMainAbilities(State.DummyOpponent).ToList())
         {
             if (State.IsGameOver || (_aiTurn?.Memory ?? 0) < 0) break;
-            string text = ability.Card.EffectText;
-            if (AiEvaluator.EstimateSentenceValue(text) <= 0) continue;
+            if (!AiPolicy.ShouldUseMainAbility(this, ability, _aiTurn?.Memory ?? 0)) continue;
             AddEffectEvent(ability.Card, CaptureEffectLogs(() => UseMainAbility(State.DummyOpponent, ability.Digimon, ability.Card)));
         }
     }

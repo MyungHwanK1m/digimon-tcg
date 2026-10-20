@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DigimonTcg.Core.Data;
+using DigimonTcg.Core.Engine.Ai;
 using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
@@ -30,9 +31,16 @@ public partial class GoldfishEngine
         public readonly Queue<CardInstance> Attackers = new();
         public CardInstance? AttackTarget;    // 지금 어택의 대상 (≪돌진≫으로 바꾼 내 디지몬, 없으면 시큐리티)
         public CardInstance? BlitzAttacker;   // ≪진격≫으로 메모리가 상대 쪽이어도 어택할 수 있는 AI 디지몬
+        public int AttacksDeclared;           // 이번 턴에 정책에서 받은 어택 수 (무한 반복 방지)
     }
 
     private AiTurnContext? _aiTurn;
+
+    /// <summary>AI 턴의 결정 정책 (진화 · 옵션 · 어택 · 등장 · [메인] 기동) — 결정만 돌려주고 처리는 엔진이 한다</summary>
+    public IAiPolicy AiPolicy { get; set; } = new LegacyAiPolicy();
+
+    /// <summary>AI가 한 턴에 선언할 수 있는 어택 수 상한 (액티브로 돌아오는 효과의 무한 반복 방지)</summary>
+    private const int MaxAiAttacksPerTurn = 20;
 
     public GoldfishEngine(GameState state)
     {
@@ -1143,35 +1151,16 @@ public partial class GoldfishEngine
         AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },
             CaptureEffectLogs(() => TriggerStartOfMainPhase(State.DummyOpponent)));
 
-        // 3-A. [어택 전 메인 페이즈] 메모리가 0 이상으로 유지되는 선에서 먼저 진화 (진화 직후 바로 어택 가능!)
-        bool preAttackEvolved = true;
-        while (ctx.Memory >= 0 && preAttackEvolved && !State.IsGameOver)
+        // 3-A. [어택 전 메인 페이즈] 정책이 고른 옵션 · 진화 (메모리를 상대 쪽으로 넘기지 않는 것 — 진화 직후 바로 어택 가능!)
+        while (ctx.Memory >= 0 && !State.IsGameOver)
         {
-            preAttackEvolved = false;
-            foreach (var fieldDigimon in AiEvolutionBases())
-            {
-                var safeEvo = State.DummyOpponent.Hand
-                    .FirstOrDefault(c => ActionValidator.EvolutionCost(fieldDigimon, c) <= ctx.Memory && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
-
-                if (safeEvo != null)
-                {
-                    AiEvolve(ctx, fieldDigimon, safeEvo);
-                    preAttackEvolved = true;
-                    break;
-                }
-            }
+            if (AiPolicy.ChooseOption(this, ctx.Memory, beforeAttacks: true) is { } option) { AiUseOption(ctx, option); continue; }
+            if (AiPolicy.ChooseEvolution(this, ctx.Memory, beforeAttacks: true) is { } evo) { AiEvolve(ctx, evo.Base, evo.Card); continue; }
+            break;
         }
 
         // 3-B. [AI 어택 선언] 공식 룰상 메모리가 0 이상일 때만 공격할 수 있습니다!
-        //      선공 첫 턴은 공격하지 않는다 (실제 게임은 첫 턴에 필드 디지몬이 없으므로 공격이 불가능)
-        if (!isOpeningTurn)
-        {
-            foreach (var d in State.DummyOpponent.BattleArea
-                         .Where(d => CanAttackThisTurn(d) && (!d.HasBlocker || State.DummyOpponent.BattleArea.Count >= 2))
-                         .OrderByDescending(d => d.GetCurrentDP()))
-                ctx.Attackers.Enqueue(d);
-        }
-
+        //      어택은 RunAiTurn이 하나씩 정책에 묻는다 (어택 결과로 필드가 바뀌므로). 선공 첫 턴은 공격하지 않는다
         RunAiTurn();
     }
 
@@ -1185,8 +1174,25 @@ public partial class GoldfishEngine
         if (ctx == null)
             return;
 
-        while (ctx.Attackers.Count > 0)
+        while (true)
         {
+            // 다음 어택은 정책에 묻는다 — 받은 대상(내 레스트 디지몬)이 어택 대상의 처음 값 (≪돌진≫ 등 키워드가 바꿀 수 있다)
+            if (ctx.Attackers.Count == 0)
+            {
+                if (ctx.IsOpeningTurn || State.IsGameOver || ctx.AttacksDeclared >= MaxAiAttacksPerTurn
+                    || AiPolicy.ChooseNextAttack(this, ctx.Memory) is not { } next)
+                    break;
+                if (ctx.Memory < 0)
+                {
+                    // 어택 도중 효과로 AI 메모리가 0 미만이 되면 남은 어택 없이 AI 턴의 메인 페이즈도 끝난다
+                    Log($"⚡ AI 메모리가 {ctx.Memory}(0 미만)이 되어 AI의 추가 공격 및 메인 페이즈가 즉시 종료됩니다!");
+                    break;
+                }
+                ctx.AttacksDeclared++;
+                ctx.Attackers.Enqueue(next.Attacker);
+                ctx.AttackTarget = next.Target != null && State.Player.BattleArea.Contains(next.Target) ? next.Target : null;
+            }
+
             // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료! (≪진격≫ 어택은 예외)
             if (ctx.Memory < 0 && !ReferenceEquals(ctx.Attackers.Peek(), ctx.BlitzAttacker))
             {
@@ -1496,25 +1502,26 @@ public partial class GoldfishEngine
         {
             acted = false;
 
-            // 1) 진화 가능한 카드가 있으면 진화 (코스트를 지불하여 AI 메모리가 음수로 내려갈 수 있음)
-            foreach (var fieldDigimon in AiEvolutionBases())
+            // 1) 옵션 (정책)
+            if (AiPolicy.ChooseOption(this, ctx.Memory, beforeAttacks: false) is { } option)
             {
-                var evoCandidate = State.DummyOpponent.Hand
-                    .FirstOrDefault(c => ActionValidator.EvolutionCost(fieldDigimon, c) <= ctx.Memory + MaxAiMemoryHandOver && ActionValidator.ValidateEvolution(fieldDigimon, c).CanExecute);
+                AiUseOption(ctx, option);
+                acted = true;
+                continue;
+            }
 
-                if (evoCandidate != null)
-                {
-                    AiEvolve(ctx, fieldDigimon, evoCandidate);
-                    acted = true;
-                    break;
-                }
+            // 2) 진화 (코스트를 지불하여 AI 메모리가 음수로 내려갈 수 있음 — 상한은 정책의 MaxMemoryHandOver)
+            if (AiPolicy.ChooseEvolution(this, ctx.Memory, beforeAttacks: false) is { } evo)
+            {
+                AiEvolve(ctx, evo.Base, evo.Card);
+                acted = true;
             }
 
             if (ctx.Memory < 0) break;
 
-            // 2) 테이머가 패에 있고 필드에 테이머가 없으면 테이머 등장
-            var tamerCandidate = State.DummyOpponent.Hand.FirstOrDefault(c => c.Type == CardType.Tamer);
-            if (tamerCandidate != null && State.DummyOpponent.Tamers.Count < 2)
+            // 3) 테이머 등장
+            var tamerCandidate = AiPolicy.ChooseTamerToPlay(this, ctx.Memory);
+            if (tamerCandidate != null && State.DummyOpponent.Hand.Contains(tamerCandidate))
             {
                 State.DummyOpponent.Hand.Remove(tamerCandidate);
                 int beforeMem = ctx.Memory;
@@ -1532,14 +1539,9 @@ public partial class GoldfishEngine
                 if (ctx.Memory < 0) break;
             }
 
-            // 3) 패에서 디지몬 등장 (메모리가 0 미만이 되어 플레이어에게 1~6 메모리가 넘어가도록 코스트 지불!)
-            var playCandidate = State.DummyOpponent.Hand
-                .Where(c => c.Type == CardType.Digimon && CardScripts.EffectivePlayCost(State.DummyOpponent, c) <= ctx.Memory + MaxAiMemoryHandOver)
-                .OrderByDescending(c => c.Level <= 4 ? c.PlayCost : 0)
-                .ThenBy(c => c.PlayCost)
-                .FirstOrDefault();
-
-            if (playCandidate != null)
+            // 4) 패에서 디지몬 등장 (메모리가 0 미만이 되어 플레이어에게 메모리가 넘어가도록 코스트 지불!)
+            var playCandidate = AiPolicy.ChooseDigimonToPlay(this, ctx.Memory);
+            if (playCandidate != null && State.DummyOpponent.Hand.Contains(playCandidate))
             {
                 AiPlayDigimon(ctx, playCandidate);
                 acted = true;
@@ -1655,8 +1657,23 @@ public partial class GoldfishEngine
             AddOpponentEvent(OpponentActionKind.Effect, $"{card.Name} 효과", string.Join("\n", effectLogs), card);
     }
 
-    /// <summary>AI가 턴을 넘기며 상대(플레이어)에게 넘겨줄 수 있는 메모리 상한 — 비싼 카드를 무리하게 내서 큰 메모리를 넘기지 않는다</summary>
-    private const int MaxAiMemoryHandOver = 3;
+    /// <summary>
+    /// AI 옵션 사용: 플레이어의 PlayCard 옵션 처리와 같게 — 패에서 빼고 코스트 지불 → [메인] 효과(target = 정책이 고른 대상, null이면 AI 평가 순) → 트래시.
+    /// (턴을 넘기며 상대에게 넘겨줄 메모리 상한은 AiPolicy.MaxMemoryHandOver)
+    /// </summary>
+    private void AiUseOption(AiTurnContext ctx, AiOptionUse use)
+    {
+        var opp = State.DummyOpponent;
+        if (!opp.Hand.Remove(use.Card))
+            return;
+        int beforeMem = ctx.Memory;
+        ctx.Memory -= CardScripts.EffectivePlayCost(opp, use.Card);
+        Log($"🤖 [AI 옵션 사용] [{use.Card.Name}(코스트 {use.Card.PlayCost})] (AI 메모리: +{beforeMem} → {ctx.Memory})");
+        AddOpponentEvent(OpponentActionKind.Play, "옵션 사용", $"{use.Card.Name} · 메모리 {beforeMem} → {ctx.Memory}", use.Card);
+        var target = use.Target != null && (State.Player.BattleArea.Contains(use.Target) || opp.BattleArea.Contains(use.Target)) ? use.Target : null;
+        AddEffectEvent(use.Card, CaptureEffectLogs(() => ApplyOptionEffect(opp, use.Card, target)));
+        opp.Trash.Add(use.Card);
+    }
 
     /// <summary>AI가 진화시킬 수 있는 디지몬: 배틀 에어리어 + 육성 에어리어 (육성 중인 Lv.2 → Lv.3 진화 포함)</summary>
     private List<CardInstance> AiEvolutionBases()

@@ -68,7 +68,7 @@ public static class KoreanEffectRenderer
             return $"자신의 {spWho}{J(spWho, "은", "는")} 패의 이 카드로, 진화 조건을 무시하고 진화 코스트 {sp.Groups["n"].Value}로 진화할 수 있다.";
         if (Regex.Match(clause, @"^When (?:this card would be played|you would play this card(?: from your hand)?|you would use this card), (?:if (?<cond>[^,]+), )?reduce (?:the|its) (?:play |use |memory )?cost by (?<n>\d+)\.?$", RegexOptions.IgnoreCase) is { Success: true } red)
         {
-            string head = red.Groups["cond"].Success ? CondKo(red.Groups["cond"].Value)?.If : "";
+            string? head = red.Groups["cond"].Success ? CondKo(red.Groups["cond"].Value)?.If : "";
             if (head == null) return null;
             return $"이 카드를 등장시키거나 사용할 때, {(head.Length > 0 ? head + " " : "")}지불하는 코스트를 -{red.Groups["n"].Value} 한다.";
         }
