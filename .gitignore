@@ -19,3 +19,9 @@ data/images/
 ## 한글 카드 이미지 원본 (용량 큼 · 저작권 - 로컬에서만 사용)
 data/tmp/
 data/images_ko/
+
+## 디지몬 서바이버즈 이미지 에셋 (용량 큼 · 로컬에서만 사용)
+## 앱 아이콘은 빌드(ApplicationIcon)에 필요하므로 계속 추적한다
+src/DigimonSurvivors/Assets/**/*.png
+src/DigimonSurvivors/Assets/**/*.jpg
+!src/DigimonSurvivors/Assets/app_icon.png
