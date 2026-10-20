@@ -568,10 +568,11 @@
 
                                     <TextBlock Text="EFFECT" Style="{StaticResource Duel.ZoneLabel}" Margin="0,0,6,0"/>
                                     <ComboBox x:Name="CmbFilterImpl" Width="110" Margin="0,0,14,0" SelectionChanged="FilterChanged" SelectedIndex="0"
-                                              ToolTip="효과 구현 카드 = 대전에서 효과까지 동작 / 미구현 = DP · 코스트 · 기본 키워드만 적용">
+                                              ToolTip="전부 동작 = 대전에서 효과 문장이 모두 동작 (효과 없는 카드 포함) / 일부 동작 = 동작하지 않는 절이 있음 / 미지원 = 효과가 동작하지 않음 (DP · 코스트 · 진화 조건만)">
                                         <ComboBoxItem Content="전체"/>
-                                        <ComboBoxItem Content="효과 구현"/>
-                                        <ComboBoxItem Content="효과 미구현"/>
+                                        <ComboBoxItem Content="전부 동작"/>
+                                        <ComboBoxItem Content="일부 동작"/>
+                                        <ComboBoxItem Content="미지원"/>
                                     </ComboBox>
 
                                     <Button x:Name="BtnSyncApi" Content="🌐 전체 카드 업데이트" Click="BtnSyncApi_Click" Style="{StaticResource Neo.Button.Ghost}" FontWeight="Bold" FontSize="11" Padding="10,4"
@@ -627,6 +628,8 @@
                                         <TextBlock Text="📊 황금 비율 (초심자 권장)" Foreground="{StaticResource Neo.Brush.CyanBright}" FontWeight="Bold" FontSize="12" Margin="0,0,0,4"/>
                                         <StackPanel x:Name="GoldenRatioHudPanel"/>
                                         <TextBlock x:Name="TxtDeckValidationStatus" Text="✅ 덱 검증 통과" Foreground="{StaticResource Neo.Brush.Green}" FontWeight="Bold" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="TxtDeckEffectSupport" Text=" " FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"
+                                                   ToolTip="이 덱의 카드 효과가 대전에서 얼마나 동작하는지 (⚠ 표시 카드는 덱 목록에서 확인)"/>
                                     </StackPanel>
                                 </Border>
 

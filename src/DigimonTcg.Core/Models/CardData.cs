@@ -30,18 +30,11 @@ public class CardData
     public string ImageUrl { get; set; } = string.Empty;            // 카드 이미지 URL (API 연동용)
     public string Rarity { get; set; } = string.Empty;              // 카드 등급: C / U / R / SR / SEC / P (API 동기화로 채워짐)
 
-    // 대전 엔진이 이 카드의 효과를 구현했는지 여부 (내장 한글 카드 = true, API로 받은 카드 = false)
-    // 미구현 카드는 대전에서 DP · 코스트 · 진화 조건과 자동 인식 키워드(블로커 / 시큐리티 어택)만 적용된다.
+    // 내장 한글 카드(카드별 효과 스크립트가 있는 120장)인지 여부 — 이미지 미리 받기 · 로비 그림 · 덱 자동 완성에 쓴다.
+    // 카드 효과가 대전에서 얼마나 동작하는지(API 카드 포함)는 Data.EffectSupport.For(card)로 확인한다.
     // 카드 번호로 판별하므로 덱 프리셋 · 손패 · 필드에서 새로 만든 카드 객체도 같은 결과가 나온다.
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsEffectImplemented => DigimonTcg.Core.Data.StarterDecks.IsBuiltInCard(CardId);
-
-    /// <summary>내장 카드지만 효과 문장이 아직 대전에서 동작하지 않는 카드</summary>
-    [System.Text.Json.Serialization.JsonIgnore]
-    public bool HasUnimplementedBuiltInEffect => IsEffectImplemented && DigimonTcg.Core.Data.StarterDecks.IsTextOnlyEffectCard(CardId);
-
-    [System.Text.Json.Serialization.JsonIgnore]
-    public bool HasAutoKeywords => !IsEffectImplemented && (IsBlocker || SecurityAttackBonus > 0 || InheritedSecurityAttackBonus > 0);
 
     // ---- 화면 표시용 (data/kr/cards_ko.json 공식 한글 데이터가 있으면 그것, 없으면 원래 값) ----
     // 대전 엔진 · 문장 파서는 Name · EffectText · Traits(영어 API 기준)를 그대로 쓴다.

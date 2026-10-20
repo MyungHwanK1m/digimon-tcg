@@ -320,3 +320,20 @@ API로 받은 카드(영어 문장)에서 두 가지 절을 인식해 카드 스
 - 시큐리티를 뒤지는 효과 · "Your opponent can't gain memory other than by Tamer effects" · "also treated as yellow" · 테이머 위로 진화 · 상대가 고르는 효과("Your opponent may ~").
 - 시큐리티에서 카드가 빠졌을 때 · 상대 진화원이 트래시되었을 때 같은 사건, 상대 디지몬 어택 대상 제한("can't attack players").
 - 다음: 6단계 — 한글 생성 (✅ 절을 한글 문장으로 렌더링 + 공식 표기 대조).
+
+## 13. 효과 지원 상태 표시 (UI를 엔진 실제 지원 상태에 맞춤)
+
+이전까지 UI는 "내장 120장인가(IsEffectImplemented)"만 보고 API 카드를 모두 "⚠ 효과 미구현 / 키워드만"으로 표시했다.
+이제 `Data/EffectSupport.cs`가 카드별 지원 상태를 계산하고, 도감 · 덱 빌더가 그것을 쓴다.
+
+- 판정: API 카드는 `KeywordDictionary.Analyze`의 절 결과 → 전부 동작 / 일부 동작 N/M절 / 미지원 / 효과 없음.
+  내장 카드는 카드별 스크립트가 있으므로 전부 동작, `StarterDecks.IsTextOnlyEffectCard` 목록(BT5-086)만 일부 동작.
+  분석은 영어 원문(EffectText) 기준 — 한글 표시 문구(Display*)로 바꾸면 엔진과 어긋난다.
+- 캐시: 카드 번호별 `ConcurrentDictionary`. 도감 전체(약 4,500장) 분석은 수 초라 앱 시작 · 도감 업데이트 때 백그라운드로 미리 계산하고,
+  업데이트 뒤에는 `EffectSupport.ClearCache()`.
+- UI: 바인더 배지("⚠ 일부 동작 3/5" · "⚠ 효과 미지원"), EFFECT 필터(전체 / 전부 동작 / 일부 동작 / 미지원),
+  카드 상세(동작하지 않는 절과 이유, 최대 4절), 덱 추가 토스트(일부 · 미지원일 때만), 덱 빌더 지원률(전부 · 일부 · 미지원 장수, 덱 목록 ⚠),
+  도감 검색 줄의 전체 지원률(효과 절 %).
+- 정리: `CardData.HasUnimplementedBuiltInEffect` · `HasAutoKeywords` 삭제 (`IsEffectImplemented`는 "내장 카드" 뜻으로 유지).
+- 테스트: `EffectSupportTests` 9개 (도감 전체 분석은 실제 cards_cache.json을 임시 폴더에 복사해서 연다).
+- 남은 것: "동작하지 않는 절"은 영어 원문 절로 보여 준다 (한글 문구와 절 단위 대응이 없음 — 6단계 한글 생성 때 함께).

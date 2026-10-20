@@ -96,6 +96,7 @@ public partial class MainWindow : Window
 
         // 신규 추가된 7색 TCG 카드 일러스트 백그라운드 프리패치
         _ = PrefetchCatalogImagesAsync();
+        _ = WarmUpEffectSupportAsync();
     }
 
     private async System.Threading.Tasks.Task PrefetchCatalogImagesAsync()
@@ -240,21 +241,10 @@ public partial class MainWindow : Window
         TxtInspectorInherited.Text = string.IsNullOrWhiteSpace(card.InheritedEffectText) ? "없음" : card.InheritedEffectText;
 
         // 대전 엔진이 효과를 구현하지 않은 카드 안내
-        InspectorImplNote.Visibility = card.IsEffectImplemented && !card.HasUnimplementedBuiltInEffect ? Visibility.Collapsed : Visibility.Visible;
-        if (card.HasUnimplementedBuiltInEffect)
-        {
-            TxtInspectorImplNote.Text = "⚠️ 일부 효과 미구현 — 이 카드의 효과 문장은 아직 대전에서 동작하지 않습니다. (DP · 코스트 · 진화 조건은 정상 적용)";
-        }
-        else if (!card.IsEffectImplemented)
-        {
-            var keywords = new List<string>();
-            if (card.IsBlocker) keywords.Add("블로커");
-            if (card.SecurityAttackBonus > 0) keywords.Add($"시큐리티 어택 +{card.SecurityAttackBonus}");
-            if (card.InheritedSecurityAttackBonus > 0) keywords.Add($"진화원 시큐리티 어택 +{card.InheritedSecurityAttackBonus}");
-            TxtInspectorImplNote.Text = keywords.Count > 0
-                ? $"⚠️ 효과 미구현 카드 — 대전에서는 DP · 코스트 · 진화 조건과 키워드({string.Join(", ", keywords)})만 적용됩니다."
-                : "⚠️ 효과 미구현 카드 — 대전에서는 DP · 코스트 · 진화 조건만 적용되고 아래 효과는 동작하지 않습니다.";
-        }
+        var support = EffectSupport.For(card);
+        InspectorImplNote.Visibility = support.Level is EffectSupportLevel.Partial or EffectSupportLevel.None ? Visibility.Visible : Visibility.Collapsed;
+        if (support.Level is EffectSupportLevel.Partial or EffectSupportLevel.None)
+            TxtInspectorImplNote.Text = DescribeEffectSupport(support);
 
         var bmp = GetCardBitmap(card);
         if (bmp != null)
@@ -4163,6 +4153,56 @@ public partial class MainWindow : Window
         CmbFilterSet.SelectedIndex = Math.Max(0, prefixes.IndexOf(selected ?? "") + 1);
     }
 
+    // ==================== 🧩 카드 효과 지원 상태 (EffectSupport: 전부 동작 / 일부 N/M절 / 미지원) ====================
+    // 도감 전체(약 4,500장) 문장 분석은 몇 초 걸리므로 앱 시작 · 도감 업데이트 때 백그라운드로 미리 계산한다
+    private EffectSupportSummary? _catalogEffectSummary;
+
+    private async System.Threading.Tasks.Task WarmUpEffectSupportAsync()
+    {
+        var cards = _catalogService.Catalog.ToList();
+        try
+        {
+            var summary = await System.Threading.Tasks.Task.Run(() => EffectSupport.Summarize(cards));
+            _catalogEffectSummary = summary;
+            RefreshCatalogUi();
+        }
+        catch (Exception ex)
+        {
+            ShowToast(false, $"효과 지원 상태를 계산하지 못했습니다: {ex.Message}");
+        }
+    }
+
+    /// <summary>EFFECT 필터 (1 전부 동작 — 효과 없는 카드 포함 · 2 일부 동작 · 3 미지원)</summary>
+    private static bool MatchesEffectFilter(EffectSupportLevel level, int filter) => filter switch
+    {
+        1 => level is EffectSupportLevel.Full or EffectSupportLevel.NoEffect,
+        2 => level == EffectSupportLevel.Partial,
+        3 => level == EffectSupportLevel.None,
+        _ => true
+    };
+
+    /// <summary>카드 상세 안내: 어느 절이 왜 동작하지 않는지 (최대 4절, 영어 원문 절 기준)</summary>
+    private static string DescribeEffectSupport(EffectSupportInfo info)
+    {
+        if (info.IsBuiltIn)
+            return "⚠️ 일부 효과만 동작 — 이 카드 효과 문장의 일부는 아직 대전에서 동작하지 않습니다. (DP · 코스트 · 진화 조건은 정상 적용)";
+
+        string head = info.Level == EffectSupportLevel.None
+            ? $"⚠️ 효과 미지원 ({info.TotalClauses}절 모두) — 대전에서는 DP · 코스트 · 진화 조건만 적용됩니다."
+            : $"⚠️ 효과 일부만 동작 ({info.SupportedClauses}/{info.TotalClauses}절) — 아래 절은 대전에서 동작하지 않습니다.";
+        var lines = info.UnsupportedClauses
+            .Take(4)
+            .Select(c => $"• {(c.Inherited ? "[진화원] " : "")}{Shorten(c.Text, 70)}{(string.IsNullOrWhiteSpace(c.Note) ? "" : $" — {c.Note}")}");
+        int more = info.UnsupportedClauses.Count() - 4;
+        return head + "\n" + string.Join("\n", lines) + (more > 0 ? $"\n… 외 {more}절" : "");
+    }
+
+    private static string Shorten(string text, int max)
+    {
+        string oneLine = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        return oneLine.Length <= max ? oneLine : oneLine[..(max - 1)] + "…";
+    }
+
     private void RefreshCatalogUi()
     {
         if (CatalogWrapPanel == null)
@@ -4204,15 +4244,15 @@ public partial class MainWindow : Window
         string? setPrefix = (CmbFilterSet.SelectedItem as ComboBoxItem)?.Content?.ToString();
         if (setPrefix == "전체")
             setPrefix = null;
-        int implFilter = CmbFilterImpl.SelectedIndex;   // 0 전체 · 1 효과 구현 · 2 효과 미구현
+        int effectFilter = CmbFilterImpl.SelectedIndex;   // 0 전체 · 1 전부 동작 · 2 일부 동작 · 3 미지원
         string? rarity = (CmbFilterRarity.SelectedItem as ComboBoxItem)?.Content?.ToString();
         if (rarity == "전체")
             rarity = null;
 
-        // 정렬: 효과 구현 카드 먼저 → 세트(ST → BT → EX → 그 외, 번호순) → 카드 번호
+        // 정렬: 내장 카드 먼저 → 세트(ST → BT → EX → 그 외, 번호순) → 카드 번호
         var results = _catalogService.SearchCards(keyword, color, type, level)
             .Where(c => setPrefix == null || c.CardId.StartsWith(setPrefix + "-", StringComparison.Ordinal))
-            .Where(c => implFilter switch { 1 => c.IsEffectImplemented, 2 => !c.IsEffectImplemented, _ => true })
+            .Where(c => effectFilter == 0 || MatchesEffectFilter(EffectSupport.For(c).Level, effectFilter))
             .Where(c => rarity == null || string.Equals(c.Rarity, rarity, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(c => c.IsEffectImplemented)
             .ThenBy(c => SetGroupOrder(c.CardId))
@@ -4220,8 +4260,11 @@ public partial class MainWindow : Window
             .ThenBy(c => c.CardId, StringComparer.Ordinal)
             .ToList();
 
-        int implementedTotal = _catalogService.Catalog.Count(c => c.IsEffectImplemented);
-        TxtCatalogCount.Text = $"검색된 카드: {results.Count}종 · 도감 전체 {_catalogService.Catalog.Count}종 (효과 구현 {implementedTotal}종)";
+        // 도감 전체 지원률은 앱 시작 때 백그라운드로 미리 계산해 둔 값 (계산 전이면 안내만)
+        string supportText = _catalogEffectSummary is { } cs
+            ? $"전부 동작 {cs.Full + cs.NoEffect} · 일부 {cs.Partial} · 미지원 {cs.None} · 효과 절 {cs.ClauseRate:F1}% 동작"
+            : "효과 지원 상태 계산 중…";
+        TxtCatalogCount.Text = $"검색된 카드: {results.Count}종 · 도감 전체 {_catalogService.Catalog.Count}종 ({supportText})";
 
         // 수천 장을 한 번에 그리면 느려지므로 한 페이지(60장)씩
         int pageCount = Math.Max(1, (results.Count + CatalogPageSize - 1) / CatalogPageSize);
@@ -4259,13 +4302,14 @@ public partial class MainWindow : Window
             IsHitTestVisible = false
         });
 
-        if (!card.IsEffectImplemented || card.HasUnimplementedBuiltInEffect)
+        if (EffectSupport.For(card) is { BadgeText: { } badge } badgeInfo)
         {
-            // 대전 엔진이 효과를 구현하지 않은 카드 (API로 받은 카드 · 효과 문장만 있는 내장 카드)
+            // 효과의 일부 또는 전부가 대전에서 동작하지 않는 카드 (일부 동작 N/M절 · 효과 미지원)
+            string badgeColor = badgeInfo.Level == EffectSupportLevel.None ? "#F38BA8" : "#FAB387";
             cardGrid.Children.Add(new Border
             {
                 Background = BrushFromHex("#E6301A0A"),
-                BorderBrush = BrushFromHex("#FAB387"),
+                BorderBrush = BrushFromHex(badgeColor),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(999),
                 Padding = new Thickness(7, 1, 7, 1),
@@ -4275,8 +4319,8 @@ public partial class MainWindow : Window
                 IsHitTestVisible = false,
                 Child = new TextBlock
                 {
-                    Text = card.HasUnimplementedBuiltInEffect ? "⚠ 일부 미구현" : card.HasAutoKeywords ? "⚠ 키워드만" : "⚠ 효과 미구현",
-                    Foreground = BrushFromHex("#FAB387"),
+                    Text = badge,
+                    Foreground = BrushFromHex(badgeColor),
                     FontWeight = FontWeights.Bold,
                     FontSize = 10
                 }
@@ -4414,8 +4458,13 @@ public partial class MainWindow : Window
             _builderMainDeck.Add(card);
         }
 
-        if (!card.IsEffectImplemented)
-            ShowToast(false, $"⚠️ [{card.CardId}] {card.Name}은(는) 효과 미구현 카드입니다. 덱에 넣을 수는 있지만 대전에서는 DP · 코스트 · 기본 키워드만 적용됩니다.");
+        var addedSupport = EffectSupport.For(card);
+        if (addedSupport.Level == EffectSupportLevel.Partial)
+            ShowToast(false, $"⚠️ [{card.CardId}] {card.DisplayName}은(는) 효과가 일부만 동작합니다"
+                + (addedSupport.TotalClauses > 0 ? $" ({addedSupport.SupportedClauses}/{addedSupport.TotalClauses}절)" : "")
+                + ". 동작하지 않는 절은 카드 상세에서 확인하세요.");
+        else if (addedSupport.Level == EffectSupportLevel.None)
+            ShowToast(false, $"⚠️ [{card.CardId}] {card.DisplayName}은(는) 효과가 대전에서 동작하지 않습니다. 덱에 넣을 수는 있지만 DP · 코스트 · 진화 조건만 적용됩니다.");
 
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
@@ -4505,7 +4554,22 @@ public partial class MainWindow : Window
             TxtDeckValidationStatus.Foreground = BrushFromHex("#F38BA8");
         }
 
-        TxtDeckListHeader.Text = $"📋 현재 덱 구성 (메인 {_builderMainDeck.Count}/50장, 디지타마 {_builderDigitamaDeck.Count}/5장)";
+        // 덱 효과 지원률 (전부 동작 / 일부 동작 / 미지원 장수)
+        var deckCards = _builderDigitamaDeck.Concat(_builderMainDeck).ToList();
+        if (deckCards.Count == 0)
+        {
+            TxtDeckEffectSupport.Text = " ";
+        }
+        else
+        {
+            var ds = EffectSupport.Summarize(deckCards);
+            TxtDeckEffectSupport.Text = ds.Partial + ds.None == 0
+                ? $"🧩 효과 지원: {ds.Cards}장 모두 대전에서 효과가 동작합니다"
+                : $"🧩 효과 지원: 전부 동작 {ds.Full + ds.NoEffect}장 · ⚠ 일부 동작 {ds.Partial}장 · ⚠ 미지원 {ds.None}장";
+            TxtDeckEffectSupport.Foreground = BrushFromHex(ds.None > 0 ? "#F38BA8" : ds.Partial > 0 ? "#FAB387" : "#A6E3A1");
+        }
+
+        TxtDeckListHeader.Text =$"📋 현재 덱 구성 (메인 {_builderMainDeck.Count}/50장, 디지타마 {_builderDigitamaDeck.Count}/5장)";
         CurrentDeckListPanel.Children.Clear();
 
         var grouped = _builderDigitamaDeck.Concat(_builderMainDeck)
@@ -4543,6 +4607,19 @@ public partial class MainWindow : Window
             });
 
             var rightStack = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            if (EffectSupport.For(card) is { BadgeText: not null } deckItemSupport)
+            {
+                rightStack.Children.Add(new TextBlock
+                {
+                    Text = "⚠",
+                    Foreground = BrushFromHex(deckItemSupport.Level == EffectSupportLevel.None ? "#F38BA8" : "#FAB387"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 12,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    ToolTip = deckItemSupport.Level == EffectSupportLevel.None ? "효과 미지원" : deckItemSupport.BadgeText!.TrimStart('⚠', ' ')
+                });
+            }
             rightStack.Children.Add(new TextBlock
             {
                 Text = $"x{count}",
@@ -4604,7 +4681,11 @@ public partial class MainWindow : Window
         ShowToast(success, msg);
         InitSetFilter();
         _catalogPage = 0;
+        // 카드 문장이 바뀌었을 수 있으므로 효과 지원 상태를 다시 계산한다
+        EffectSupport.ClearCache();
+        _catalogEffectSummary = null;
         RefreshCatalogUi();
+        _ = WarmUpEffectSupportAsync();
         BtnSyncApi.IsEnabled = true;
     }
 
