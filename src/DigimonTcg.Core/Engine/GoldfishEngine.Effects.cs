@@ -118,29 +118,66 @@ public partial class GoldfishEngine
     {
         var ctx = new EffectContext(this, owner, self, other, chosenTarget) { TriggerCard = triggerCard };
 
-        if (mainCard != null && CardScripts.For(mainCard) is { } main)
+        _effectDepth++;
+        try
         {
-            foreach (var effect in main.Effects.Where(e => e.Trigger == trigger && e.Source == EffectSource.Main).ToList())
-                Resolve(ctx, mainCard, effect);
-        }
-
-        if (includeInherited && self != null)
-        {
-            var sourceCards = (sources ?? self.GetEvolutionStackBottomUp()).GroupBy(s => s.CardId).Select(g => g.First()).ToList();
-            foreach (var source in sourceCards)
+            if (mainCard != null && CardScripts.For(mainCard) is { } main)
             {
-                if (CardScripts.For(source) is not { } script)
-                    continue;
-                foreach (var effect in script.Effects.Where(e => e.Trigger == trigger && e.Source == EffectSource.Inherited).ToList())
+                foreach (var effect in main.Effects.Where(e => e.Trigger == trigger && e.Source == EffectSource.Main).ToList())
+                    Resolve(ctx, mainCard, effect);
+            }
+
+            if (includeInherited && self != null)
+            {
+                var sourceCards = (sources ?? self.GetEvolutionStackBottomUp()).GroupBy(s => s.CardId).Select(g => g.First()).ToList();
+                foreach (var source in sourceCards)
                 {
-                    if (sources == null && !self.HasSource(source.CardId))
-                        break;
-                    Resolve(ctx, source, effect);
+                    if (CardScripts.For(source) is not { } script)
+                        continue;
+                    foreach (var effect in script.Effects.Where(e => e.Trigger == trigger && e.Source == EffectSource.Inherited).ToList())
+                    {
+                        if (sources == null && !self.HasSource(source.CardId))
+                            break;
+                        Resolve(ctx, source, effect);
+                    }
                 }
             }
         }
-
+        finally
+        {
+            _effectDepth--;
+        }
+        if (_effectDepth == 0)
+            FlushPendingTriggers();
         return ctx;
+    }
+
+    // 효과 처리 중에 일어난 [소멸 시] · "소멸했을 때"는 그 효과를 모두 처리한 뒤에 발휘한다 (공식 Q&A ST6-15 Q1)
+    private int _effectDepth;
+    private readonly Queue<Action> _pendingTriggers = new();
+    private bool _flushingTriggers;
+
+    /// <summary>효과 처리 중이면 그 효과가 끝날 때까지 미루고, 아니면 바로 처리</summary>
+    private void RunOrDefer(Action trigger)
+    {
+        if (_effectDepth > 0) _pendingTriggers.Enqueue(trigger);
+        else trigger();
+    }
+
+    private void FlushPendingTriggers()
+    {
+        if (_flushingTriggers)
+            return;
+        _flushingTriggers = true;
+        try
+        {
+            while (_pendingTriggers.Count > 0)
+                _pendingTriggers.Dequeue()();
+        }
+        finally
+        {
+            _flushingTriggers = false;
+        }
     }
 
     private static void Resolve(EffectContext ctx, CardData card, CardEffect effect)
@@ -495,8 +532,6 @@ public partial class GoldfishEngine
     {
         if (!zones.BattleArea.Remove(instance))
             return;
-        var outerCause = CurrentDeletionCause;
-        CurrentDeletionCause = cause;   // [소멸 시] · "소멸했을 때" 효과가 볼 수 있게 ("deleted by an effect" · "by dropping to 0 DP")
 
         var stack = instance.GetEvolutionStackBottomUp();
         // ≪불굴≫: 진화원을 가진 이 디지몬이 소멸했을 때, 이 카드(≪불굴≫이 적힌 카드)를 코스트 없이 등장
@@ -505,21 +540,38 @@ public partial class GoldfishEngine
             fortitude = stack.LastOrDefault(s => CardScripts.For(s)?.InheritedKeywords.Contains(Keyword.Fortitude) == true
                                               && CardScripts.For(instance.TopCard)?.Keywords.Contains(Keyword.Fortitude) != true) ?? instance.TopCard;
         ApplyOverflow(zones, stack.Append(instance.TopCard));
+        // ≪머티리얼 세이브 N≫: 진화원 N장(디지몬 카드)을 자신의 테이머 아래에 놓을 수 있다
+        int materialSave = CardScripts.For(instance.TopCard)?.MaterialSave ?? 0;
+        if (materialSave > 0 && zones.Tamers.Count > 0 && instance.EvolutionSources.Any(s => s.Type == CardType.Digimon)
+            && AskYesNo(zones, instance, $"≪머티리얼 세이브 {materialSave}≫ [{instance.TopCard.Name}]의 진화원 {materialSave}장을 테이머 아래에 놓을까요?", recommended: true))
+        {
+            var saved = ChooseCards(zones, CardChoiceZone.DigivolutionCards, instance.EvolutionSources.Where(s => s.Type == CardType.Digimon).OrderByDescending(s => s.Level).ToList(),
+                materialSave, upTo: true, $"≪머티리얼 세이브 {materialSave}≫ 테이머 아래에 놓을 진화원을 고르세요.");
+            foreach (var s in saved)
+                if (instance.TakeSource(x => ReferenceEquals(x, s)) != null) zones.UnderTamers.Add(s);
+            if (saved.Count > 0) EffectLog(zones, $"[≪머티리얼 세이브≫] [{string.Join(", ", saved.Select(s => s.Name))}]을(를) 테이머 아래에 놓았습니다.");
+        }
         zones.Trash.Add(instance.TopCard);
         while (instance.EvolutionSources.Count > 0)
             zones.Trash.Add(instance.EvolutionSources.Pop());
         PurgeTokens(zones);
 
-        RunEffects(EffectTrigger.OnDeletion, zones, instance, instance.TopCard, sources: stack);
-        FireForSide(EffectTrigger.AllyDigimonDeleted, zones, instance);
-        FireForSide(EffectTrigger.OpponentDigimonDeleted, EnemyOf(zones), instance);
-        CurrentDeletionCause = outerCause;
-
-        if (fortitude != null && zones.Trash.Remove(fortitude))
+        // [소멸 시] · "소멸했을 때" · ≪불굴≫ — 효과 처리 중이면 그 효과가 끝난 뒤에
+        RunOrDefer(() =>
         {
-            EffectLog(zones, $"[≪불굴≫] [{fortitude.Name}]이(가) 코스트 없이 다시 등장합니다.");
-            PlayWithoutCost(zones, fortitude);
-        }
+            var outerCause = CurrentDeletionCause;
+            CurrentDeletionCause = cause;   // 이 효과들이 볼 수 있게 ("deleted by an effect" · "by dropping to 0 DP")
+            RunEffects(EffectTrigger.OnDeletion, zones, instance, instance.TopCard, sources: stack);
+            FireForSide(EffectTrigger.AllyDigimonDeleted, zones, instance);
+            FireForSide(EffectTrigger.OpponentDigimonDeleted, EnemyOf(zones), instance);
+            CurrentDeletionCause = outerCause;
+
+            if (fortitude != null && zones.Trash.Remove(fortitude))
+            {
+                EffectLog(zones, $"[≪불굴≫] [{fortitude.Name}]이(가) 코스트 없이 다시 등장합니다.");
+                PlayWithoutCost(zones, fortitude);
+            }
+        });
     }
 
     // =====================================================================
@@ -1139,7 +1191,7 @@ public partial class GoldfishEngine
             var bases = defender.BattleArea.Where(d => ActionValidator.ValidateEvolution(d, card).CanExecute)
                 .OrderByDescending(d => d.HasBlocker && !d.IsSuspended).ThenByDescending(d => d.GetCurrentDP()).ToList();
             if (bases.Count == 0) continue;
-            var target = AskDigimon(defender, $"【카운터】 ≪블래스트 진화≫ [{attacker.TopCard.Name}]의 어택 — 패의 [{card.Name}](으)로 코스트 없이 진화시킬 디지몬을 고르세요.",
+            var target = AskDigimon(defender, $"【카운터】 ≪블래스트 진화≫ [{attacker.TopCard.Name}]의 어택: 패의 [{card.Name}](으)로 코스트 없이 진화시킬 디지몬을 고르세요 (고르지 않으면 쓰지 않음)",
                 bases, bases[0], optional: true);
             if (target == null) continue;
             EffectLog(defender, $"【카운터】 ≪블래스트 진화≫ [{target.TopCard.Name}] → [{card.Name}]");
@@ -1349,15 +1401,21 @@ public partial class GoldfishEngine
     /// </summary>
     private string ApplyOptionEffect(PlayerZones owner, CardData optionCard, CardInstance? target)
     {
-        var optionCtx = RunEffects(EffectTrigger.Main, owner, null, optionCard, chosenTarget: target, includeInherited: false);
+        // 옵션 효과를 모두 처리하고 그 결과를 남긴 뒤에, 처리 중에 일어난 [소멸 시] 등을 발휘한다
+        EffectContext optionCtx;
+        _effectDepth++;
+        try { optionCtx = RunEffects(EffectTrigger.Main, owner, null, optionCard, chosenTarget: target, includeInherited: false); }
+        finally { _effectDepth--; }
         string msg = optionCtx.Message;
+        if (msg.Length > 0)
+            Log("[효과] " + msg);
+        if (_effectDepth == 0)
+            FlushPendingTriggers();
         if (optionCtx.PlaceInBattleArea) PlaceOption(owner, optionCard);
         else owner.Trash.Add(optionCard);
         // "When you use an Option card" / "When a player uses an Option card"
         FireForSide(EffectTrigger.AllyOptionUsed, owner, null, triggerCard: optionCard);
         FireForSide(EffectTrigger.OpponentOptionUsed, EnemyOf(owner), null, triggerCard: optionCard);
-        if (msg.Length > 0)
-            Log("[효과] " + msg);
         RecalculateFieldBuffs();
         return msg;
     }

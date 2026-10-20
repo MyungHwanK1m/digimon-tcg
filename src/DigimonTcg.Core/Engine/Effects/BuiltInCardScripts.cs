@@ -803,9 +803,13 @@ internal static class BuiltInCardScripts
             }, when: c => c.Owner.SecurityStack.Count <= 3)
             .WhenAttacking(c =>   // 패의 옐로 Lv.3 디지몬 1장을 코스트 없이 등장
             {
-                var lv3 = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, c.Owner.Hand.Where(x => IsDigimon(x) && x.Color == CardColor.Yellow && x.Level == 3).ToList(),
-                    1, upTo: false, "홀리드라몬: 코스트 없이 등장시킬 옐로 Lv.3 디지몬을 고르세요.").FirstOrDefault();
-                if (lv3 == null || c.Owner.BattleArea.Count >= 8) return;
+                // 공식 Q&A BT2-039 Q1: 쓰지 않아도 되는 효과 ("~할 수 있다")
+                var candidates = c.Owner.Hand.Where(x => IsDigimon(x) && x.Color == CardColor.Yellow && x.Level == 3).ToList();
+                if (candidates.Count == 0 || c.Owner.BattleArea.Count >= 8
+                    || !c.Engine.AskYesNo(c.Owner, c.Self, "홀리드라몬: 패의 옐로 Lv.3 디지몬 1장을 코스트 없이 등장시킬까요?", recommended: true))
+                    return;
+                var lv3 = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, candidates, 1, upTo: false, "홀리드라몬: 코스트 없이 등장시킬 옐로 Lv.3 디지몬을 고르세요.").FirstOrDefault();
+                if (lv3 == null) return;
                 c.Owner.Hand.Remove(lv3);
                 var inst = c.PlayWithoutCost(lv3);
                 c.Log($"[어택 시] 홀리드라몬: 패의 [{lv3.Name}]을(를) 코스트 없이 등장");

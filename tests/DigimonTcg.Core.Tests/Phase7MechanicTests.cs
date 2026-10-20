@@ -130,6 +130,31 @@ public class Phase7MechanicTests
     }
 
     [Fact]
+    public void Save_ShouldPlaceTheDeletedCardUnderATamerAndLetItBePlayedFromThere()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.Player.Tamers.Add(Api("P7-SAVE-TAMER", 0, 0, type: CardType.Tamer));
+        var saver = Api("P7-SAVE", 4, 5000, main: "[On Deletion] ＜Save＞ (You may place this card under one of your Tamers.)");
+        var mine = new CardInstance(saver, 1);
+        state.Player.BattleArea.Add(mine);
+        var killer = Api("P7-SAVE-KILL", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] Delete 1 of your Digimon.");
+        state.Player.Hand.Add(killer);
+
+        engine.PlayCard(killer);
+
+        Assert.Contains(saver, state.Player.UnderTamers);
+        Assert.DoesNotContain(saver, state.Player.Trash);
+
+        var caller = Api("P7-SAVE-CALL", 3, 3000, main: "[On Play] You may play 1 [P7-SAVE] from your hand or from under one of your Tamers without paying its memory cost.");
+        state.Player.Hand.Add(caller);
+        state.MemoryGauge = 5;
+        engine.PlayCard(caller);
+
+        Assert.Empty(state.Player.UnderTamers);
+        Assert.Contains(state.Player.BattleArea, d => d.TopCard == saver);
+    }
+
+    [Fact]
     public void Iceclad_ShouldCompareDigivolutionCardCounts()
     {
         var (state, engine, cards) = NewMainPhase();

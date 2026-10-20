@@ -86,6 +86,13 @@ internal static class SentenceParser
             def?.SpecialEvolution(d => names.Any(n => exact ? d.TopCard.Name.Equals(n, StringComparison.OrdinalIgnoreCase) : TargetSpec.NameHas(d.TopCard, n)), cost);
             return null;
         }
+        // ≪머티리얼 세이브 N≫: 이 디지몬이 소멸할 때 진화원 N장을 자신의 테이머 아래에 놓을 수 있다 (엔진의 소멸 처리)
+        var materialSave = Regex.Match(clause, @"^＜Material Save (?<n>\d+)＞\.?$", RegexOptions.IgnoreCase);
+        if (materialSave.Success && card.Type == CardType.Digimon)
+        {
+            def?.MaterialSave(int.Parse(materialSave.Groups["n"].Value));
+            return null;
+        }
         // [패] [카운터] ≪블래스트 진화≫: 상대 디지몬이 어택했을 때 패의 이 카드로 자신의 디지몬을 코스트 없이 진화 (엔진의 카운터 타이밍)
         if (Regex.IsMatch(clause, @"^\[Hand\]\s*\[Counter\]\s*＜Blast Digivolve＞\.?$", RegexOptions.IgnoreCase) && card.Type == CardType.Digimon)
         {
@@ -824,6 +831,13 @@ internal static class SentenceParser
             int n = int.Parse(m.Groups["n"].Value); string dir = m.Groups["dir"].Value.ToLowerInvariant();
             return d => d != null && (dir is "higher" or "more" ? d.TopCard.Level >= n : dir is "lower" or "less" ? d.TopCard.Level <= n : d.TopCard.Level == n);
         }
+        if ((m = Regex.Match(cond, @"^(?:this Digimon|it) has ＜(?<k>[A-Za-z .\-]+?)\s*＞ in its texts?$", RegexOptions.IgnoreCase)).Success)
+        {
+            // "this Digimon has ＜Save＞ in its text" — 맨 위 카드 · 진화원 문장에 그 키워드가 있는지
+            string k = m.Groups["k"].Value.Trim();
+            return d => d != null && d.GetEvolutionStackBottomUp().Append(d.TopCard)
+                .Any(x => (x.EffectText + " " + x.InheritedEffectText).Contains($"＜{k}", StringComparison.OrdinalIgnoreCase));
+        }
         if ((m = Regex.Match(cond, @"^(?:this Digimon|it) has ＜(?<k>[A-Za-z .\-]+?)\s*＞$", RegexOptions.IgnoreCase)).Success)
         {
             string k = m.Groups["k"].Value.Trim();
@@ -1270,6 +1284,22 @@ internal static class SentenceParser
                     },
                     c => Pool(c).First().TopCard.Level <= 3 || !delete, delete ? "자신의 디지몬 1마리를 소멸시켜" : "자신의 디지몬 1마리를 패로 되돌려");
         }
+        // "placing 1 Digimon card with ＜Save＞ in its text from your hand (face down) under this Tamer"
+        if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) from your hand (?:face down )?under (?:this Tamer|(?:1|one) of your Tamers|your Tamers)$", RegexOptions.IgnoreCase)).Success
+            && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } underPick)
+        {
+            var (n, match) = underPick;
+            return (c => c.Owner.Tamers.Count > 0 && c.Owner.Hand.Count(match) >= n,
+                    c =>
+                    {
+                        foreach (var x in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, c.Owner.Hand.Where(match).OrderBy(x => x.Level).ToList(), n, upTo: false, $"[{c.Card.Name}] 테이머 아래에 놓을 패 {n}장을 고르세요."))
+                        {
+                            c.Owner.Hand.Remove(x);
+                            c.Owner.UnderTamers.Add(x);
+                        }
+                    },
+                    c => c.Owner.Hand.Count >= n + 2, $"패 {n}장을 테이머 아래에 놓아");
+        }
         // "adding the top card of your security stack to your hand"
         if (Regex.IsMatch(cost, @"^adding (?:the top card of your security stack|your top security card) to (?:the|your) hand$", RegexOptions.IgnoreCase))
             return (c => c.Owner.SecurityStack.Count > 0,
@@ -1494,6 +1524,49 @@ internal static class SentenceParser
                 c.Owner.Hand.Add(c.Card);
                 Emit(c, label, "트래시의 이 카드를 패에 넣는다");
             }, null);
+        // ≪세이브≫ ([소멸 시]): 트래시로 간 이 카드를 자신의 테이머 아래에 놓을 수 있다
+        if (Regex.IsMatch(s, @"^＜Save＞$", RegexOptions.IgnoreCase))
+            return (c =>
+            {
+                if (c.Owner.Tamers.Count == 0 || !c.Owner.Trash.Contains(c.Card)) { c.LastStepResolved = false; return; }
+                if (!c.Engine.AskYesNo(c.Owner, null, $"≪세이브≫ [{c.Card.Name}]을(를) 자신의 테이머 아래에 놓을까요?", recommended: true)) { c.LastStepResolved = false; return; }
+                c.Owner.Trash.Remove(c.Card);
+                c.Owner.UnderTamers.Add(c.Card);
+                Emit(c, label, "≪세이브≫ 이 카드를 테이머 아래에 놓는다");
+            }, null);
+        // "Place 1 Digimon card with the [Xros Heart] trait from your hand or trash under 1 of your Tamers" · "Place the top card of your deck face down under this Tamer"
+        if (Regex.IsMatch(s, @"^Place the top card of your deck(?: face down)? under (?:this Tamer|(?:1|one) of your Tamers|your Tamers)$", RegexOptions.IgnoreCase))
+            return (c =>
+            {
+                if (c.Owner.Tamers.Count == 0 || c.Owner.MainDeck.Count == 0) { c.LastStepResolved = false; return; }
+                c.Owner.UnderTamers.Add(c.Owner.MainDeck[0]);
+                c.Owner.MainDeck.RemoveAt(0);
+                Emit(c, label, "덱 위 1장을 테이머 아래에 놓는다");
+            }, null);
+        if ((m = Regex.Match(s, @"^Place (?<pick>.+?) from (?<from>your hand or (?:from )?(?:your )?trash|your trash or hand|your hand|your trash) (?:face down )?under (?:this Tamer|(?:1|one) of your Tamers|your Tamers)$", RegexOptions.IgnoreCase)).Success)
+        {
+            var pick = ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value);
+            if (pick == null) return (null, $"미지원 회수 조건: {m.Groups["pick"].Value}");
+            var (count, match) = pick.Value;
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash");
+            return (c =>
+            {
+                if (c.Owner.Tamers.Count == 0) { c.LastStepResolved = false; Emit(c, label, "테이머가 없습니다"); return; }
+                var pool = new List<CardData>();
+                if (fromHand) pool.AddRange(c.Owner.Hand.Where(match));
+                if (fromTrash) pool.AddRange(c.Owner.Trash.Where(match));
+                var zone = fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var picks = c.Engine.ChooseCards(c.Owner, zone, pool.OrderBy(x => x.Level).ToList(), count, upTo: false, $"[{c.Card.Name}] 테이머 아래에 놓을 카드 {count}장을 고르세요.");
+                foreach (var x in picks)
+                {
+                    if (!((fromHand && c.Owner.Hand.Remove(x)) || (fromTrash && c.Owner.Trash.Remove(x)))) continue;
+                    c.Owner.UnderTamers.Add(x);
+                }
+                if (picks.Count == 0) c.LastStepResolved = false;
+                Emit(c, label, picks.Count > 0 ? $"[{string.Join(", ", picks.Select(x => x.Name))}]을(를) 테이머 아래에" : "놓을 카드가 없습니다");
+            }, null);
+        }
         // ≪딜레이≫ 옵션: "Then, place this card in your battle area" — 트래시 대신 배틀 에어리어에 놓는다 (엔진이 사용 뒤 처리)
         if (Regex.IsMatch(s, @"^Place this card in (?:the|your) battle area$", RegexOptions.IgnoreCase) && card.Type == CardType.Option)
             return (c => { c.PlaceInBattleArea = true; Emit(c, label, "이 카드를 배틀 에어리어에 놓는다"); }, null);
@@ -1616,27 +1689,28 @@ internal static class SentenceParser
         // "Play 1 level 4 or lower digivolution card under this card as another Digimon without paying its memory cost"
         if ((m = Regex.Match(s, @"^Play (?<n>\d+) (?<adj>.*?)digivolution cards? (?:under this (?:card|Digimon)|of this Digimon) as (?:another|other) Digimon (?<rest>without paying .+)$", RegexOptions.IgnoreCase)).Success)
             return ParseAction($"Play {m.Groups["n"].Value} {m.Groups["adj"].Value}Digimon card from this Digimon's digivolution cards {m.Groups["rest"].Value}", card, triggers);
-        if ((m = Regex.Match(s, @"^Play (?<pick>.+?)(?<sus> suspended)? from (?<from>your hand or (?:from your )?trash|your hand or from your trash|your trash or hand|your hand|your trash|this Digimon's digivolution cards)(?<sus> suspended)? without paying (?:the|its) (?:memory |play )?cost(?<noplay> ⟦no-onplay⟧)?$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(s, @"^Play (?<pick>.+?)(?<sus> suspended)? from (?<from>your hand or (?:from your )?trash|your hand or from your trash|your trash or hand|your hand,? or (?:from )?under (?:one of |1 of )?your Tamers|(?:from )?under (?:one of |1 of )?your Tamers|your hand|your trash|this Digimon's digivolution cards)(?<sus> suspended)? without paying (?:the|its) (?:memory |play )?cost(?<noplay> ⟦no-onplay⟧)?$", RegexOptions.IgnoreCase)).Success)
         {
             bool noOnPlay = m.Groups["noplay"].Success, suspended = m.Groups["sus"].Success;
             var pick = ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value);
             if (pick == null) return (null, $"미지원 등장 조건: {m.Groups["pick"].Value}");
             var (count, match) = pick.Value;
             string from = m.Groups["from"].Value.ToLowerInvariant();
-            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash"), fromSources = from.Contains("digivolution");
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash"), fromSources = from.Contains("digivolution"), fromUnder = from.Contains("under");
             return (c =>
             {
                 var played = new List<string>();
                 var pool = new List<CardData>();
+                if (fromUnder) pool.AddRange(c.Owner.UnderTamers.Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)));
                 if (fromHand) pool.AddRange(c.Owner.Hand.Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)));
                 if (fromTrash) pool.AddRange(c.Owner.Trash.Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)));
                 if (fromSources && c.Self != null) pool.AddRange(c.Self.EvolutionSources.Where(x => x.Type == CardType.Digimon && match(x)));
-                var zone = fromSources ? CardChoiceZone.DigivolutionCards : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var zone = fromSources ? CardChoiceZone.DigivolutionCards : fromUnder ? CardChoiceZone.Other : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
                 var ranked = pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.PlayCost).ToList();
                 foreach (var pick in c.Engine.ChooseCards(c.Owner, zone, ranked, count, upTo: false, $"[{c.Card.Name}] 코스트 없이 등장시킬 카드 {count}장을 고르세요."))
                 {
                     if (c.Owner.BattleArea.Count >= 12) break;
-                    bool taken = (fromHand && c.Owner.Hand.Remove(pick)) || (fromTrash && c.Owner.Trash.Remove(pick))
+                    bool taken = (fromHand && c.Owner.Hand.Remove(pick)) || (fromTrash && c.Owner.Trash.Remove(pick)) || (fromUnder && c.Owner.UnderTamers.Remove(pick))
                                  || (fromSources && c.Self?.TakeSource(x => ReferenceEquals(x, pick)) != null);
                     if (!taken) continue;
                     c.Engine.PlayWithoutCost(c.Owner, pick, triggerOnPlay: !noOnPlay, suspended: suspended);
@@ -1741,20 +1815,29 @@ internal static class SentenceParser
             }, null);
         }
         // "Place 1 [Palmon] from your trash under 1 of your green Digimon at the bottom of its digivolution cards" · "~ from your hand under 1 of your Digimon as its bottom digivolution card"
-        if ((m = Regex.Match(s, @"^Place (?<pick>.+?) from (?<from>your trash|your hand) under (?<t>.+?) (?:at the bottom of its digivolution cards|as its bottom digivolution card)$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(s, @"^Place (?<pick>.+?) from (?<from>your hand,? or (?:from )?under (?:one of |1 of )?your Tamers,?|your hand or (?:from )?(?:your )?trash|your trash|your hand) under (?<t>.+?) (?:at the bottom of its digivolution cards|as its bottom digivolution card)$", RegexOptions.IgnoreCase)).Success)
         {
             var pick = ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value);
             var target = TargetSpec.Parse(m.Groups["t"].Value);
             if (pick == null || target == null) return (null, $"미지원 진화원 넣기: {s}");
             var (count, match) = pick.Value;
-            bool fromHand = m.Groups["from"].Value.Contains("hand", StringComparison.OrdinalIgnoreCase);
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash"), fromUnder = from.Contains("under");
             return (c =>
             {
-                var zone = fromHand ? c.Owner.Hand : c.Owner.Trash;
                 var d = Pick(target, c, security).FirstOrDefault();
-                var cards = c.Engine.ChooseCards(c.Owner, fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash, zone.Where(match).OrderBy(x => x.Level).ToList(), count, upTo: false, $"[{c.Card.Name}] 진화원 아래에 놓을 카드 {count}장을 고르세요.");
+                var pool = new List<CardData>();
+                if (fromHand) pool.AddRange(c.Owner.Hand.Where(match));
+                if (fromTrash) pool.AddRange(c.Owner.Trash.Where(match));
+                if (fromUnder) pool.AddRange(c.Owner.UnderTamers.Where(match));
+                var zoneKind = fromUnder ? CardChoiceZone.Other : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var cards = c.Engine.ChooseCards(c.Owner, zoneKind, pool.OrderBy(x => x.Level).ToList(), count, upTo: false, $"[{c.Card.Name}] 진화원 아래에 놓을 카드 {count}장을 고르세요.");
                 if (d == null || cards.Count == 0) { c.LastStepResolved = false; Emit(c, label, "놓을 카드나 대상이 없습니다"); return; }
-                foreach (var x in cards) { zone.Remove(x); d.AddBottomSource(x); }
+                foreach (var x in cards)
+                {
+                    if (!((fromHand && c.Owner.Hand.Remove(x)) || (fromTrash && c.Owner.Trash.Remove(x)) || (fromUnder && c.Owner.UnderTamers.Remove(x)))) continue;
+                    d.AddBottomSource(x);
+                }
                 c.RecalculateFieldBuffs();
                 Emit(c, label, $"[{string.Join(", ", cards.Select(x => x.Name))}]을(를) [{d.TopCard.Name}]의 진화원 맨 아래에");
             }, null);

@@ -41,6 +41,9 @@ public class PlayerZones
     public List<CardInstance> BattleArea { get; set; } = new List<CardInstance>();
     public List<CardData> Tamers { get; set; } = new List<CardData>();
 
+    // 자신의 테이머 아래에 놓인 카드 (≪세이브≫ 등 — 어느 테이머 아래인지는 구분하지 않는다)
+    public List<CardData> UnderTamers { get; set; } = new List<CardData>();
+
     // 배틀 에어리어에 놓인 옵션 카드 (≪딜레이≫ — 놓은 다음 턴부터 파기해서 효과를 발휘한다)
     public List<PlacedOption> OptionsInPlay { get; set; } = new List<PlacedOption>();
 

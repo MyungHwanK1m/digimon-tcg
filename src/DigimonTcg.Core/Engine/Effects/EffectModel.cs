@@ -172,6 +172,9 @@ public sealed class CardScript
     /// <summary>[패] [카운터] ≪블래스트 진화≫ — 상대 디지몬이 어택했을 때 패의 이 카드로 자신의 디지몬을 코스트 없이 진화시킬 수 있다</summary>
     public bool BlastDigivolve { get; set; }
 
+    /// <summary>≪머티리얼 세이브 N≫ — 이 디지몬이 소멸할 때 진화원 N장을 자신의 테이머 아래에 놓을 수 있다 (0이면 없음)</summary>
+    public int MaterialSave { get; set; }
+
     /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
     public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }
 

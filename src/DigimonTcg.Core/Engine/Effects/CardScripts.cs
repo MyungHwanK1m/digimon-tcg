@@ -153,6 +153,12 @@ public sealed class CardScriptDefinition
         return this;
     }
 
+    public CardScriptDefinition MaterialSave(int count)
+    {
+        _script.MaterialSave = count;
+        return this;
+    }
+
     public CardScriptDefinition BlastDigivolve()
     {
         _script.BlastDigivolve = true;
