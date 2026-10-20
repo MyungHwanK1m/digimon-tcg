@@ -891,6 +891,46 @@
             </Border>
         </Grid>
 
+        <!-- ==================== 💾 [DECK SAVE] 덱 이름을 정해 저장 (같은 이름이면 덮어쓰기 확인) ==================== -->
+        <Grid x:Name="DeckSaveOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="948" Visibility="Collapsed" Background="#B3000000"
+              MouseLeftButtonDown="DeckOverlayBackdrop_MouseLeftButtonDown">
+            <Border Width="460" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="24,20" CornerRadius="10"
+                    Background="{StaticResource Neo.Brush.SurfaceRaised}" BorderBrush="{StaticResource Neo.Brush.Cyan}" BorderThickness="1.5"
+                    MouseLeftButtonDown="DeckOverlayPanel_MouseLeftButtonDown">
+                <StackPanel>
+                    <TextBlock Text="덱 저장" Foreground="White" FontWeight="Black" FontSize="22"/>
+                    <TextBlock x:Name="TxtDeckSaveSummary" Text="-" Foreground="{StaticResource Neo.Brush.Text.Secondary}" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,14"/>
+                    <TextBlock Text="덱 이름" Foreground="{StaticResource Neo.Brush.Text.Muted}" FontSize="12" Margin="0,0,0,4"/>
+                    <TextBox x:Name="TxtDeckSaveName" FontSize="14" Padding="8,6" TextChanged="TxtDeckSaveName_TextChanged" KeyDown="TxtDeckSaveName_KeyDown"/>
+                    <TextBlock x:Name="TxtDeckSaveHint" Text=" " FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                        <Button Content="취소" Click="BtnDeckSaveCancel_Click" Style="{StaticResource Neo.Button.Ghost}" FontWeight="Bold" Padding="16,7" Margin="0,0,8,0"/>
+                        <Button x:Name="BtnDeckSaveConfirm" Content="저장" Click="BtnDeckSaveConfirm_Click" Style="{StaticResource Neo.Button.Primary}" FontWeight="Bold" Padding="20,7"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ==================== 📂 [DECK LOAD] 저장한 덱 목록에서 불러오기 / 삭제 ==================== -->
+        <Grid x:Name="DeckLoadOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="948" Visibility="Collapsed" Background="#B3000000"
+              MouseLeftButtonDown="DeckOverlayBackdrop_MouseLeftButtonDown">
+            <Border Width="560" MaxHeight="620" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="24,20" CornerRadius="10"
+                    Background="{StaticResource Neo.Brush.SurfaceRaised}" BorderBrush="{StaticResource Neo.Brush.Cyan}" BorderThickness="1.5"
+                    MouseLeftButtonDown="DeckOverlayPanel_MouseLeftButtonDown">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                        <TextBlock Text="저장한 덱" Foreground="White" FontWeight="Black" FontSize="22"/>
+                        <TextBlock x:Name="TxtDeckLoadSummary" Text="-" Foreground="{StaticResource Neo.Brush.Text.Secondary}" FontSize="12.5" Margin="0,4,0,0"/>
+                    </StackPanel>
+                    <Button DockPanel.Dock="Bottom" Content="닫기" Click="BtnDeckLoadClose_Click" Style="{StaticResource Neo.Button.Ghost}"
+                            FontWeight="Bold" Padding="16,7" HorizontalAlignment="Right" Margin="0,14,0,0"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="DeckLoadListPanel"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+
         <!-- ==================== 🃏 [MULLIGAN] 게임 시작 전 초기 손패 확인 / 다시 뽑기 (공식 룰 5-2) ==================== -->
         <!--  손패 5장 → 멀리건 1회 → 시큐리티 5장 → 게임 시작. 엔진은 Phase.Setup에서 기다리고, [이 손패로 시작]이 BeginGame을 부른다 -->
         <Grid x:Name="MulliganOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="942" Visibility="Collapsed" Background="#B3000000">

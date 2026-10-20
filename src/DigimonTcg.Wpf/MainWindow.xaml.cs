@@ -29,6 +29,10 @@ public partial class MainWindow : Window
     private List<CardData> _builderDigitamaDeck = new();
     private string _activeDeckTitle = "🔥 [추천 1] 워그레이몬 & 오메가몬 초화력 비트 (50장)";
 
+    // 이름을 붙여 저장한 내 덱 보관함 (data/saved_decks.json) · 지금 덱 빌더에 불러온 / 저장한 덱 이름 (저장 창 기본값)
+    private readonly SavedDeckStore _savedDeckStore;
+    private string? _currentSavedDeckName;
+
     private CardData? _pendingHandCard;
     private bool _pendingIsEvolution;
     private bool _pendingTargetsOpponent;
@@ -61,6 +65,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _catalogService = new CardCatalogService();
+        _savedDeckStore = new SavedDeckStore(Path.Combine(Path.GetDirectoryName(_catalogService.ImagesDirectoryPath)!, "saved_decks.json"));
         _gameState = new GameState();
         _engine = new GoldfishEngine(_gameState) { PlayerChoosesBlocks = true };
         _engine.PlayerChoices = new WpfChoiceProvider(this);   // ≪방벽≫ · ≪회피≫ · ≪돌진≫ · ≪연계≫ 같은 "~할 수 있다" 선택
@@ -594,8 +599,11 @@ public partial class MainWindow : Window
         ShowToast(true, "🛠️ [덱 빌딩 & 도감] 7색 전체 TCG 카드와 6대 추천 메타 덱 프리셋, AI 자동 완성 기능을 사용할 수 있습니다.");
     }
 
-    // ==================== 👾 상대 AI 덱 선택 (기초 덱 + 내가 만든 덱) ====================
+    // ==================== 👾 상대 AI 덱 선택 (기초 덱 + 미러전 + 이름 붙여 저장한 내 덱들) ====================
+    // 콤보 항목: 0 자동 배정 · 1~6 기초 덱 · 7 미러전 · 8~ 저장한 덱 (이름별 1개씩, 저장 / 삭제하면 다시 채운다)
+    private const int MirrorChoiceIndex = 7;
     private int _opponentChoiceIndex;
+    private string? _opponentSavedDeckName;   // 저장한 덱을 상대로 골랐을 때 그 덱 이름
     private bool _isSyncingOpponentCombo;
 
     private static readonly string[] OpponentChoiceLabels =
@@ -607,7 +615,6 @@ public partial class MainWindow : Window
         "🌿 [기초] ST-4 기가 그린",
         "⚙️ [기초] ST-5 머신 블랙",
         "💜 [기초] ST-6 베놈 바이올렛",
-        "🛠️ 내가 만든 덱 (저장된 덱)",
         "🪞 미러전 (현재 내 출전 덱)"
     };
 
@@ -617,6 +624,25 @@ public partial class MainWindow : Window
         CmbMatchOpponentDeck.Items.Clear();
         foreach (var label in OpponentChoiceLabels)
             CmbMatchOpponentDeck.Items.Add(new ComboBoxItem { Content = label });
+
+        var savedDecks = _savedDeckStore.LoadAll();
+        foreach (var deck in savedDecks)
+            CmbMatchOpponentDeck.Items.Add(new ComboBoxItem { Content = $"🛠️ 내 덱: {deck.Name}", Tag = deck.Name });
+
+        // 상대로 고른 저장 덱이 지워졌으면 자동 배정으로 돌아간다
+        if (_opponentSavedDeckName != null)
+        {
+            int at = savedDecks.ToList().FindIndex(d => string.Equals(d.Name, _opponentSavedDeckName, StringComparison.OrdinalIgnoreCase));
+            if (at >= 0)
+            {
+                _opponentChoiceIndex = OpponentChoiceLabels.Length + at;
+            }
+            else
+            {
+                _opponentSavedDeckName = null;
+                _opponentChoiceIndex = 0;
+            }
+        }
         CmbMatchOpponentDeck.SelectedIndex = _opponentChoiceIndex;
         _isSyncingOpponentCombo = false;
     }
@@ -627,14 +653,9 @@ public partial class MainWindow : Window
             return;
 
         _opponentChoiceIndex = combo.SelectedIndex;
-
-        if (_opponentChoiceIndex == 7 && _catalogService.LoadCustomDeck() == null)
-        {
-            ShowToast(false, "저장된 커스텀 덱이 없습니다. [🛠️ 덱 빌딩]에서 덱을 만든 뒤 [💾 덱 저장]을 눌러주세요. (그 전까지는 자동 배정으로 대전합니다)");
-            return;
-        }
-
-        ShowToast(true, $"👾 상대 AI 덱을 [{OpponentChoiceLabels[_opponentChoiceIndex]}](으)로 설정했습니다. 다음 실전 대련(또는 [🔄 재대전])부터 적용됩니다.");
+        _opponentSavedDeckName = (combo.SelectedItem as ComboBoxItem)?.Tag as string;
+        string label = (combo.SelectedItem as ComboBoxItem)?.Content as string ?? OpponentChoiceLabels[0];
+        ShowToast(true, $"👾 상대 AI 덱을 [{label}](으)로 설정했습니다. 다음 실전 대련(또는 [🔄 재대전])부터 적용됩니다.");
     }
 
     private void BtnRematchAi_Click(object sender, RoutedEventArgs e)
@@ -651,6 +672,17 @@ public partial class MainWindow : Window
     /// </summary>
     private (List<CardData>? Main, List<CardData>? Digitama, string? Name) ResolveSelectedOpponentDeck()
     {
+        if (_opponentSavedDeckName != null)
+        {
+            var saved = _savedDeckStore.Find(_opponentSavedDeckName);
+            if (saved == null)
+                return (null, null, null);
+            var (main, digitama, _) = SavedDeckStore.Resolve(saved, CatalogById());
+            if (main.Count < 10)
+                return (null, null, null);   // 너무 적으면 자동 배정
+            return (main, digitama, $"🛠️ 내 덱: {saved.Name} ({main.Count}장)");
+        }
+
         switch (_opponentChoiceIndex)
         {
             case 1: { var (m, d) = StarterDecks.CreateSt1GaiaRedPreset(); return (m, d, OpponentChoiceLabels[1]); }
@@ -659,14 +691,7 @@ public partial class MainWindow : Window
             case 4: { var (m, d) = StarterDecks.CreateSt4GigaGreenPreset(); return (m, d, OpponentChoiceLabels[4]); }
             case 5: { var (m, d) = StarterDecks.CreateSt5MachineBlackPreset(); return (m, d, OpponentChoiceLabels[5]); }
             case 6: { var (m, d) = StarterDecks.CreateSt6VenomVioletPreset(); return (m, d, OpponentChoiceLabels[6]); }
-            case 7:
-            {
-                var saved = _catalogService.LoadCustomDeck();
-                if (saved == null || saved.Value.MainDeck.Count < 10)
-                    return (null, null, null);
-                return (saved.Value.MainDeck, saved.Value.DigitamaDeck, $"🛠️ 내가 만든 덱: {saved.Value.DeckName} ({saved.Value.MainDeck.Count}장)");
-            }
-            case 8:
+            case MirrorChoiceIndex:
                 return (_builderMainDeck.ToList(), _builderDigitamaDeck.ToList(), $"🪞 미러전: {_activeDeckTitle}");
             default:
                 return (null, null, null);
@@ -875,6 +900,7 @@ public partial class MainWindow : Window
     private void ApplyPresetDeckAndSync(string deckTitle, (List<CardData> MainDeck, List<CardData> DigitamaDeck) preset)
     {
         _activeDeckTitle = deckTitle;
+        _currentSavedDeckName = null;
         _builderMainDeck = preset.MainDeck;
         _builderDigitamaDeck = preset.DigitamaDeck;
         if (TxtLobbyActiveDeckName != null)
@@ -4584,31 +4610,180 @@ public partial class MainWindow : Window
         ShowToast(true, guideMsg);
     }
 
+    // ==================== 💾 내 덱 저장 · 불러오기 (이름을 붙여 여러 개 저장, data/saved_decks.json) ====================
+    private Dictionary<string, CardData> CatalogById() =>
+        _catalogService.Catalog.GroupBy(c => c.CardId).ToDictionary(g => g.Key, g => g.First());
+
     private void BtnSaveCustomDeck_Click(object sender, RoutedEventArgs e)
     {
-        _catalogService.SaveCustomDeck("사용자 커스텀 덱", _builderMainDeck, _builderDigitamaDeck);
-        ShowToast(true, "현재 덱 구성을 로컬 파일(data/saved_decks.json)에 저장했습니다.");
+        if (_builderMainDeck.Count + _builderDigitamaDeck.Count == 0)
+        {
+            ShowToast(false, "덱이 비어 있습니다. 카드를 담은 뒤 저장하세요.");
+            return;
+        }
+
+        var (isValid, _) = DeckValidator.ValidateDeck(_builderMainDeck, _builderDigitamaDeck);
+        TxtDeckSaveSummary.Text = $"메인 덱 {_builderMainDeck.Count}장 · 디지타마 {_builderDigitamaDeck.Count}장"
+            + (isValid ? "" : " · 아직 대전 규격(메인 50장)을 채우지 않은 덱도 저장할 수 있습니다.");
+        TxtDeckSaveName.Text = _currentSavedDeckName ?? $"내 덱 {_savedDeckStore.LoadAll().Count + 1}";
+        UpdateDeckSaveHint();
+        DeckSaveOverlay.Visibility = Visibility.Visible;
+        TxtDeckSaveName.Focus();
+        TxtDeckSaveName.SelectAll();
     }
+
+    private void UpdateDeckSaveHint()
+    {
+        string? error = SavedDeckStore.ValidateName(TxtDeckSaveName.Text);
+        bool exists = error == null && _savedDeckStore.Exists(TxtDeckSaveName.Text);
+        TxtDeckSaveHint.Text = error ?? (exists ? "⚠️ 같은 이름의 덱이 있습니다. 저장하면 그 덱을 덮어씁니다." : " ");
+        TxtDeckSaveHint.Foreground = BrushFromHex(error != null ? "#F38BA8" : "#F9E2AF");
+        BtnDeckSaveConfirm.IsEnabled = error == null;
+        BtnDeckSaveConfirm.Content = exists ? "덮어쓰기" : "저장";
+    }
+
+    private void TxtDeckSaveName_TextChanged(object sender, TextChangedEventArgs e) => UpdateDeckSaveHint();
+
+    private void TxtDeckSaveName_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter && BtnDeckSaveConfirm.IsEnabled)
+            BtnDeckSaveConfirm_Click(sender, e);
+        else if (e.Key == System.Windows.Input.Key.Escape)
+            DeckSaveOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void BtnDeckSaveConfirm_Click(object sender, RoutedEventArgs e)
+    {
+        if (SavedDeckStore.ValidateName(TxtDeckSaveName.Text) is { } error)
+        {
+            ShowToast(false, error);
+            return;
+        }
+
+        bool overwrote = _savedDeckStore.Exists(TxtDeckSaveName.Text);
+        SavedDeck saved;
+        try
+        {
+            saved = _savedDeckStore.Save(TxtDeckSaveName.Text, _builderMainDeck, _builderDigitamaDeck);
+        }
+        catch (IOException ex)
+        {
+            ShowToast(false, $"덱을 저장하지 못했습니다: {ex.Message}");
+            return;
+        }
+
+        DeckSaveOverlay.Visibility = Visibility.Collapsed;
+        _currentSavedDeckName = saved.Name;
+        SetActiveDeckTitle($"📂 {saved.Name} ({_builderMainDeck.Count}장)");
+        InitOpponentDeckCombos();
+        ShowToast(true, overwrote ? $"💾 [{saved.Name}] 덱을 새 구성으로 덮어썼습니다." : $"💾 [{saved.Name}] 덱을 저장했습니다.");
+    }
+
+    private void BtnDeckSaveCancel_Click(object sender, RoutedEventArgs e) => DeckSaveOverlay.Visibility = Visibility.Collapsed;
 
     private void BtnLoadCustomDeck_Click(object sender, RoutedEventArgs e)
     {
-        var loaded = _catalogService.LoadCustomDeck();
-        if (loaded == null)
+        RenderDeckLoadList();
+        DeckLoadOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void RenderDeckLoadList()
+    {
+        var decks = _savedDeckStore.LoadAll();
+        TxtDeckLoadSummary.Text = decks.Count == 0
+            ? "저장한 덱이 없습니다. 덱 빌더에서 [💾 저장]을 눌러 이름을 붙여 저장하세요."
+            : $"{decks.Count}개 · 최근 저장한 순서";
+        DeckLoadListPanel.Children.Clear();
+        foreach (var deck in decks)
+            DeckLoadListPanel.Children.Add(CreateSavedDeckRow(deck));
+    }
+
+    private FrameworkElement CreateSavedDeckRow(SavedDeck deck)
+    {
+        var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        info.Children.Add(new TextBlock { Text = deck.Name, Foreground = Brushes.White, FontWeight = FontWeights.Bold, FontSize = 14.5, TextTrimming = TextTrimming.CharacterEllipsis });
+        info.Children.Add(new TextBlock
         {
-            ShowToast(false, "저장된 커스텀 덱 파일(data/saved_decks.json)이 없습니다.");
-            return;
-        }
-        _builderMainDeck = loaded.Value.MainDeck;
-        _builderDigitamaDeck = loaded.Value.DigitamaDeck;
-        _activeDeckTitle = $"📂 {loaded.Value.DeckName} (50장)";
-        if (TxtLobbyActiveDeckName != null)
+            Text = $"메인 {deck.MainDeckCardIds.Count}장 · 디지타마 {deck.DigitamaCardIds.Count}장 · {deck.SavedAt:yyyy-MM-dd HH:mm} 저장",
+            Foreground = Theme.GetBrush("Neo.Brush.Text.Muted"),
+            FontSize = 11.5,
+            Margin = new Thickness(0, 2, 0, 0)
+        });
+
+        var btnLoad = new Button { Content = "불러오기", Style = (Style)FindResource("Neo.Button.Primary"), FontWeight = FontWeights.Bold, Padding = new Thickness(14, 6, 14, 6), Margin = new Thickness(8, 0, 0, 0) };
+        btnLoad.Click += (_, _) => LoadSavedDeck(deck);
+
+        // 삭제는 두 번 눌러야 한다 (실수로 지우지 않도록)
+        var btnDelete = new Button { Content = "삭제", Style = (Style)FindResource("Neo.Button.Ghost"), FontWeight = FontWeights.Bold, Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0) };
+        bool armed = false;
+        btnDelete.Click += (_, _) =>
         {
-            TxtLobbyActiveDeckName.Text = $"🎴 출전 덱: {_activeDeckTitle}";
-        }
+            if (!armed)
+            {
+                armed = true;
+                btnDelete.Content = "정말 삭제?";
+                btnDelete.Foreground = BrushFromHex("#F38BA8");
+                return;
+            }
+            _savedDeckStore.Delete(deck.Name);
+            if (string.Equals(_currentSavedDeckName, deck.Name, StringComparison.OrdinalIgnoreCase))
+                _currentSavedDeckName = null;
+            InitOpponentDeckCombos();
+            RenderDeckLoadList();
+            ShowToast(true, $"🗑️ [{deck.Name}] 덱을 삭제했습니다.");
+        };
+
+        var row = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(btnDelete, Dock.Right);
+        DockPanel.SetDock(btnLoad, Dock.Right);
+        row.Children.Add(btnDelete);
+        row.Children.Add(btnLoad);
+        row.Children.Add(info);
+
+        return new Border
+        {
+            Child = row,
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 0, 0, 8),
+            CornerRadius = new CornerRadius(6),
+            Background = Theme.GetBrush("Neo.Brush.SurfaceInput"),
+            BorderBrush = BrushFromHex("#33FFFFFF"),
+            BorderThickness = new Thickness(1)
+        };
+    }
+
+    private void LoadSavedDeck(SavedDeck deck)
+    {
+        var (main, digitama, missing) = SavedDeckStore.Resolve(deck, CatalogById());
+        _builderMainDeck = main;
+        _builderDigitamaDeck = digitama;
+        _currentSavedDeckName = deck.Name;
+        SetActiveDeckTitle($"📂 {deck.Name} ({main.Count}장)");
+        DeckLoadOverlay.Visibility = Visibility.Collapsed;
         RefreshCatalogUi();
         RefreshDeckBuilderUi();
-        ShowToast(true, $"[{loaded.Value.DeckName}] 덱을 불러왔습니다.");
+        ShowToast(missing == 0, missing == 0
+            ? $"📂 [{deck.Name}] 덱을 불러왔습니다."
+            : $"📂 [{deck.Name}] 덱을 불러왔습니다. 도감에 없는 카드 {missing}장은 빠졌습니다.");
     }
+
+    private void BtnDeckLoadClose_Click(object sender, RoutedEventArgs e) => DeckLoadOverlay.Visibility = Visibility.Collapsed;
+
+    private void SetActiveDeckTitle(string title)
+    {
+        _activeDeckTitle = title;
+        if (TxtLobbyActiveDeckName != null)
+            TxtLobbyActiveDeckName.Text = $"🎴 출전 덱: {_activeDeckTitle}";
+    }
+
+    // 창 바깥(어두운 배경)을 누르면 닫고, 창 안을 누르면 닫히지 않게 한다
+    private void DeckOverlayBackdrop_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        DeckSaveOverlay.Visibility = Visibility.Collapsed;
+        DeckLoadOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void DeckOverlayPanel_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e) => e.Handled = true;
 
     private void BtnClearDeck_Click(object sender, RoutedEventArgs e)
     {
