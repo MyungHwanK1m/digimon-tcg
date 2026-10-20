@@ -11,7 +11,29 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
         ApplyTcgCardBackImages();
+    }
+
+    /// <summary>
+    /// 처리되지 않은 UI 예외로 게임이 그냥 꺼지지 않도록: 실행 파일 옆 crash_log.txt 에 기록하고 알린 뒤 계속 진행한다.
+    /// </summary>
+    private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        string logPath = Path.Combine(AppContext.BaseDirectory, "crash_log.txt");
+        try
+        {
+            File.AppendAllText(logPath, $"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} ====\n{e.Exception}\n\n");
+        }
+        catch
+        {
+            // 로그 기록 실패는 무시
+        }
+
+        MessageBox.Show(
+            $"예상하지 못한 오류가 발생했지만 게임을 계속 진행합니다.\n\n{e.Exception.Message}\n\n자세한 내용: {logPath}",
+            "DIGIMON TCG - 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+        e.Handled = true;
     }
 
     /// <summary>
@@ -21,7 +43,7 @@ public partial class App : Application
     /// </summary>
     private void ApplyTcgCardBackImages()
     {
-        string imagesDir = new CardCatalogService().ImagesDirectoryPath;
+        string imagesDir = CardCatalogService.ResolveImagesDirectory();
 
         var cardBack = LoadImage(Path.Combine(imagesDir, "_card_back.jpg"));
         if (cardBack != null)

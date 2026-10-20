@@ -16,8 +16,27 @@ public class CardInstance
     public int TemporarySecurityAttackBonus { get; set; } // 이번 턴 스킬/옵션 임시 시큐리티 어택 버프
     public int TamerDpBonus { get; set; }          // 필드 테이머 지속 DP 버프
     public int TamerSecurityAttackBonus { get; set; } // 필드 테이머 지속 시큐리티 어택 버프
+    public int EffectDpBonus { get; set; }         // 카드 지속 효과(진화원 조건부 DP 등) — 엔진이 매번 다시 계산
+    public int EffectSecurityAttackBonus { get; set; } // 카드 지속 효과 시큐리티 어택 — 엔진이 매번 다시 계산
     public bool HasUsedOncePerTurnEffect { get; set; }    // 턴당 1회 효과(메탈가루몬 재행동 등) 사용 여부
     public List<string> ActiveSkillBuffLabels { get; } = new(); // 이번 턴 적용된 스킬/옵션 버프 이름 목록
+
+    /// <summary>지금이 이 디지몬 주인의 턴인지 — [자신의 턴] 진화원 DP 보너스는 주인의 턴에만 적용된다 (엔진이 설정)</summary>
+    public bool IsOwnersTurn { get; set; } = true;
+
+    // 기간 효과: 값은 GameState.TurnSequence(플레이어 · 상대 턴마다 1씩 증가) 기준 "이 턴 종료 시까지"
+    public int CannotAttackUntil { get; set; }     // 어택할 수 없음 (소로 블루 · 로제몬 등)
+    public int CannotBlockUntil { get; set; }      // 블록할 수 없음
+    public int GrantedBlockerUntil { get; set; }   // ≪블로커≫를 얻음 (메탈그레이몬 ST5-09)
+    public int GrantedRebootUntil { get; set; }    // ≪재기동≫을 얻음 (파워드라몬 ST5-12)
+    public int UnblockableUntil { get; set; }      // 블록당하지 않음 (오메가몬 Alter-S BT3-112)
+
+    /// <summary>이번 턴에 사용한 [턴에 1회] 효과 (카드 번호 기준) — 액티브 페이즈에 비운다</summary>
+    public HashSet<string> UsedOncePerTurn { get; } = new();
+
+    /// <summary>엔진이 계산한 ≪블로커≫ 보유 여부 (카드 본래 블로커 + 진화원 · 효과로 얻은 블로커)</summary>
+    public bool HasGrantedBlocker { get; set; }
+    public bool HasBlocker => TopCard.IsBlocker || HasGrantedBlocker;
 
     public CardInstance(CardData baseCard, int currentTurn)
     {
@@ -30,33 +49,56 @@ public class CardInstance
     {
         EvolutionSources.Push(TopCard);
         TopCard = newCard;
-
-        // ST1-11 워그레이몬 등 [진화 시] 진화원 2장마다 시큐리티 어택 +1 처리
-        if (newCard.CardId == "ST1-11")
-        {
-            int bonusChecks = EvolutionSources.Count / 2;
-            if (bonusChecks > 0)
-            {
-                TemporarySecurityAttackBonus += bonusChecks;
-                ActiveSkillBuffLabels.Add($"🔥워그레이몬 진화스킬 (시큐어택 +{bonusChecks})");
-            }
-        }
     }
 
+    /// <summary>≪퇴화≫: 맨 위 카드를 버리고 바로 아래 진화원을 맨 위로 올린다 (버린 카드 반환)</summary>
+    public CardData? DeDigivolveOnce()
+    {
+        if (EvolutionSources.Count == 0 || TopCard.Level <= 3)
+            return null;
+        var removed = TopCard;
+        TopCard = EvolutionSources.Pop();
+        return removed;
+    }
+
+    /// <summary>진화원을 아래(가장 먼저 깔린 카드)에서부터 최대 count장 제거해 반환한다</summary>
+    public List<CardData> RemoveBottomSources(int count)
+    {
+        var bottomUp = EvolutionSources.Reverse().ToList();
+        var removed = bottomUp.Take(count).ToList();
+        var rest = bottomUp.Skip(removed.Count).ToList();
+        EvolutionSources = new Stack<CardData>(rest);
+        return removed;
+    }
+
+    /// <summary>진화원에서 조건에 맞는 카드 1장을 꺼낸다 (순서 유지)</summary>
+    public CardData? TakeSource(Func<CardData, bool> predicate)
+    {
+        var bottomUp = EvolutionSources.Reverse().ToList();
+        var found = bottomUp.FirstOrDefault(predicate);
+        if (found == null)
+            return null;
+        bottomUp.Remove(found);
+        EvolutionSources = new Stack<CardData>(bottomUp);
+        return found;
+    }
+
+    public bool HasSource(string cardId) => EvolutionSources.Any(s => s.CardId == cardId);
+
     public int GetInheritedDpBonus() =>
-        EvolutionSources.Sum(s => s.InheritedDpBonus);
+        IsOwnersTurn ? EvolutionSources.Sum(s => s.InheritedDpBonus) : 0;
 
     public int GetTotalBonusDP() =>
-        GetInheritedDpBonus() + TamerDpBonus + TemporaryDpBonus;
+        GetInheritedDpBonus() + TamerDpBonus + TemporaryDpBonus + EffectDpBonus;
 
     public int GetCurrentDP() =>
-        TopCard.DP + GetTotalBonusDP();
+        Math.Max(0, TopCard.DP + GetTotalBonusDP());
 
     public int GetInheritedSecurityAttackBonus() =>
         EvolutionSources.Sum(s => s.InheritedSecurityAttackBonus);
 
     public int GetTotalBonusSecurityAttack() =>
-        TopCard.SecurityAttackBonus + GetInheritedSecurityAttackBonus() + TamerSecurityAttackBonus + TemporarySecurityAttackBonus;
+        TopCard.SecurityAttackBonus + GetInheritedSecurityAttackBonus() + TamerSecurityAttackBonus + TemporarySecurityAttackBonus + EffectSecurityAttackBonus;
 
     public int GetSecurityAttackCount() =>
         Math.Max(0, 1 + GetTotalBonusSecurityAttack());

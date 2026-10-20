@@ -15,3 +15,7 @@ TestResults/
 ## 공식 카드 뒷면 이미지 (저작권 - 로컬에서만 사용, 없으면 벡터 뒷면으로 대체)
 data/images/_card_back.jpg
 data/images/_digitama_back.jpg
+
+## 한글 카드 이미지 원본 (용량 큼 · 저작권 - 로컬에서만 사용)
+data/tmp/
+data/images_ko/

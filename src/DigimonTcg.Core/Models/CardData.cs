@@ -21,6 +21,16 @@ public class CardData
     public int SecurityAttackBonus { get; set; }                    // 기본 시큐리티 어택 추가 수치
     public int InheritedSecurityAttackBonus { get; set; }           // 진화원 시큐리티 어택 추가 수치
     public string ImageUrl { get; set; } = string.Empty;            // 카드 이미지 URL (API 연동용)
+    public string Rarity { get; set; } = string.Empty;              // 카드 등급: C / U / R / SR / SEC / P (API 동기화로 채워짐)
+
+    // 대전 엔진이 이 카드의 효과를 구현했는지 여부 (내장 한글 카드 = true, API로 받은 카드 = false)
+    // 미구현 카드는 대전에서 DP · 코스트 · 진화 조건과 자동 인식 키워드(블로커 / 시큐리티 어택)만 적용된다.
+    // 카드 번호로 판별하므로 덱 프리셋 · 손패 · 필드에서 새로 만든 카드 객체도 같은 결과가 나온다.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsEffectImplemented => DigimonTcg.Core.Data.StarterDecks.IsBuiltInCard(CardId);
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasAutoKeywords => !IsEffectImplemented && (IsBlocker || SecurityAttackBonus > 0 || InheritedSecurityAttackBonus > 0);
 
     public string DisplaySummary =>
         Type == CardType.Digitama
