@@ -230,15 +230,17 @@ public partial class MainWindow : Window
             ? $"Lv.{card.Level} {card.Color} {card.Type}"
             : $"{card.Color} {card.Type}") + (string.IsNullOrEmpty(card.Rarity) ? "" : $" · {card.Rarity}");
 
-        TxtInspectorName.Text = card.Name;
+        TxtInspectorName.Text = card.DisplayName;
         TxtInspectorStats.Text = card.Type == CardType.Digimon
             ? $"등장 코스트: {card.PlayCost} | 진화: {card.EvoCost} (Lv.{card.EvoRequirementLevel})\n기본 DP: {card.DP:N0}"
             : card.Type == CardType.Digitama
                 ? "육성 에어리어 전용 Lv.2 디지타마"
                 : $"사용 코스트: {card.PlayCost}";
+        if (card.DisplayTraits.Count > 0)
+            TxtInspectorStats.Text += $"\n특징: {string.Join(" · ", card.DisplayTraits)}";
 
-        TxtInspectorEffect.Text = string.IsNullOrWhiteSpace(card.EffectText) ? "없음 (바닐라)" : card.EffectText;
-        TxtInspectorInherited.Text = string.IsNullOrWhiteSpace(card.InheritedEffectText) ? "없음" : card.InheritedEffectText;
+        TxtInspectorEffect.Text = string.IsNullOrWhiteSpace(card.DisplayEffectText) ? "없음 (바닐라)" : card.DisplayEffectText;
+        TxtInspectorInherited.Text = string.IsNullOrWhiteSpace(card.DisplayInheritedEffectText) ? "없음" : card.DisplayInheritedEffectText;
 
         // 대전 엔진이 효과를 구현하지 않은 카드 안내
         var support = EffectSupport.For(card);
@@ -257,7 +259,7 @@ public partial class MainWindow : Window
         {
             ImgInspectorCard.Visibility = Visibility.Collapsed;
             InspectorFallbackPanel.Visibility = Visibility.Visible;
-            TxtInspectorFallback.Text = $"{card.CardId}\n{card.Name}\n(Lv.{card.Level})";
+            TxtInspectorFallback.Text = $"{card.CardId}\n{card.DisplayName}\n(Lv.{card.Level})";
         }
     }
 
@@ -300,7 +302,7 @@ public partial class MainWindow : Window
                     45.0),
                 Child = new TextBlock
                 {
-                    Text = $"{card.CardId}\n{card.Name}",
+                    Text = $"{card.CardId}\n{card.DisplayName}",
                     Foreground = BrushFromHex("#11111B"),
                     FontWeight = FontWeights.ExtraBold,
                     FontSize = 13,
@@ -397,7 +399,7 @@ public partial class MainWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = card.Level > 0 ? $"Lv.{card.Level} {card.Name}" : card.Name,
+                        Text = card.Level > 0 ? $"Lv.{card.Level} {card.DisplayName}" : card.DisplayName,
                         Foreground = BrushFromHex("#F8FAFC"),
                         FontWeight = FontWeights.Bold,
                         FontSize = 11,
@@ -547,7 +549,7 @@ public partial class MainWindow : Window
             Stretch = Stretch.UniformToFill,
             AlignmentY = AlignmentY.Top
         };
-        target.ToolTip = $"{card!.Name} ({card.CardId})";
+        target.ToolTip = $"{card!.DisplayName} ({card.CardId})";
     }
 
     private void BtnNavHome_Click(object sender, RoutedEventArgs e)
@@ -963,7 +965,7 @@ public partial class MainWindow : Window
             {
                 var tamerSummaries = _gameState.Player.Tamers
                     .GroupBy(t => t.CardId)
-                    .Select(g => $"{g.First().Name} x{g.Count()}");
+                    .Select(g => $"{g.First().DisplayName} x{g.Count()}");
                 TxtFieldTamerAndSources.Text = $"🎖️ 현재 내 필드 활성 테이머: {string.Join(", ", tamerSummaries)}\n(필드의 디지몬에 마우스를 올리면 정확한 DP/시큐 증가치가 계산됩니다)";
             }
             else
@@ -974,7 +976,7 @@ public partial class MainWindow : Window
         }
 
         string sideLabel = isOpponent ? "[상대 필드]" : ReferenceEquals(_gameState.Player.BreedingArea, instance) ? "[내 육성존]" : "[내 배틀존]";
-        TxtFieldInspectHeader.Text = $"{sideLabel} Lv.{instance.TopCard.Level} {instance.TopCard.Name}";
+        TxtFieldInspectHeader.Text = $"{sideLabel} Lv.{instance.TopCard.Level} {instance.TopCard.DisplayName}";
         TxtFieldInspectPinState.Text = isPinned ? "📌 클릭 고정됨 (재클릭 해제)" : "🖱️ 마우스 오버 중 (클릭 시 고정)";
         TxtFieldInspectPinState.Foreground = BrushFromHex(isPinned ? "#F9E2AF" : "#A6E3A1");
 
@@ -1006,7 +1008,7 @@ public partial class MainWindow : Window
         var detailLines = new List<string>();
         if (!isOpponent && _gameState.Player.Tamers.Count > 0)
         {
-            var tamerNames = _gameState.Player.Tamers.GroupBy(t => t.CardId).Select(g => $"{g.First().Name} x{g.Count()}");
+            var tamerNames = _gameState.Player.Tamers.GroupBy(t => t.CardId).Select(g => $"{g.First().DisplayName} x{g.Count()}");
             detailLines.Add($"🎖️ 테이머 오라 적용: {string.Join(", ", tamerNames)} (DP +{instance.TamerDpBonus:N0}, 시큐 +{instance.TamerSecurityAttackBonus})");
         }
         if (instance.ActiveSkillBuffLabels.Count > 0)
@@ -1024,7 +1026,7 @@ public partial class MainWindow : Window
                     : s.InheritedDpBonus > 0
                         ? $"[▲DP+{s.InheritedDpBonus:N0}]"
                         : "";
-                return $"Lv.{s.Level} {s.Name}{bonus}";
+                return $"Lv.{s.Level} {s.DisplayName}{bonus}";
             });
             detailLines.Add($"🧬 진화원({evoSources.Count}장): {string.Join(" ➔ ", srcTexts)}");
         }
@@ -1041,10 +1043,10 @@ public partial class MainWindow : Window
         if (TxtFieldInspectHeader == null)
             return;
 
-        TxtFieldInspectHeader.Text = $"[내 테이머 존] 🎖️ {tamer.Name} x{count}장";
+        TxtFieldInspectHeader.Text = $"[내 테이머 존] 🎖️ {tamer.DisplayName} x{count}장";
         TxtFieldInspectPinState.Text = "🎖️ 테이머 지속 효과";
 
-        string mainEffect = tamer.EffectText.Split('\n')[0];
+        string mainEffect = tamer.DisplayEffectText.Split('\n')[0];
         string dpAura = tamer.CardId == "ST1-12"
             ? $"[자신의 턴] 아군 모든 디지몬 DP +{count * 1000:N0}"
             : tamer.CardId == "ST3-12"
@@ -1053,7 +1055,7 @@ public partial class MainWindow : Window
 
         TxtFieldDpBreakdown.Text = $"⚔️ 필드 DP 증가치: {dpAura}";
         TxtFieldSecBreakdown.Text = $"⚡ 테이머 효과 (x{count}): {mainEffect}";
-        TxtFieldTamerAndSources.Text = $"📜 원문 효과: {tamer.EffectText}";
+        TxtFieldTamerAndSources.Text = $"📜 원문 효과: {tamer.DisplayEffectText}";
     }
 
     // ==================== ⚡ 2-3. 궁극체(Lv.6) / 초궁극체(Lv.7) 특수 소환 컷인 연출 ====================
@@ -1088,12 +1090,12 @@ public partial class MainWindow : Window
                 : $"⚡ LV.{card.Level} ULTIMATE SUMMON // 궁극체 전장 강림!";
         TxtUltimateCutInTier.Foreground = card.Level >= 7 ? BrushFromHex("#F9E2AF") : colorBrush;
 
-        TxtUltimateCutInName.Text = card.Name;
+        TxtUltimateCutInName.Text = card.DisplayName;
         TxtUltimateCutInStats.Text =
             $"⚔️ DP {instance.GetCurrentDP():N0} (▲+{instance.GetTotalBonusDP():N0})   |   💥 시큐리티 타격 {instance.GetSecurityAttackCount()}장";
-        TxtUltimateCutInEffect.Text = string.IsNullOrWhiteSpace(card.EffectText)
+        TxtUltimateCutInEffect.Text = string.IsNullOrWhiteSpace(card.DisplayEffectText)
             ? "압도적인 궁극체 전투력으로 상대 필드를 제압합니다!"
-            : card.EffectText;
+            : card.DisplayEffectText;
 
         // 배경 오라 + 카드 색 집중선
         CutInAura.Background = new RadialGradientBrush(Color.FromArgb(150, auraColor.R, auraColor.G, auraColor.B), Color.FromArgb(0, 0, 0, 0))
@@ -1544,7 +1546,7 @@ public partial class MainWindow : Window
 
         var attacker = pending.Attacker;
         BlockAttackerSlot.Content = CreateReplayCard(attacker.TopCard);
-        TxtBlockTitle.Text = $"AI [{attacker.TopCard.Name}]의 어택! 블록하시겠습니까?";
+        TxtBlockTitle.Text = $"AI [{attacker.TopCard.DisplayName}]의 어택! 블록하시겠습니까?";
         TxtBlockDetail.Text = $"상대 DP {pending.AttackerDp:N0} · 시큐리티 체크 {pending.SecurityChecks}장 — 막을 ≪블로커≫를 고르거나, 블록하지 않고 시큐리티로 받으세요. (예상 결과는 DP 기준)";
 
         int mySecurity = _gameState.Player.SecurityStack.Count;
@@ -1575,7 +1577,7 @@ public partial class MainWindow : Window
         content.Children.Add(CreateCardVisualFrame(blocker.TopCard, width: 110, height: 154));
         content.Children.Add(new TextBlock
         {
-            Text = $"{blocker.TopCard.Name} · DP {dp:N0}",
+            Text = $"{blocker.TopCard.DisplayName} · DP {dp:N0}",
             Foreground = Brushes.White,
             FontWeight = FontWeights.Bold,
             FontSize = 13,
@@ -1599,7 +1601,7 @@ public partial class MainWindow : Window
             Margin = new Thickness(0, 0, 12, 0),
             Padding = new Thickness(10),
             Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = $"[{blocker.TopCard.Name}]을(를) 레스트하고 이 어택을 대신 받습니다"
+            ToolTip = $"[{blocker.TopCard.DisplayName}]을(를) 레스트하고 이 어택을 대신 받습니다"
         };
         btn.MouseEnter += (_, _) => UpdateCardInspector(blocker.TopCard);
         btn.Click += (_, _) => ChooseBlock(blocker);
@@ -1881,7 +1883,7 @@ public partial class MainWindow : Window
         {
             var nextCard = remainingCards[0];
             TxtNextSecurityTarget.Text = peek
-                ? $"🎯 다음 타격 (#{clearedCount + 1}): [{nextCard.Name}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : nextCard.Type.ToString())}"
+                ? $"🎯 다음 타격 (#{clearedCount + 1}): [{nextCard.DisplayName}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : nextCard.Type.ToString())}"
                 : $"🎯 다음 타격: 시큐리티 #{clearedCount + 1} (뒷면 비공개)";
             TxtNextSecurityTarget.Foreground = BrushFromHex("#89DCEB");
         }
@@ -2052,7 +2054,7 @@ public partial class MainWindow : Window
 
             infoStack.Children.Add(new TextBlock
             {
-                Text = $"{titlePrefix}{card.Name}",
+                Text = $"{titlePrefix}{card.DisplayName}",
                 Foreground = BrushFromHex(isCleared ? "#9399B2" : "#F8FAFC"),
                 FontWeight = FontWeights.Bold,
                 FontSize = 12.5,
@@ -2132,12 +2134,12 @@ public partial class MainWindow : Window
 
         if (_pendingHandCard != null && !_pendingIsEvolution && _pendingTargetsOpponent)
         {
-            TxtOpponentFieldHeader.Text = $"🎯 [{_pendingHandCard.Name}] 발동 대기 중 👉 제거/무력화할 상대 디지몬을 클릭하세요!";
+            TxtOpponentFieldHeader.Text = $"🎯 [{_pendingHandCard.DisplayName}] 발동 대기 중 👉 제거/무력화할 상대 디지몬을 클릭하세요!";
             TxtOpponentFieldHeader.Foreground = BrushFromHex("#A6E3A1");
         }
         else if (_pendingAttackerInstance != null)
         {
-            TxtOpponentFieldHeader.Text = $"🎯 [{_pendingAttackerInstance.TopCard.Name}(DP {_pendingAttackerInstance.GetCurrentDP()})] 공격 대기 중 👉 타격할 상대 레스트(REST) 디지몬을 클릭하세요!";
+            TxtOpponentFieldHeader.Text = $"🎯 [{_pendingAttackerInstance.TopCard.DisplayName}(DP {_pendingAttackerInstance.GetCurrentDP()})] 공격 대기 중 👉 타격할 상대 레스트(REST) 디지몬을 클릭하세요!";
             TxtOpponentFieldHeader.Foreground = BrushFromHex("#A6E3A1");
         }
         else
@@ -2220,7 +2222,7 @@ public partial class MainWindow : Window
 
             infoStack.Children.Add(new TextBlock
             {
-                Text = $"Lv.{opp.TopCard.Level} {opp.TopCard.Name}",
+                Text = $"Lv.{opp.TopCard.Level} {opp.TopCard.DisplayName}",
                 Foreground = BrushFromHex("#F8FAFC"),
                 FontWeight = FontWeights.Bold,
                 FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = OpponentZoneSlotWidth - 14,
@@ -2239,7 +2241,7 @@ public partial class MainWindow : Window
             {
                 var btnOptTarget = new Button
                 {
-                    Content = $"💥 [{_pendingHandCard.Name}] 적중!",
+                    Content = $"💥 [{_pendingHandCard.DisplayName}] 적중!",
                     Background = BrushFromHex("#A6E3A1"),
                     Foreground = BrushFromHex("#11111B"),
                     FontWeight = FontWeights.ExtraBold,
@@ -2262,7 +2264,7 @@ public partial class MainWindow : Window
                 {
                     var btnHitTarget = new Button
                     {
-                        Content = $"⚔️ [{_pendingAttackerInstance.TopCard.Name}]으로 격파!",
+                        Content = $"⚔️ [{_pendingAttackerInstance.TopCard.DisplayName}]으로 격파!",
                         Background = BrushFromHex("#A6E3A1"),
                         Foreground = BrushFromHex("#11111B"),
                         FontWeight = FontWeights.ExtraBold,
@@ -2381,7 +2383,7 @@ public partial class MainWindow : Window
                 frame,
                 new TextBlock
                 {
-                    Text = $"Lv.{card.Level} {card.Name}",
+                    Text = $"Lv.{card.Level} {card.DisplayName}",
                     Foreground = Theme.GetBrush("Neo.Brush.Text.Secondary"),
                     FontSize = 10,
                     FontWeight = FontWeights.Bold,
@@ -2562,16 +2564,16 @@ public partial class MainWindow : Window
         if (_pendingHandCard != null)
         {
             TxtSelectedTarget.Text = _pendingIsEvolution
-                ? $"🎯 [{_pendingHandCard.Name}(Lv.{_pendingHandCard.Level})] 진화 대기 중 👉 내 필드에서 Lv.{_pendingHandCard.EvoRequirementLevel} 디지몬을 클릭하세요!"
+                ? $"🎯 [{_pendingHandCard.DisplayName}(Lv.{_pendingHandCard.Level})] 진화 대기 중 👉 내 필드에서 Lv.{_pendingHandCard.EvoRequirementLevel} 디지몬을 클릭하세요!"
                 : _pendingTargetsOpponent
-                    ? $"🎯 [{_pendingHandCard.Name}] 사용 대기 중 👉 상단 상대 배틀 에어리어에서 상대 디지몬을 클릭하세요!"
-                    : $"🎯 [{_pendingHandCard.Name}] 사용 대기 중 👉 내 배틀 에어리어에서 아군 디지몬을 클릭하세요!";
+                    ? $"🎯 [{_pendingHandCard.DisplayName}] 사용 대기 중 👉 상단 상대 배틀 에어리어에서 상대 디지몬을 클릭하세요!"
+                    : $"🎯 [{_pendingHandCard.DisplayName}] 사용 대기 중 👉 내 배틀 에어리어에서 아군 디지몬을 클릭하세요!";
             TxtSelectedTarget.Foreground = BrushFromHex("#A6E3A1");
             BtnCancelPendingAction.Visibility = Visibility.Visible;
         }
         else if (_pendingAttackerInstance != null)
         {
-            TxtSelectedTarget.Text = $"🎯 [{_pendingAttackerInstance.TopCard.Name}] 공격 대기 중 👉 상단 상대 배틀 에어리어에서 레스트(REST) 디지몬을 클릭하세요!";
+            TxtSelectedTarget.Text = $"🎯 [{_pendingAttackerInstance.TopCard.DisplayName}] 공격 대기 중 👉 상단 상대 배틀 에어리어에서 레스트(REST) 디지몬을 클릭하세요!";
             TxtSelectedTarget.Foreground = BrushFromHex("#A6E3A1");
             BtnCancelPendingAction.Visibility = Visibility.Visible;
         }
@@ -2621,7 +2623,7 @@ public partial class MainWindow : Window
                     Cursor = System.Windows.Input.Cursors.Hand,
                     Child = new TextBlock
                     {
-                        Text = $"★ {tamer.Name} x{count} [{auraDesc}]",
+                        Text = $"★ {tamer.DisplayName} x{count} [{auraDesc}]",
                         Foreground = BrushFromHex("#11111B"),
                         FontWeight = FontWeights.ExtraBold,
                         FontSize = 11
@@ -2640,14 +2642,14 @@ public partial class MainWindow : Window
                     if (_engine.GetMainAbilities(_gameState.Player).Any(a => a.Digimon == null && ReferenceEquals(a.Card, tamer)))
                         TryActivateMainAbility(null, tamer);
                     else
-                        ShowToast(true, $"🎖️ 테이머 [{tamer.Name}] x{count}장 활성 중: {auraDesc}");
+                        ShowToast(true, $"🎖️ 테이머 [{tamer.DisplayName}] x{count}장 활성 중: {auraDesc}");
                 };
                 TamerZonePanel.Children.Add(tamerChip);
             }
         }
 
         string myLastSecInfo = _gameState.PlayerSecurityCheckHistory.Count > 0
-            ? $"최근 오픈: [{_gameState.PlayerSecurityCheckHistory[^1].SecurityCard.Name}] → {_gameState.PlayerSecurityCheckHistory[^1].OutcomeSummary}"
+            ? $"최근 오픈: [{_gameState.PlayerSecurityCheckHistory[^1].SecurityCard.DisplayName}] → {_gameState.PlayerSecurityCheckHistory[^1].OutcomeSummary}"
             : "50장 메인 덱 맨 위 5장 무작위 배치됨";
 
         TxtPlayerZonesSummary.Text =
@@ -2787,7 +2789,7 @@ public partial class MainWindow : Window
                 else if (CardScripts.MainTargetOf(_pendingHandCard) == TargetKind.OwnDigimonWithDigimonSource && !instance.EvolutionSources.Any(s => s.Type == CardType.Digimon))
                 {
                     isValidPendingTarget = false;
-                    invalidTargetReason = $"{_pendingHandCard.Name}은(는) 진화원에 디지몬 카드가 있는 디지몬에게만 사용할 수 있습니다.";
+                    invalidTargetReason = $"{_pendingHandCard.DisplayName}은(는) 진화원에 디지몬 카드가 있는 디지몬에게만 사용할 수 있습니다.";
                 }
                 else
                 {
@@ -2867,14 +2869,14 @@ public partial class MainWindow : Window
                     Padding = new Thickness(5, 1, 5, 1),
                     Margin = new Thickness(0, 0, 0, 1),
                     Cursor = System.Windows.Input.Cursors.Hand,
-                    ToolTip = $"진화원: [{src.CardId}] Lv.{src.Level} {src.Name} — {src.InheritedEffectText}",
+                    ToolTip = $"진화원: [{src.CardId}] Lv.{src.Level} {src.DisplayName} — {src.DisplayInheritedEffectText}",
                     Child = new DockPanel
                     {
                         Children =
                         {
                             new TextBlock
                             {
-                                Text = $"🧬 Lv.{src.Level} {src.Name}",
+                                Text = $"🧬 Lv.{src.Level} {src.DisplayName}",
                                 Foreground = BrushFromHex("#CDD6F4"),
                                 FontWeight = FontWeights.Bold,
                                 FontSize = 9.5,
@@ -2961,8 +2963,8 @@ public partial class MainWindow : Window
                 var btnConfirmTarget = new Button
                 {
                     Content = _pendingIsEvolution
-                        ? $"🧬 여기에 [{_pendingHandCard.Name}] 진화!"
-                        : $"✨ 여기에 [{_pendingHandCard.Name}] 적용!",
+                        ? $"🧬 여기에 [{_pendingHandCard.DisplayName}] 진화!"
+                        : $"✨ 여기에 [{_pendingHandCard.DisplayName}] 적용!",
                     Background = BrushFromHex("#A6E3A1"),
                     Foreground = BrushFromHex("#11111B"),
                     FontWeight = FontWeights.ExtraBold,
@@ -3087,7 +3089,7 @@ public partial class MainWindow : Window
                     }
 
                     _pendingAttackerInstance = instance;
-                    ShowToast(true, $"🎯 [{instance.TopCard.Name}(DP {instance.GetCurrentDP()})] 공격 준비 완료! 상단 상대 배틀 에어리어에서 타격할 레스트 디지몬을 클릭하세요.");
+                    ShowToast(true, $"🎯 [{instance.TopCard.DisplayName}(DP {instance.GetCurrentDP()})] 공격 준비 완료! 상단 상대 배틀 에어리어에서 타격할 레스트 디지몬을 클릭하세요.");
                     RefreshAllSimulatorUi();
                 };
                 stack.Children.Add(btnAttackDigimon);
@@ -3228,10 +3230,10 @@ public partial class MainWindow : Window
             _ => card.IsBlocker ? "#FAB387" : "#A6E3A1"
         };
 
-        if (!string.IsNullOrWhiteSpace(card.EffectText))
-            return ((card.Type == CardType.Tamer ? "🎖️ " : card.Type == CardType.Option ? "✨ " : "⚡ ") + Shorten(card.EffectText), color);
-        if (!string.IsNullOrWhiteSpace(card.InheritedEffectText))
-            return ("🧬 " + Shorten(card.InheritedEffectText), "#A6E3A1");
+        if (!string.IsNullOrWhiteSpace(card.DisplayEffectText))
+            return ((card.Type == CardType.Tamer ? "🎖️ " : card.Type == CardType.Option ? "✨ " : "⚡ ") + Shorten(card.DisplayEffectText), color);
+        if (!string.IsNullOrWhiteSpace(card.DisplayInheritedEffectText))
+            return ("🧬 " + Shorten(card.DisplayInheritedEffectText), "#A6E3A1");
         return ("⚔️ 효과 없음 (바닐라)", "#9399B2");
     }
 
@@ -3674,7 +3676,7 @@ public partial class MainWindow : Window
                     HighlightDropZone(info.OverBreedingZone ? BreedingAreaZoneBorder : BattleAreaZoneBorder, check.CanExecute ? "#A6E3A1" : "#F38BA8");
                     if (check.CanExecute)
                     {
-                        _dragGhostBadgeText.Text = $"🧬 [{intent.EvoTarget.TopCard.Name}] 위에 진화! (코스트 {card.EvoCost}, 1드로우)";
+                        _dragGhostBadgeText.Text = $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화! (코스트 {card.EvoCost}, 1드로우)";
                         _dragGhostBadgeBorder.Background = BrushFromHex("#A6E3A1");
                         ShowToast(true, check.GuideMessage);
                     }
@@ -3720,7 +3722,7 @@ public partial class MainWindow : Window
                     if (oppTarget != null)
                     {
                         HighlightDropZone(OpponentBattleAreaBorder, "#A6E3A1");
-                        _dragGhostBadgeText.Text = $"🔥 상대 [{oppTarget.TopCard.Name}]에게 [{card.Name}] 발동!";
+                        _dragGhostBadgeText.Text = $"🔥 상대 [{oppTarget.TopCard.DisplayName}]에게 [{card.DisplayName}] 발동!";
                         _dragGhostBadgeBorder.Background = BrushFromHex("#A6E3A1");
                     }
                     else
@@ -3741,7 +3743,7 @@ public partial class MainWindow : Window
                     if (allyTarget != null)
                     {
                         HighlightDropZone(BattleAreaZoneBorder, "#A6E3A1");
-                        _dragGhostBadgeText.Text = $"✨ 아군 [{allyTarget.TopCard.Name}]에게 [{card.Name}] 적용!";
+                        _dragGhostBadgeText.Text = $"✨ 아군 [{allyTarget.TopCard.DisplayName}]에게 [{card.DisplayName}] 적용!";
                         _dragGhostBadgeBorder.Background = BrushFromHex("#A6E3A1");
                     }
                     else
@@ -3756,8 +3758,8 @@ public partial class MainWindow : Window
                     bool overPlaymat = info.OverBattleZone || info.OverBreedingZone;
                     HighlightDropZone(overPlaymat ? BattleAreaZoneBorder : null, "#89B4FA");
                     _dragGhostBadgeText.Text = overPlaymat
-                        ? $"⚡ [{card.Name}] 즉시 발동! (코스트 {card.PlayCost})"
-                        : $"🖱️ 배틀 에어리어에 드롭하여 [{card.Name}] 발동!";
+                        ? $"⚡ [{card.DisplayName}] 즉시 발동! (코스트 {card.PlayCost})"
+                        : $"🖱️ 배틀 에어리어에 드롭하여 [{card.DisplayName}] 발동!";
                     _dragGhostBadgeBorder.Background = BrushFromHex(overPlaymat ? "#A6E3A1" : "#F9E2AF");
                 }
             }
@@ -3766,7 +3768,7 @@ public partial class MainWindow : Window
                 bool overPlaymat = info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null;
                 HighlightDropZone(overPlaymat ? BattleAreaZoneBorder : null, "#A6E3A1");
                 _dragGhostBadgeText.Text = overPlaymat
-                    ? $"🎖️ 테이머 [{card.Name}] 필드에 등장! (코스트 {card.PlayCost})"
+                    ? $"🎖️ 테이머 [{card.DisplayName}] 필드에 등장! (코스트 {card.PlayCost})"
                     : "🖱️ 배틀 에어리어에 드롭하여 테이머를 등장시키세요!";
                 _dragGhostBadgeBorder.Background = BrushFromHex(overPlaymat ? "#A6E3A1" : "#F9E2AF");
             }
@@ -3778,7 +3780,7 @@ public partial class MainWindow : Window
                 var moveCheck = ActionValidator.ValidateMoveFromBreeding(_gameState);
                 HighlightDropZone(BattleAreaZoneBorder, moveCheck.CanExecute ? "#89DCEB" : "#F38BA8");
                 _dragGhostBadgeText.Text = moveCheck.CanExecute
-                    ? $"🚀 [{_potentialDragBreedingDigimon.TopCard.Name}] 배틀 에어리어로 이동!"
+                    ? $"🚀 [{_potentialDragBreedingDigimon.TopCard.DisplayName}] 배틀 에어리어로 이동!"
                     : $"⚠️ {moveCheck.Reason}";
                 _dragGhostBadgeBorder.Background = BrushFromHex(moveCheck.CanExecute ? "#A6E3A1" : "#F38BA8");
             }
@@ -3797,7 +3799,7 @@ public partial class MainWindow : Window
                 var check = ActionValidator.ValidateAttack(_gameState, attacker, info.OpponentDigimon);
                 HighlightDropZone(OpponentBattleAreaBorder, check.CanExecute ? "#A6E3A1" : "#F38BA8");
                 _dragGhostBadgeText.Text = check.CanExecute
-                    ? $"🎯 상대 [{info.OpponentDigimon.TopCard.Name}] 직접 타격!"
+                    ? $"🎯 상대 [{info.OpponentDigimon.TopCard.DisplayName}] 직접 타격!"
                     : "⚠️ 액티브 디지몬은 직접 공격 불가 (시큐리티 존에 드롭하세요)";
                 _dragGhostBadgeBorder.Background = BrushFromHex(check.CanExecute ? "#A6E3A1" : "#F38BA8");
             }
@@ -4067,11 +4069,11 @@ public partial class MainWindow : Window
         }
         if (!_engine.GetMainAbilities(_gameState.Player).Any(a => ReferenceEquals(a.Digimon, digimon) && ReferenceEquals(a.Card, card)))
         {
-            ShowToast(false, $"[{card.Name}]은(는) 지금 쓸 수 있는 [메인] 효과가 없습니다. (효과가 없거나 이번 턴에 이미 썼습니다)");
+            ShowToast(false, $"[{card.DisplayName}]은(는) 지금 쓸 수 있는 [메인] 효과가 없습니다. (효과가 없거나 이번 턴에 이미 썼습니다)");
             return;
         }
         string effectText = string.Join("\n", card.EffectText.Split('\n').Where(l => l.Contains("[Main]") || l.Contains("[메인]") || l.Contains("Digi-Burst")));
-        bool go = _engine.PlayerChoices?.Confirm(_gameState, digimon, $"[{card.Name}]의 [메인] 효과를 쓸까요?\n\n{effectText}", true) ?? true;
+        bool go = _engine.PlayerChoices?.Confirm(_gameState, digimon, $"[{card.DisplayName}]의 [메인] 효과를 쓸까요?\n\n{effectText}", true) ?? true;
         if (go)
             ApplyActionResult(_engine.ActivateMainAbility(digimon, card));
     }
@@ -4600,7 +4602,7 @@ public partial class MainWindow : Window
 
             itemDock.Children.Add(new TextBlock
             {
-                Text = $"[{card.CardId}] {card.Name} {(card.Level > 0 ? $"(Lv.{card.Level})" : $"({card.Type})")}",
+                Text = $"[{card.CardId}] {card.DisplayName} {(card.Level > 0 ? $"(Lv.{card.Level})" : $"({card.Type})")}",
                 Foreground = BrushFromHex("#F8FAFC"),
                 FontSize = 11.5,
                 VerticalAlignment = VerticalAlignment.Center

@@ -103,6 +103,13 @@ public static class KoreanCardData
     public static IReadOnlyList<string> DisplayTraits(CardData card) =>
         Get(card.CardId) is { Traits.Count: > 0 } ko ? ko.Traits : card.Traits;
 
-    private static string Clean(string? text) =>
-        string.IsNullOrWhiteSpace(text) || text.Trim() == "-" ? string.Empty : text.Trim();
+    private static string Clean(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Trim() == "-")
+            return string.Empty;
+        // 사이트 문구는 효과가 한 줄로 이어져 있다 → 새 효과의 발동 시점(【…】) 앞에서 줄을 바꾼다
+        // (문장이 끝난 뒤의 【…】만 — "이 카드의 【메인】 효과"처럼 문장 속 표기는 그대로)
+        string t = System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"(?<=[.。)）》」])\s*(?=【|〔)", "\n");
+        return t.Trim();
+    }
 }
