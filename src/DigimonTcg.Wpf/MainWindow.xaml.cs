@@ -815,6 +815,9 @@ public partial class MainWindow : Window
             CoinTossOverlay.Visibility = Visibility.Collapsed;
             CoinTossOverlay.BeginAnimation(OpacityProperty, null);
             CoinTossOverlay.Opacity = 1;
+            // 코인 토스 화면이 사라진 뒤에 손패 확인 · 멀리건 화면을 띄운다
+            // (아래 RefreshAllSimulatorUi 때는 코인 토스 화면이 아직 사라지는 중이라 멀리건 화면이 뜨지 않는다)
+            TryShowMulliganChoice();
         };
         CoinTossOverlay.BeginAnimation(OpacityProperty, fade);
 
@@ -2154,7 +2157,11 @@ public partial class MainWindow : Window
         }
 
         TxtOpponentZonesSummary.Text = _gameState.CurrentStage == PracticeStage.Stage3_AiBattle
-            ? $"AI 필드: {_gameState.DummyOpponent.BattleArea.Count}체 | AI 테이머: {_gameState.DummyOpponent.Tamers.Count}장 | AI 손패: {_gameState.DummyOpponent.Hand.Count}장 | AI 덱: {_gameState.DummyOpponent.MainDeck.Count}장"
+            ? $"AI 필드: {_gameState.DummyOpponent.BattleArea.Count}체 | AI 테이머: {_gameState.DummyOpponent.Tamers.Count}장"
+              + (_gameState.DummyOpponent.OptionsInPlay.Count > 0
+                  ? $" | ⏳ AI 딜레이 옵션: {string.Join(", ", _gameState.DummyOpponent.OptionsInPlay.Select(p => p.Card.DisplayName))}"
+                  : "")
+              + $" | AI 손패: {_gameState.DummyOpponent.Hand.Count}장 | AI 덱: {_gameState.DummyOpponent.MainDeck.Count}장"
             : $"상대 필드: {_gameState.DummyOpponent.BattleArea.Count}체 | 상대 트래시: {_gameState.DummyOpponent.Trash.Count}장";
 
         if (_gameState.DummyOpponent.BattleArea.Count == 0)
@@ -2646,6 +2653,42 @@ public partial class MainWindow : Window
                 };
                 TamerZonePanel.Children.Add(tamerChip);
             }
+        }
+
+        // 배틀 에어리어에 놓인 내 옵션 (≪딜레이≫ — 놓은 다음 턴부터 클릭해서 파기하고 효과를 발휘)
+        var readyOptions = _engine.GetMainAbilities(_gameState.Player).Where(a => a.Digimon == null && a.Card.Type == CardType.Option).Select(a => a.Card).ToList();
+        foreach (var placed in _gameState.Player.OptionsInPlay)
+        {
+            var option = placed.Card;
+            bool ready = readyOptions.Any(o => ReferenceEquals(o, option));
+            var optionChip = new Border
+            {
+                Background = BrushFromHex("#33F9E2AF"),
+                BorderBrush = BrushFromHex(ready ? "#F9E2AF" : "#6C7086"),
+                BorderThickness = new Thickness(ready ? 1.5 : 1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 2, 8, 2),
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = ready ? "클릭하면 이 옵션을 파기하고 ≪딜레이≫ 효과를 발휘합니다" : "≪딜레이≫ 옵션은 놓은 다음 턴부터 쓸 수 있습니다",
+                Child = new TextBlock
+                {
+                    Text = $"⏳ {option.DisplayName} [{(ready ? "딜레이 · 사용 가능" : "딜레이 · 다음 턴부터")}]",
+                    Foreground = BrushFromHex(ready ? "#F9E2AF" : "#A6ADC8"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 11
+                }
+            };
+            optionChip.MouseEnter += (_, _) => UpdateCardInspector(option);
+            optionChip.MouseLeftButtonUp += (_, _) =>
+            {
+                UpdateCardInspector(option);
+                if (ready)
+                    TryActivateMainAbility(null, option);
+                else
+                    ShowToast(false, $"⏳ [{option.DisplayName}]은(는) 놓은 턴에는 쓸 수 없습니다. 다음 내 턴부터 클릭해서 쓰세요.");
+            };
+            TamerZonePanel.Children.Add(optionChip);
         }
 
         string myLastSecInfo = _gameState.PlayerSecurityCheckHistory.Count > 0
