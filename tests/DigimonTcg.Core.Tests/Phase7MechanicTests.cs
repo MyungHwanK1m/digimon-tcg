@@ -85,6 +85,51 @@ public class Phase7MechanicTests
     }
 
     [Fact]
+    public void Delay_ShouldStayInTheBattleAreaAndBeTrashedOnALaterTurnForItsEffect()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.Player.BattleArea.Add(new CardInstance(cards["ST1-02"], 1));   // 레드 (옵션 색 조건)
+        var delay = Api("P7-DELAY", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Main] Gain 1 memory. Then, place this card in your battle area.\n[Main] ＜Delay＞ (Trash this card in your battle area to activate the effect below. You can't activate this effect the turn this card enters play.)\n・Gain 2 memory.");
+        state.Player.Hand.Add(delay);
+
+        Assert.True(engine.PlayCard(delay).CanExecute);
+        Assert.Equal(4, state.MemoryGauge);
+        Assert.Contains(state.Player.OptionsInPlay, p => p.Card == delay);
+        Assert.DoesNotContain(delay, state.Player.Trash);
+        Assert.DoesNotContain(engine.GetMainAbilities(state.Player), a => a.Card == delay);   // 놓은 턴에는 쓸 수 없다
+
+        state.TurnSequence += 2;   // 다음 자신의 턴
+        Assert.True(engine.ActivateMainAbility(null, delay).CanExecute);
+
+        Assert.Equal(6, state.MemoryGauge);
+        Assert.Empty(state.Player.OptionsInPlay);
+        Assert.Contains(delay, state.Player.Trash);
+    }
+
+    [Fact]
+    public void BlastDigivolve_ShouldDigivolveForFreeAtCounterTiming()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.CurrentStage = PracticeStage.Stage3_AiBattle;
+        var attacker = new CardInstance(Api("P7-BLAST-ATK", 5, 7000), 1);
+        state.Player.BattleArea.Add(attacker);
+        var aiBase = new CardInstance(Api("P7-BLAST-BASE", 4, 4000), 1);
+        state.DummyOpponent.BattleArea.Add(aiBase);
+        var blast = Api("P7-BLAST", 5, 9000, evoCost: 3,
+            main: "[Hand] [Counter] ＜Blast Digivolve＞ (One of your Digimon may digivolve into this card without paying the cost.)");
+        state.DummyOpponent.Hand.Add(blast);
+        state.DummyOpponent.MainDeck.Add(cards["ST1-02"]);
+        state.DummyOpponent.SecurityStack.Add(cards["ST1-02"]);
+
+        engine.AttackSecurityOrDirect(attacker);
+
+        Assert.Equal("P7-BLAST", aiBase.TopCard.CardId);          // 어택 중 【카운터】로 코스트 없이 진화
+        Assert.DoesNotContain(blast, state.DummyOpponent.Hand);
+        Assert.Single(state.DummyOpponent.Hand);                  // 진화 보너스 드로우
+    }
+
+    [Fact]
     public void Iceclad_ShouldCompareDigivolutionCardCounts()
     {
         var (state, engine, cards) = NewMainPhase();

@@ -208,7 +208,7 @@ public static class KeywordDictionary
                 SentenceParser.TryParse(clause, inherited, card, def);   // 키워드 절이 아니면 문장 파서 (읽지 못하면 등록하지 않음)
         }
         bool any = script.Keywords.Count + script.InheritedKeywords.Count + script.Effects.Count + script.Statics.Count > 0
-                   || script.OverflowMemory > 0 || script.DigisorptionReduction > 0 || script.SpecialEvolutions.Count > 0 || script.IgnoreColorRequirement != null || script.PlayCostReduction != null;
+                   || script.OverflowMemory > 0 || script.DigisorptionReduction > 0 || script.BlastDigivolve || script.SpecialEvolutions.Count > 0 || script.IgnoreColorRequirement != null || script.PlayCostReduction != null;
         return any ? script : null;
     }
 
@@ -219,7 +219,7 @@ public static class KeywordDictionary
         for (int i = 0; i < list.Count; i++)
         {
             bool header = Regex.IsMatch(list[i], @"(?:effects? below|following effects?)(?: twice| \d+ times| instead)?\s*[:.]?\s*$", RegexOptions.IgnoreCase)
-                          || list[i].Contains("＜Digi-Burst", StringComparison.OrdinalIgnoreCase);   // ≪디지버스트 N≫ (설명문 뒤에 ・효과)
+                          || list[i].Contains("＜Digi-Burst", StringComparison.OrdinalIgnoreCase) || list[i].Contains("＜Delay", StringComparison.OrdinalIgnoreCase);   // ≪디지버스트 N≫ (설명문 뒤에 ・효과)
             if (header && i + 1 < list.Count && list[i + 1].StartsWith("・"))
             {
                 var options = new List<string>();

@@ -41,12 +41,22 @@ public class PlayerZones
     public List<CardInstance> BattleArea { get; set; } = new List<CardInstance>();
     public List<CardData> Tamers { get; set; } = new List<CardData>();
 
+    // 배틀 에어리어에 놓인 옵션 카드 (≪딜레이≫ — 놓은 다음 턴부터 파기해서 효과를 발휘한다)
+    public List<PlacedOption> OptionsInPlay { get; set; } = new List<PlacedOption>();
+
     // 레스트 상태인 테이머 (같은 카드 객체가 여러 장일 수 있어 장 수로 센다) — 자신의 액티브 페이즈에 비운다
     public List<CardData> SuspendedTamers { get; set; } = new List<CardData>();
 
     /// <summary>이 테이머 카드 중 액티브 상태인 장이 있는지</summary>
     public bool HasActiveTamer(CardData tamer) =>
         Tamers.Count(t => ReferenceEquals(t, tamer)) > SuspendedTamers.Count(t => ReferenceEquals(t, tamer));
+}
+
+/// <summary>배틀 에어리어에 놓인 옵션 카드 1장 (PlacedTurn = 놓은 GameState.TurnSequence)</summary>
+public sealed class PlacedOption
+{
+    public CardData Card { get; init; } = new();
+    public int PlacedTurn { get; init; }
 }
 
 public class GameState

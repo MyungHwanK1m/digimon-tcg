@@ -86,6 +86,12 @@ internal static class SentenceParser
             def?.SpecialEvolution(d => names.Any(n => exact ? d.TopCard.Name.Equals(n, StringComparison.OrdinalIgnoreCase) : TargetSpec.NameHas(d.TopCard, n)), cost);
             return null;
         }
+        // [패] [카운터] ≪블래스트 진화≫: 상대 디지몬이 어택했을 때 패의 이 카드로 자신의 디지몬을 코스트 없이 진화 (엔진의 카운터 타이밍)
+        if (Regex.IsMatch(clause, @"^\[Hand\]\s*\[Counter\]\s*＜Blast Digivolve＞\.?$", RegexOptions.IgnoreCase) && card.Type == CardType.Digimon)
+        {
+            def?.BlastDigivolve();
+            return null;
+        }
         // ≪디지섭션 -N≫: 패에서 이 카드로 진화할 때 자신의 디지몬 1마리를 레스트시켜 진화 코스트 -N
         var digisorption = Regex.Match(clause, @"^＜Digisorption -(?<n>\d+)＞\.?$", RegexOptions.IgnoreCase);
         if (digisorption.Success)
@@ -201,13 +207,29 @@ internal static class SentenceParser
             else if (label.Equals("All Turns", StringComparison.OrdinalIgnoreCase)) qualifier = Qualifier.AllTurns;
             else return $"미지원 시점 [{label}]";
         }
+        // ≪딜레이≫ (옵션): 배틀 에어리어에 놓인 이 카드를 파기하는 것으로 아래 효과(・)를 모두 발휘 — 놓은 턴에는 쓸 수 없다.
+        //   "[Main] ＜Delay＞" = [메인] 기동 효과 · "[All Turns] When ~, ＜Delay＞" = 그 사건에 발휘할 수 있다
+        var delay = Regex.Match(prefix.Groups[2].Value, @"^(?:When (?<ev>[^,]+), )?(?:If (?<cond>[^,]+), )?＜Delay＞\.?$", RegexOptions.IgnoreCase);
+        Func<EffectContext, bool>? delayEvent = null;
+        if (delay.Success)
+        {
+            if (card.Type != CardType.Option || inherited) return "미지원: 옵션이 아닌 카드의 ≪딜레이≫";
+            if (delay.Groups["ev"].Success)
+            {
+                if (ParseEventPhrase(delay.Groups["ev"].Value) is not { } ev) return $"미지원 발동 조건 (When {delay.Groups["ev"].Value})";
+                triggers.AddRange(ev.Triggers.Where(t => !triggers.Contains(t)));
+                delayEvent = ev.Condition;
+            }
+            for (int i = 0; i < triggers.Count; i++)
+                if (triggers[i] == EffectTrigger.Main) triggers[i] = EffectTrigger.ActivateMain;
+        }
         if (triggers.Count == 0) return "미지원: 시점 없는 고르는 효과";
-        if (!MapMainTrigger(triggers, card, inherited)) return "미지원: 진화원의 [메인] 효과";
+        if (!delay.Success && !MapMainTrigger(triggers, card, inherited)) return "미지원: 진화원의 [메인] 효과";
 
         // ≪디지버스트 N≫: 이 디지몬의 진화원 N장을 파기하는 것으로 아래 효과(・)를 모두 발휘
         string head = prefix.Groups[2].Value;
         var burst = Regex.Match(head, @"^(?:If (?<cond>[^,]+), )?＜Digi-Burst (?<n>\d+)＞\.?$", RegexOptions.IgnoreCase);
-        bool allOptions = burst.Success;
+        bool allOptions = burst.Success || delay.Success;
         // 모든 효과를 여러 번: "Activate the following effect twice." · "For each Digimon you have in play, activate the effect below."
         Func<EffectContext, int>? repeat = null;
         Func<EffectContext, bool>? allInstead = null;
@@ -227,13 +249,26 @@ internal static class SentenceParser
             // "Activate 1 of the effects below. If you have no other Digimon in play, activate all of the effects below instead."
             if ((allInstead = ParseEventCondition(body.Groups["all"].Value)) == null) return $"미지원 조건 (If {body.Groups["all"].Value})";
         }
-        else body = burst.Success
-            ? burst
+        else body = burst.Success ? burst
+            : delay.Success ? delay
             : Regex.Match(head, @"^(?:If (?<cond>[^,]+), )?(?:you may )?(?:By (?<cost>[^,]+), )?(?:you may )?activate (?:1|one) of the (?:effects below|following effects)[:.]?$", RegexOptions.IgnoreCase);
         if (!body.Success) return "문장 파서(3단계) 대상: 고르는 효과";
         Func<EffectContext, bool>? cond = null;
         if (body.Groups["cond"].Success && (cond = ParseEventCondition(body.Groups["cond"].Value)) == null)
             return $"미지원 조건 (If {body.Groups["cond"].Value})";
+        if (delay.Success)
+        {
+            // 배틀 에어리어에 놓은 다음 턴 이후의 이 카드를 파기하는 것이 비용 — [메인]은 쓰는 것 자체가 선택, 사건은 묻는다
+            bool activate = triggers.Contains(EffectTrigger.ActivateMain);
+            var ev = delayEvent;
+            cond = c =>
+            {
+                if (ev != null && !ev(c)) return false;
+                if (c.Engine.ReadyPlacedOptions(c.Owner, c.Card) == 0) return false;
+                if (!activate && !c.Engine.AskYesNo(c.Owner, null, $"[{c.Card.Name}] ≪딜레이≫ — 배틀 에어리어의 이 카드를 파기하고 효과를 발휘할까요?", recommended: true)) return false;
+                return c.Engine.TrashPlacedOption(c.Owner, c.Card);
+            };
+        }
         string? costText = burst.Success ? $"trashing {burst.Groups["n"].Value} of this Digimon's digivolution cards" : body.Groups["cost"].Success ? body.Groups["cost"].Value : null;
         if (costText != null)
         {
@@ -299,11 +334,11 @@ internal static class SentenceParser
         return null;
     }
 
-    /// <summary>설명문 괄호 · 라벨("Security Effect", "Inherited Effect", "・") · 특수 공백 정리 (키워드 ＜＞ 안의 괄호는 보존)</summary>
     /// <summary>한글 생성(KoreanEffectRenderer)이 같은 정리 · 문장 나누기를 쓰도록</summary>
     internal static string NormalizeForRender(string clause) => Normalize(clause);
     internal static List<string> SentencesForRender(string body) => MergeRevealSentences(SplitSentences(body));
 
+    /// <summary>설명문 괄호 · 라벨("Security Effect", "Inherited Effect", "・") · 특수 공백 정리 (키워드 ＜＞ 안의 괄호는 보존)</summary>
     private static string Normalize(string clause)
     {
         string s = clause.Replace(" ", " ").Replace("’", "'").Replace("‘", "'").Trim();
@@ -409,9 +444,17 @@ internal static class SentenceParser
         if ((m = Regex.Match(ev, @"^your opponent plays (?<subj>(?:an?|1) [^,]*?Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success
             && ParseAllySubject(m.Groups["subj"].Value) is { } enemyPlayed)
             return One(EffectTrigger.OpponentDigimonPlayed, c => c.Other != null && enemyPlayed(c, c.Other));
-        if ((m = Regex.Match(ev, @"^(?:one of |any of )?your (?<subj>other [^,]*?Digimon(?: with [^,]+?)?) (?:is|are) deleted$", RegexOptions.IgnoreCase)).Success
+        if ((m = Regex.Match(ev, @"^(?:one of |any of )?your (?<subj>(?:other )?[^,]*?Digimon(?: with [^,]+?)?) (?:is|are) deleted$", RegexOptions.IgnoreCase)).Success
             && ParseAllySubject(m.Groups["subj"].Value) is { } deleted)
             return One(EffectTrigger.AllyDigimonDeleted, c => c.Other == null || deleted(c, c.Other));
+        // "When one of your [Myotismon] is deleted" · "When one of your [Galacticmon] attacks" — 이름만 있는 주어
+        if ((m = Regex.Match(ev, $@"^(?:one of |any of )?your (?<other>other )?(?<x>{TargetSpec.NameList}) (?<what>is deleted|are deleted|attacks?)$", RegexOptions.IgnoreCase)).Success)
+        {
+            var xs = TargetSpec.Names(m.Groups["x"].Value);
+            bool other = m.Groups["other"].Success;
+            Func<EffectContext, bool> named = c => c.Other != null && (!other || !ReferenceEquals(c.Other, c.Self)) && xs.Any(x => TargetSpec.NameHas(c.Other.TopCard, x));
+            return One(m.Groups["what"].Value.StartsWith("attack", StringComparison.OrdinalIgnoreCase) ? EffectTrigger.AllyDigimonAttacks : EffectTrigger.AllyDigimonDeleted, named);
+        }
         if ((m = Regex.Match(ev, $@"^(?:one of |any of )?your (?:(?<color>(?:{Colors})(?: or (?:{Colors}))*) )?Tamers? (?:becomes suspended|suspends|is suspended|become suspended)$", RegexOptions.IgnoreCase)).Success)
         {
             var colors = Regex.Matches(m.Groups["color"].Value, Colors, RegexOptions.IgnoreCase).Select(x => Enum.Parse<CardColor>(x.Value, ignoreCase: true)).ToList();
@@ -1451,6 +1494,9 @@ internal static class SentenceParser
                 c.Owner.Hand.Add(c.Card);
                 Emit(c, label, "트래시의 이 카드를 패에 넣는다");
             }, null);
+        // ≪딜레이≫ 옵션: "Then, place this card in your battle area" — 트래시 대신 배틀 에어리어에 놓는다 (엔진이 사용 뒤 처리)
+        if (Regex.IsMatch(s, @"^Place this card in (?:the|your) battle area$", RegexOptions.IgnoreCase) && card.Type == CardType.Option)
+            return (c => { c.PlaceInBattleArea = true; Emit(c, label, "이 카드를 배틀 에어리어에 놓는다"); }, null);
         if (Regex.IsMatch(s, @"^Activate this card'?s \[Main\] effects?$", RegexOptions.IgnoreCase) && security && card.Type == CardType.Option)
             return (c => ActivateMainEffects(c, label), null);
 

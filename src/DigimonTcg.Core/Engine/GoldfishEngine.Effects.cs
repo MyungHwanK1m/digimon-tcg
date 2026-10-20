@@ -936,7 +936,6 @@ public partial class GoldfishEngine
         }
     }
 
-    /// <summary>ACE ≪오버플로우 -N≫: 배틀 에어리어 · 진화원에서 다른 곳으로 간 카드마다 주인의 메모리 -N</summary>
     /// <summary>토큰 카드 아이디 ("TOKEN-" 접두사) — 필드를 떠나면 사라진다</summary>
     internal static bool IsToken(CardData card) => card.CardId.StartsWith("TOKEN-", StringComparison.Ordinal);
 
@@ -948,6 +947,7 @@ public partial class GoldfishEngine
         zones.MainDeck.RemoveAll(IsToken);
     }
 
+    /// <summary>ACE ≪오버플로우 -N≫: 배틀 에어리어 · 진화원에서 다른 곳으로 간 카드마다 주인의 메모리 -N</summary>
     private void ApplyOverflow(PlayerZones owner, IEnumerable<CardData> leavingCards)
     {
         foreach (var card in leavingCards)
@@ -1006,6 +1006,10 @@ public partial class GoldfishEngine
         foreach (var t in owner.Tamers.Distinct())
             if (HasMainAbility(t) && _usedMainAbilities.GetValueOrDefault(t) < owner.Tamers.Count(x => ReferenceEquals(x, t)))
                 list.Add(new MainAbility(null, t));
+        // 배틀 에어리어의 옵션 (≪딜레이≫ — 놓은 다음 턴부터)
+        foreach (var o in owner.OptionsInPlay.Select(p => p.Card).Distinct())
+            if (HasMainAbility(o) && ReadyPlacedOptions(owner, o) > 0)
+                list.Add(new MainAbility(null, o));
         return list;
     }
 
@@ -1080,6 +1084,8 @@ public partial class GoldfishEngine
             RunEffects(trigger, owner, d, d.TopCard, other: other, triggerCard: triggerCard);
         foreach (var tamer in owner.Tamers.ToList())
             RunEffects(trigger, owner, null, tamer, other: other, includeInherited: false, triggerCard: triggerCard);
+        foreach (var option in owner.OptionsInPlay.Select(p => p.Card).Distinct().ToList())   // ≪딜레이≫ 옵션의 "When ~, ＜Delay＞"
+            RunEffects(trigger, owner, null, option, other: other, includeInherited: false, triggerCard: triggerCard);
         RecalculateFieldBuffs();
     }
 
@@ -1117,6 +1123,29 @@ public partial class GoldfishEngine
         int reduced = Math.Min(n, baseCost);   // 실제 진화 코스트(카드 효과 진화 포함)보다 많이 줄이지 않는다
         EffectLog(owner, $"[≪디지섭션 -{n}≫] [{pick.TopCard.Name}]을(를) 레스트시켜 [{evoCard.Name}] 진화 코스트 -{reduced}");
         return reduced;
+    }
+
+    /// <summary>
+    /// 【카운터】 타이밍: 상대 디지몬이 어택했을 때 (어택 시 효과 뒤, 블록 타이밍 전) — 방어 측 패의 ≪블래스트 진화≫.
+    /// 진화 조건을 만족하는 자신의 디지몬을 코스트 없이 진화시킨다 (진화 보너스 드로우 · [진화 시] 효과 포함). 어택 1번에 1장.
+    /// AI · 테스트는 블록할 수 있는 액티브 디지몬 → DP가 높은 디지몬 순으로 추천해 쓴다.
+    /// </summary>
+    internal void CounterTiming(PlayerZones defender, CardInstance attacker)
+    {
+        if (!EnemyOf(defender).BattleArea.Contains(attacker))
+            return;
+        foreach (var card in defender.Hand.Where(c => CardScripts.For(c)?.BlastDigivolve == true).Distinct().OrderByDescending(c => c.Level).ThenByDescending(c => c.DP).ToList())
+        {
+            var bases = defender.BattleArea.Where(d => ActionValidator.ValidateEvolution(d, card).CanExecute)
+                .OrderByDescending(d => d.HasBlocker && !d.IsSuspended).ThenByDescending(d => d.GetCurrentDP()).ToList();
+            if (bases.Count == 0) continue;
+            var target = AskDigimon(defender, $"【카운터】 ≪블래스트 진화≫ [{attacker.TopCard.Name}]의 어택 — 패의 [{card.Name}](으)로 코스트 없이 진화시킬 디지몬을 고르세요.",
+                bases, bases[0], optional: true);
+            if (target == null) continue;
+            EffectLog(defender, $"【카운터】 ≪블래스트 진화≫ [{target.TopCard.Name}] → [{card.Name}]");
+            EvolveByEffect(defender, target, card, 0);
+            return;
+        }
     }
 
     /// <summary>≪디지버스트 N≫ 비용: 진화원 아래에서 N장 파기 → 그 카드들의 "디지버스트로 트래시되었을 때" 효과 → "디지버스트를 발휘했을 때"</summary>
@@ -1314,10 +1343,16 @@ public partial class GoldfishEngine
     private void OnAttackBlocked(CardInstance attacker) =>
         RunEffects(EffectTrigger.AttackBlocked, OwnerOf(attacker), attacker, null);
 
-    /// <summary>옵션 [메인] 효과. target = UI가 고른 대상. 반환: 결과 메시지</summary>
+    /// <summary>
+    /// 옵션 [메인] 효과 + 사용 뒤 처리 (트래시, ≪딜레이≫ 옵션은 "place this card in your battle area"면 배틀 에어리어).
+    /// target = UI가 고른 대상. 반환: 결과 메시지
+    /// </summary>
     private string ApplyOptionEffect(PlayerZones owner, CardData optionCard, CardInstance? target)
     {
-        string msg = RunEffects(EffectTrigger.Main, owner, null, optionCard, chosenTarget: target, includeInherited: false).Message;
+        var optionCtx = RunEffects(EffectTrigger.Main, owner, null, optionCard, chosenTarget: target, includeInherited: false);
+        string msg = optionCtx.Message;
+        if (optionCtx.PlaceInBattleArea) PlaceOption(owner, optionCard);
+        else owner.Trash.Add(optionCard);
         // "When you use an Option card" / "When a player uses an Option card"
         FireForSide(EffectTrigger.AllyOptionUsed, owner, null, triggerCard: optionCard);
         FireForSide(EffectTrigger.OpponentOptionUsed, EnemyOf(owner), null, triggerCard: optionCard);
@@ -1348,8 +1383,31 @@ public partial class GoldfishEngine
             return new($"{head} [시큐리티] 효과가 없는 카드입니다.", $"[시큐리티 {option.Name}] 효과 없음", false, false);
 
         var ctx = RunEffects(EffectTrigger.Security, owner, null, option, other: attacker, chosenTarget: attacker, includeInherited: false);
+        if (ctx.PlaceInBattleArea && owner.Trash.Remove(option))   // 시큐리티 체크 처리에서 이미 트래시로 갔다
+            PlaceOption(owner, option);
         return new($"{head} {ctx.Message}", $"[시큐리티 {option.Name}] {ctx.Summary}", ctx.AttackerRemoved, ctx.ReturnToHand);
     }
+
+    /// <summary>옵션 카드를 배틀 에어리어에 놓는다 (≪딜레이≫: 놓은 다음 턴부터 [메인]으로 파기해 효과를 발휘)</summary>
+    internal void PlaceOption(PlayerZones owner, CardData option)
+    {
+        owner.OptionsInPlay.Add(new PlacedOption { Card = option, PlacedTurn = State.TurnSequence });
+        EffectLog(owner, $"[{option.Name}]을(를) 배틀 에어리어에 놓았습니다.");
+    }
+
+    /// <summary>배틀 에어리어의 옵션을 트래시로 (≪딜레이≫ 비용) — 놓은 턴에는 쓸 수 없다. 성공하면 true</summary>
+    internal bool TrashPlacedOption(PlayerZones owner, CardData option)
+    {
+        var placed = owner.OptionsInPlay.FirstOrDefault(p => ReferenceEquals(p.Card, option) && p.PlacedTurn < State.TurnSequence);
+        if (placed == null) return false;
+        owner.OptionsInPlay.Remove(placed);
+        owner.Trash.Add(option);
+        return true;
+    }
+
+    /// <summary>≪딜레이≫를 쓸 수 있는 장수 (놓은 다음 턴 이후인 것)</summary>
+    internal int ReadyPlacedOptions(PlayerZones owner, CardData option) =>
+        owner.OptionsInPlay.Count(p => ReferenceEquals(p.Card, option) && p.PlacedTurn < State.TurnSequence);
 
     /// <summary>
     /// [자신의 턴 개시 시] 테이머 효과로 메모리를 보정한다 (플레이어 · AI 공통, 카드 스크립트의 StartOfTurnMemory).

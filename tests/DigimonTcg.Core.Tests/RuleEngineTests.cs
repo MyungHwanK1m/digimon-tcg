@@ -340,6 +340,7 @@ public class RuleEngineTests
         var (state, engine, cards) = NewMainPhase();
         state.CurrentStage = PracticeStage.Stage3_AiBattle;
         engine.PlayerChoosesBlocks = true;
+        engine.AiPolicy = new DigimonTcg.Core.Engine.Ai.LegacyAiPolicy();   // 블록 규칙 테스트라 블로커가 있어도 어택하는 기존 AI로 고정
         var blocker = new CardInstance(cards["ST1-06"], currentTurn: 1);       // ≪블로커≫ DP 6000
         state.Player.BattleArea.Add(blocker);
         state.Player.SecurityStack.Add(cards["ST2-02"]);

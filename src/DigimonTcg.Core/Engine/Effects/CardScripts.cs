@@ -153,6 +153,12 @@ public sealed class CardScriptDefinition
         return this;
     }
 
+    public CardScriptDefinition BlastDigivolve()
+    {
+        _script.BlastDigivolve = true;
+        return this;
+    }
+
     public CardScriptDefinition Digisorption(int reduction)
     {
         _script.DigisorptionReduction = reduction;

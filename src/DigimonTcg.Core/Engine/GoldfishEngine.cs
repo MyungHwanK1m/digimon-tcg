@@ -37,7 +37,7 @@ public partial class GoldfishEngine
     private AiTurnContext? _aiTurn;
 
     /// <summary>AI 턴의 결정 정책 (진화 · 옵션 · 어택 · 등장 · [메인] 기동) — 결정만 돌려주고 처리는 엔진이 한다</summary>
-    public IAiPolicy AiPolicy { get; set; } = new LegacyAiPolicy();
+    public IAiPolicy AiPolicy { get; set; } = new SmartAiPolicy();
 
     /// <summary>AI가 한 턴에 선언할 수 있는 어택 수 상한 (액티브로 돌아오는 효과의 무한 반복 방지)</summary>
     private const int MaxAiAttacksPerTurn = 20;
@@ -540,8 +540,7 @@ public partial class GoldfishEngine
         else if (card.Type == CardType.Option)
         {
             effectSummary = " " + ApplyOptionEffect(State.Player, card, target);
-            State.Player.Trash.Add(card);
-            Log($"옵션 사용: [{card.Name}] (코스트 {cost} 지불 후 트래시 이동)");
+            Log($"옵션 사용: [{card.Name}] (코스트 {cost} 지불 후 {(State.Player.OptionsInPlay.Any(p => ReferenceEquals(p.Card, card)) ? "배틀 에어리어에 놓음" : "트래시 이동")})");
         }
 
         CheckTurnEndAndAutoReset();
@@ -634,6 +633,7 @@ public partial class GoldfishEngine
         }
         else
         {
+            CounterTiming(State.DummyOpponent, attacker);   // 【카운터】 (≪블래스트 진화≫)
             var blocker = EffectRules.ChooseOpponentBlocker(State, attacker, defender);
             var battleTarget = blocker ?? defender;
             string prefix = string.Empty;
@@ -697,6 +697,7 @@ public partial class GoldfishEngine
         if (!State.Player.BattleArea.Contains(attacker))
             return ActionResult.Success($"[{attacker.TopCard.Name}]이(가) 필드를 떠나 어택이 종료되었습니다.");
 
+        CounterTiming(opp, attacker);   // 【카운터】 (≪블래스트 진화≫)
         // 1) 상대가 ≪블로커≫로 막기로 하면 시큐리티 어택을 가로채 블록 (실전 AI는 막을지 스스로 판단)
         var blocker = EffectRules.ChooseOpponentBlocker(State, attacker, null);
         if (blocker != null)
@@ -1238,6 +1239,9 @@ public partial class GoldfishEngine
                 continue;
             }
 
+            var counterLogs = CaptureEffectLogs(() => CounterTiming(State.Player, aiAttacker));   // 【카운터】 (내 ≪블래스트 진화≫)
+            if (counterLogs.Count > 0)
+                AddReplayEvent("내 【카운터】", string.Join("\n", counterLogs));
             // [공식 룰] ≪블로커≫로 막을지는 방어하는 플레이어가 고른다 (어택 대상인 디지몬은 블록할 수 없다)
             var candidates = EffectRules.BlockCandidates(State, State.Player.BattleArea.Where(d => !ReferenceEquals(d, ctx.AttackTarget)), aiAttacker);
             if (candidates.Count > 0 && PlayerChoosesBlocks)
@@ -1672,7 +1676,6 @@ public partial class GoldfishEngine
         AddOpponentEvent(OpponentActionKind.Play, "옵션 사용", $"{use.Card.Name} · 메모리 {beforeMem} → {ctx.Memory}", use.Card);
         var target = use.Target != null && (State.Player.BattleArea.Contains(use.Target) || opp.BattleArea.Contains(use.Target)) ? use.Target : null;
         AddEffectEvent(use.Card, CaptureEffectLogs(() => ApplyOptionEffect(opp, use.Card, target)));
-        opp.Trash.Add(use.Card);
     }
 
     /// <summary>AI가 진화시킬 수 있는 디지몬: 배틀 에어리어 + 육성 에어리어 (육성 중인 Lv.2 → Lv.3 진화 포함)</summary>
