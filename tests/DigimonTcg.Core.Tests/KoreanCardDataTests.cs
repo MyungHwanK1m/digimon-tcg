@@ -7,6 +7,7 @@ using Xunit;
 namespace DigimonTcg.Core.Tests;
 
 /// <summary>한국 공식 사이트 데이터(data/kr/cards_ko.json)는 화면 표시 · 검색에만 쓰이고, 없으면 원래 값이 나와야 한다</summary>
+[Collection("KoreanCardData")]   // KoreanCardData.Reload(전역)를 쓰는 테스트끼리는 순서대로 실행
 public class KoreanCardDataTests
 {
     private const string SampleJson = """
@@ -24,7 +25,11 @@ public class KoreanCardDataTests
         var dir = Path.Combine(Path.GetTempPath(), "dtcg_ko_" + System.Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, "cards_ko.json");
-        File.WriteAllText(file, SampleJson);
+        // 지금 데이터(있으면) + 테스트 카드 — 같은 시각에 도는 다른 테스트가 한글 데이터를 읽어도 영향이 없도록
+        var merged = KoreanCardData.All.ToDictionary(c => c.CardId, System.StringComparer.OrdinalIgnoreCase);
+        foreach (var c in System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<KoreanCard>>(SampleJson)!)
+            merged[c.CardId] = c;
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(merged.Values));
         try
         {
             KoreanCardData.Reload(file);
@@ -43,7 +48,8 @@ public class KoreanCardDataTests
             Assert.DoesNotContain("테스트", tai.EffectText);
 
             // 한글 데이터가 없는 카드는 원래 값
-            Assert.Equal(cards["ST1-02"].Name, cards["ST1-02"].DisplayName);
+            var unknown = new CardData { CardId = "QNA-NO-KO-001", Name = "Unknown Card", EffectText = "[Main] Gain 1 memory." };
+            Assert.Equal("Unknown Card", unknown.DisplayName);
 
             // 검색: 화면에 보이는 한글 이름 · 특징으로도 찾는다
             var catalogDir = Path.Combine(dir, "catalog");
