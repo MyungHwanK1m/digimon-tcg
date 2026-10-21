@@ -37,6 +37,8 @@ public class CardInstance
     public int CannotAttackUntil { get; set; }     // 어택할 수 없음 (소로 블루 · 로제몬 등)
     public int CannotBlockUntil { get; set; }      // 블록할 수 없음
     public int SkipUnsuspendUntil { get; set; }   // 다음 액티브 페이즈에 액티브가 되지 않음 ("doesn't unsuspend during ~ next unsuspend phase")
+    public int CannotUnsuspendUntil { get; set; } // 액티브가 될 수 없음 — 액티브 페이즈 · 효과 모두 ("can't unsuspend until the end of their turn")
+    public int CannotSuspendUntil { get; set; }   // 레스트가 될 수 없음 — 어택 · 블록 · 효과로 레스트 불가 ("can't suspend until their turn ends")
     public List<CardData> LinkedCards { get; } = new();   // 링크 카드 (디지몬 옆에 가로로 끼운 카드 — 떠나면 트래시)
     public int GrantedBlockerUntil { get; set; }   // ≪블로커≫를 얻음 (메탈그레이몬 ST5-09)
     public int GrantedRebootUntil { get; set; }    // ≪재기동≫을 얻음 (파워드라몬 ST5-12)

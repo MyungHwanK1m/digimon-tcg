@@ -373,7 +373,7 @@ public partial class GoldfishEngine
         var woke = new List<CardInstance>();
         foreach (var instance in AllInstances(State.Player))
         {
-            if (instance.IsSuspended && !EffectRules.IsActive(instance.SkipUnsuspendUntil, State))   // "doesn't unsuspend during the next unsuspend phase"
+            if (instance.IsSuspended && !EffectRules.IsActive(instance.SkipUnsuspendUntil, State) && !EffectRules.IsUnsuspendLocked(State, instance))   // "doesn't unsuspend during the next unsuspend phase"
             {
                 instance.IsSuspended = false;
                 awakened++;
@@ -1103,7 +1103,7 @@ public partial class GoldfishEngine
         var aiWoke = new List<CardInstance>();
         foreach (var d in AllInstances(State.DummyOpponent))
         {
-            if (d.IsSuspended && !EffectRules.IsActive(d.SkipUnsuspendUntil, State)) { d.IsSuspended = false; aiWoke.Add(d); }
+            if (d.IsSuspended && !EffectRules.IsActive(d.SkipUnsuspendUntil, State) && !EffectRules.IsUnsuspendLocked(State, d)) { d.IsSuspended = false; aiWoke.Add(d); }
             ResetTurnScopedState(d);
         }
         // 내 디지몬의 "이 턴 동안" 효과는 내 턴이 끝나면 사라진다
@@ -1114,7 +1114,7 @@ public partial class GoldfishEngine
             d.ActiveSkillBuffLabels.Clear();
         }
         // ≪재기동≫: 상대의 액티브 페이즈에 내 디지몬도 액티브가 된다
-        foreach (var d in State.Player.BattleArea.Where(d => d.IsSuspended && HasReboot(d) && !EffectRules.IsActive(d.SkipUnsuspendUntil, State)))
+        foreach (var d in State.Player.BattleArea.Where(d => d.IsSuspended && HasReboot(d) && !EffectRules.IsActive(d.SkipUnsuspendUntil, State) && !EffectRules.IsUnsuspendLocked(State, d)))
         {
             d.IsSuspended = false;
             Log($"[≪재기동≫] 내 [{d.TopCard.Name}]이(가) 상대의 액티브 페이즈에 액티브 상태가 되었습니다.");

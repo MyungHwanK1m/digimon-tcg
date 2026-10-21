@@ -1878,6 +1878,13 @@ internal static class SentenceParser
         // 공개 효과 뒤: "If you added cards" · "If this effect added to a hand" · "If a card is placed by this effect" — 공개한 카드를 1장이라도 가져갔을 때
         if (Regex.IsMatch(cond, @"^(?:you added (?:a card|cards?)(?: to (?:the|your) hand)?|this effect added (?:a card |cards )?to (?:a|the|your) hand|a card (?:is|was) placed by this effect|this effect placed(?: a card| cards)?)$", RegexOptions.IgnoreCase))
             return c => c.LastStepResolved;
+        // "1 Digimon"(양쪽)을 레스트한 뒤: "If this effect suspended your Digimon" · "If this effect unsuspended"
+        if (Regex.IsMatch(cond, @"^this effect (?:suspended|suspends) (?:1 of )?your Digimon$", RegexOptions.IgnoreCase))
+            return c => c.LastStepResolved && c.LastTargets.Any(d => d.IsSuspended && c.Owner.BattleArea.Contains(d));
+        if (Regex.IsMatch(cond, @"^this effect (?:suspended|suspends) (?:1 of )?your opponent's Digimon$", RegexOptions.IgnoreCase))
+            return c => c.LastStepResolved && c.LastTargets.Any(d => d.IsSuspended && c.Enemy.BattleArea.Contains(d));
+        if (Regex.IsMatch(cond, @"^this effect (?:unsuspended|unsuspends)(?: (?:a|that|your) Digimon)?$", RegexOptions.IgnoreCase))
+            return c => c.LastStepResolved && c.LastTargets.Any(d => !d.IsSuspended);
         if (Regex.IsMatch(cond, @"^no Digimon (?:was|were|is) deleted by this effect$", RegexOptions.IgnoreCase))
             return c => !c.LastTargets.Any(d => !c.Owner.BattleArea.Contains(d) && !c.Enemy.BattleArea.Contains(d));
         if (Regex.IsMatch(cond, @"^you have no other Digimon(?: in play)?$", RegexOptions.IgnoreCase))
@@ -2565,6 +2572,7 @@ internal static class SentenceParser
             string tt = Regex.Replace(m.Groups["t"].Value, @"Digimon or Tamers", "Digimon", RegexOptions.IgnoreCase);
             var target = TargetSpec.Parse(tt);
             if (target == null) return (null, $"미지원 대상 ({(suspend ? "레스트" : "액티브")})");
+            target.PreferOwnSide = !suspend;
             return (c =>
             {
                 var list = Pick(target, c, security).Where(d => d.IsSuspended != suspend).ToList();
@@ -2574,6 +2582,8 @@ internal static class SentenceParser
                     if (suspend) c.Engine.Suspend(d);
                     else c.Engine.Unsuspend(d);
                 }
+                c.LastTargets = list;   // "If this effect suspended your Digimon" — 실제로 바뀐 디지몬
+                if (list.Count == 0) c.LastStepResolved = false;
                 Emit(c, label, list.Count > 0 ? $"[{string.Join(", ", list.Select(d => d.TopCard.Name))}] {(suspend ? "레스트" : "액티브")}" : "대상이 없습니다");
             }, null);
         }
@@ -2827,6 +2837,7 @@ internal static class SentenceParser
             var grants = ParseKeywordList(combo.Groups["kws"].Value);
             if (target == null || grants == null) return (null, "미지원 키워드 부여 + DP");
             int dp = int.Parse(combo.Groups["n"].Value) * (combo.Groups["sign"].Value == "-" ? -1 : 1);
+            target.PreferOwnSide = dp > 0;
             var d2 = dur == Duration.None ? Duration.ThisTurn : dur;
             return (c =>
             {
@@ -2851,6 +2862,7 @@ internal static class SentenceParser
             var target = TargetSpec.Parse(m.Groups["t"].Value);
             if (target == null) return (null, $"미지원 대상 (DP): {m.Groups["t"].Value}");
             int dp = int.Parse(m.Groups["n"].Value) * (m.Groups["sign"].Value == "-" ? -1 : 1);
+            target.PreferOwnSide = dp > 0;
             return (c =>
             {
                 var list = Pick(target, c, security);
@@ -2869,6 +2881,7 @@ internal static class SentenceParser
             var target = TargetSpec.Parse(m.Groups["t"].Value);
             var grants = ParseKeywordList(m.Groups["kws"].Value);
             if (target == null || grants == null) return (null, "미지원 키워드 부여");
+            target.PreferOwnSide = true;
             return (c =>
             {
                 int until = Until(c, dur);
@@ -2903,8 +2916,29 @@ internal static class SentenceParser
             }, null);
         }
 
+        // "1 of your opponent's Digimon can't unsuspend until the end of their turn" · "1 of their Digimon or Tamers can't suspend until their turn ends"
+        //  — 기간 동안 액티브(액티브 페이즈 · 효과) / 레스트(어택 · 블록 · 효과)가 될 수 없다. 테이머는 대상에서 뺀다
+        if (dur != Duration.None && dur != Duration.ThisAttack
+            && (m = Regex.Match(core, @"^(?<t>.+?) (?:can't|cannot|doesn't|don't|does not|do not) (?<v>unsuspend|suspend|become unsuspended|become suspended)$", RegexOptions.IgnoreCase)).Success)
+        {
+            bool un = m.Groups["v"].Value.Contains("unsuspend", StringComparison.OrdinalIgnoreCase);
+            var target = TargetSpec.Parse(Regex.Replace(m.Groups["t"].Value, @"\bDigimon or Tamers\b", "Digimon", RegexOptions.IgnoreCase));
+            if (target == null) return (null, $"미지원 대상 ({(un ? "액티브" : "레스트")} 불가): {m.Groups["t"].Value}");
+            return (c =>
+            {
+                int until = Until(c, dur);
+                var list = Pick(target, c, security);
+                foreach (var d in list)
+                {
+                    if (un) d.CannotUnsuspendUntil = Math.Max(d.CannotUnsuspendUntil, until);
+                    else d.CannotSuspendUntil = Math.Max(d.CannotSuspendUntil, until);
+                }
+                Emit(c, label, list.Count > 0 ? $"[{string.Join(", ", list.Select(d => d.TopCard.Name))}] {(un ? "액티브" : "레스트")}가 될 수 없음" : "대상이 없습니다");
+            }, null);
+        }
+
         // "It doesn't unsuspend during your opponent's next unsuspend phase" — 대상 주인의 다음 액티브 페이즈에 액티브가 되지 않는다
-        if ((m = Regex.Match(core, @"^(?<t>.+?) (?:doesn't|don't|does not|do not|can't) (?:unsuspend|become unsuspended) during (?:its owner's|their owner's|your opponent's|their|your|its) next unsuspend phase$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(core, @"^(?<t>.+?) (?:doesn't|don't|does not|do not|can't) (?:unsuspend|become unsuspended) (?:during|in) (?:its owner's|their owner's|your opponent's|their|your|its) next unsuspend phase$", RegexOptions.IgnoreCase)).Success)
         {
             string tp = Regex.Replace(m.Groups["t"].Value, @"^none of ", "all of ", RegexOptions.IgnoreCase);
             var target = TargetSpec.Parse(tp);

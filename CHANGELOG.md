@@ -10,6 +10,15 @@
 
 ---
 
+## v0.11.0 — 2026-10-22
+주인을 말하지 않은 대상 · 레스트 / 액티브 불가
+- "suspend 1 Digimon" · "up to 2 Digimon"처럼 주인이 없는 대상 = 양쪽 디지몬 중에서 고름 (레스트 · 소멸 · DP − 같은 해로운 효과는 상대 디지몬을, 액티브 · DP + · 키워드 부여는 자신의 디지몬을 먼저 추천)
+- 조건 "If this effect suspended your Digimon" · "If this effect suspended your opponent's Digimon" · "If this effect unsuspended"
+- 새 규칙: "~ can't unsuspend until ~" (액티브 페이즈 · 효과로 액티브가 되지 않음), "~ can't suspend until ~" (어택 · 블록 · 효과로 레스트가 되지 않음)
+- "can't unsuspend in their next unsuspend phase" 표기
+- 시나리오 테스트 SuspendLockTests 10개
+- 도감 효과 문장 지원 6,198 → 6,290 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.10.0 — 2026-10-22
 "덱 위 N장 공개" 효과의 여러 표기와 공개한 카드에 하는 일
 - 공개 앞에 붙는 비용 · 조건: "By suspending this Digimon, reveal ~" · "If it's your opponent's turn, reveal ~" · "suspend this Tamer to reveal ~"

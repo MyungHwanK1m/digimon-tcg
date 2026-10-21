@@ -16,7 +16,7 @@ public static class EffectRules
     public static bool IsActive(int until, GameState state) => until > 0 && until >= state.TurnSequence;
 
     public static bool CanBlock(GameState state, CardInstance blocker) =>
-        blocker.HasBlocker && !blocker.IsSuspended && !IsActive(blocker.CannotBlockUntil, state);
+        blocker.HasBlocker && !blocker.IsSuspended && !IsActive(blocker.CannotBlockUntil, state) && !IsSuspendLocked(state, blocker);
 
     /// <summary>attacker가 blocker에게 블록당하지 않는지</summary>
     public static bool IsUnblockableBy(GameState state, CardInstance attacker, CardInstance blocker) =>
@@ -40,7 +40,7 @@ public static class EffectRules
 
     /// <summary>blocker가 attacker의 어택을 블록할 수 있는지 (≪충돌≫이면 ≪블로커≫가 없어도)</summary>
     public static bool CanBlockAgainst(GameState state, CardInstance blocker, CardInstance attacker) =>
-        (blocker.HasBlocker || ForcesBlock(attacker)) && !blocker.IsSuspended && !IsActive(blocker.CannotBlockUntil, state);
+        (blocker.HasBlocker || ForcesBlock(attacker)) && !blocker.IsSuspended && !IsActive(blocker.CannotBlockUntil, state) && !IsSuspendLocked(state, blocker);
 
     /// <summary>
     /// 상대(AI · 연습 더미)가 내 어택을 블록할 블로커. null = 블록하지 않음.
@@ -92,7 +92,13 @@ public static class EffectRules
         digimon.IsSuspended && !CardScripts.HasKeyword(digimon, Keyword.CannotBeAttacked);
 
     public static bool IsAttackLocked(GameState state, CardInstance digimon) =>
-        IsActive(digimon.CannotAttackUntil, state) || CardScripts.HasKeyword(digimon, Keyword.CannotAttack);
+        IsActive(digimon.CannotAttackUntil, state) || IsActive(digimon.CannotSuspendUntil, state) || CardScripts.HasKeyword(digimon, Keyword.CannotAttack);   // 어택하면 레스트가 되므로 레스트 불가 = 어택 불가
+
+    /// <summary>"can't suspend" — 레스트가 될 수 없으면 블록(레스트해서 막기)도 할 수 없다</summary>
+    public static bool IsSuspendLocked(GameState state, CardInstance digimon) => IsActive(digimon.CannotSuspendUntil, state);
+
+    /// <summary>"can't unsuspend" — 액티브 페이즈 · 효과로 액티브가 되지 않는다</summary>
+    public static bool IsUnsuspendLocked(GameState state, CardInstance digimon) => IsActive(digimon.CannotUnsuspendUntil, state);
 }
 
 /// <summary>
@@ -1228,7 +1234,7 @@ public partial class GoldfishEngine
     /// <summary>디지몬을 레스트시킨다 + "이 디지몬이 레스트 상태가 되었을 때" 효과</summary>
     internal void Suspend(CardInstance inst)
     {
-        if (inst.IsSuspended)
+        if (inst.IsSuspended || EffectRules.IsSuspendLocked(State, inst))
             return;
         inst.IsSuspended = true;
         var owner = OwnerOf(inst);
@@ -1344,7 +1350,7 @@ public partial class GoldfishEngine
     /// <summary>디지몬을 액티브로 (효과) + 자신의 메인 페이즈라면 "메인 페이즈에 액티브가 되었을 때" 효과</summary>
     internal void Unsuspend(CardInstance inst)
     {
-        if (!inst.IsSuspended)
+        if (!inst.IsSuspended || EffectRules.IsUnsuspendLocked(State, inst))
             return;
         inst.IsSuspended = false;
         var owner = OwnerOf(inst);

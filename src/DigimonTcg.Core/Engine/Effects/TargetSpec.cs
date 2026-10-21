@@ -16,6 +16,10 @@ public sealed class TargetSpec
     /// <summary>"that Digimon" · "it" — 앞 문장의 대상 (EffectContext.LastTargets, 없으면 이 디지몬)</summary>
     public bool IsThat { get; private init; }
     public bool Opponent { get; private init; }
+    /// <summary>"1 Digimon" · "up to 2 Digimon" — 주인을 말하지 않은 대상 = 양쪽 디지몬 중에서 고른다</summary>
+    public bool AnySide { get; private init; }
+    /// <summary>양쪽에서 고를 때 자신의 디지몬을 먼저 볼지 (액티브 · DP + 같은 이로운 효과). 동작을 읽는 쪽이 정한다</summary>
+    public bool PreferOwnSide { get; set; }
     /// <summary>고르는 수 (0 = 전부)</summary>
     public int Count { get; private init; } = 1;
     public List<Func<CardInstance, bool>> Filters { get; } = new();
@@ -39,6 +43,11 @@ public sealed class TargetSpec
             return new TargetSpec { IsThis = true, Text = phrase };
         if (Regex.IsMatch(phrase, @"^(?:it|they|that Digimon|those Digimon|them|that card|the Digimon)$", RegexOptions.IgnoreCase))
             return new TargetSpec { IsThat = true, Count = 0, Text = phrase };
+
+        // "1 Digimon" · "up to 2 level 4 or lower Digimon" — 주인이 없으면 양쪽 디지몬 (읽기는 "of your ~"로)
+        var anySide = Regex.Match(phrase, @"^(?<count>\d+|up to \d+|all) (?!of )(?<body>(?:other )?(?:[^,]*? )?Digimon\b.*)$", RegexOptions.IgnoreCase);
+        if (anySide.Success && Parse($"{anySide.Groups["count"].Value} of your {anySide.Groups["body"].Value}") is { } own && !own.IsThis && !own.IsThat)
+            return own.WithAnySide(phrase);
 
         var m = Head.Match(phrase);
         if (!m.Success || m.Groups["kind"].Value.Equals("Security Digimon", StringComparison.OrdinalIgnoreCase))
@@ -88,6 +97,14 @@ public sealed class TargetSpec
         string rest = m.Groups["rest"].Value.Trim();
         if (!ParseFilters(rest, spec))
             return null;
+        return spec;
+    }
+
+    private TargetSpec WithAnySide(string text)
+    {
+        var spec = new TargetSpec { AnySide = true, Count = Count, UpTo = UpTo, Text = text, Selector = Selector };
+        spec.Filters.AddRange(Filters);
+        spec.ContextFilters.AddRange(ContextFilters);
         return spec;
     }
 
@@ -245,8 +262,8 @@ public sealed class TargetSpec
         if (IsThis || IsThat)
             return c.Self != null && (c.Owner.BattleArea.Contains(c.Self) || ReferenceEquals(c.Owner.BreedingArea, c.Self)) ? new List<CardInstance> { c.Self } : new List<CardInstance>();
 
-        var zone = Opponent ? c.Enemy : c.Owner;
-        IEnumerable<CardInstance> candidates = zone.BattleArea.Where(d => Filters.All(f => f(d)) && ContextFilters.All(f => f(c, d)));
+        var pool = AnySide ? c.Owner.BattleArea.Concat(c.Enemy.BattleArea) : (Opponent ? c.Enemy : c.Owner).BattleArea;
+        IEnumerable<CardInstance> candidates = pool.Where(d => Filters.All(f => f(d)) && ContextFilters.All(f => f(c, d)));
         if (Selector != null)
             candidates = Selector(candidates);
         var list = candidates.ToList();
@@ -255,11 +272,12 @@ public sealed class TargetSpec
 
         var ordered = list
             .OrderByDescending(d => ReferenceEquals(d, preferred))
-            .ThenByDescending(d => !Opponent && ReferenceEquals(d, c.Self))
+            .ThenByDescending(d => AnySide && c.Owner.BattleArea.Contains(d) == PreferOwnSide)   // 양쪽: 해로운 효과는 상대 먼저, 이로운 효과는 자신 먼저
+            .ThenByDescending(d => (!Opponent || (AnySide && PreferOwnSide)) && ReferenceEquals(d, c.Self))
             .ThenByDescending(d => d.GetCurrentDP())
             .ThenByDescending(d => d.TopCard.Level)
             .ToList();
-        string side = Opponent ? "상대 디지몬" : "자신의 디지몬";
+        string side = AnySide ? "디지몬" : Opponent ? "상대 디지몬" : "자신의 디지몬";
         return c.Engine.ChooseTargets(c.Owner, ordered, Count, $"[{c.Card?.Name}] 효과의 대상({side} {Count}마리{(UpTo ? "까지" : "")})을 고르세요.", UpTo, preferred);
     }
 }
