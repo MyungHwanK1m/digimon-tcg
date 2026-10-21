@@ -3818,13 +3818,13 @@ public partial class MainWindow : Window
         if (_potentialDragHandCard != null)
         {
             var card = _potentialDragHandCard;
-            if (LinkTargetOf(card, info) is { } linkTarget)
+            if (SpecialHandDropActions(card, info) is { Count: > 0 } specials)
             {
-                bool alsoOther = DescribeOtherHandDrop(card, info) != null;
+                bool choose = specials.Count > 1 || DescribeOtherHandDrop(card, info) != null;
                 HighlightDropZone(BattleAreaZoneBorder, "#89DCEB");
-                _dragGhostBadgeText.Text = alsoOther
-                    ? $"{LinkLabel(card, linkTarget)} 가능 — 놓으면 링크 / 다른 동작 중 고르기"
-                    : $"{LinkLabel(card, linkTarget)}!";
+                _dragGhostBadgeText.Text = choose
+                    ? $"{specials[0].Label} 가능 — 놓으면 할 일을 고르기"
+                    : $"{specials[0].Label}!";
                 _dragGhostBadgeBorder.Background = BrushFromHex("#89DCEB");
                 return;
             }
@@ -4024,12 +4024,48 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>링크와 다른 동작 중 고르기 — 링크를 고르면 true (창을 닫으면 원래 동작)</summary>
-    private bool ChooseLinkOver(string otherAction, CardData card, CardInstance target)
+    /// <summary>
+    /// 패의 카드를 내 디지몬 위에 놓았을 때 할 수 있는 특별 동작 (DNA 진화 · 링크) — 표시 문구와 실행.
+    /// 할 수 있는지 · 코스트 · 효과 · 턴 종료는 엔진이 정한다 (GetDnaPairs · GetLinkTargets).
+    /// </summary>
+    private List<(string Label, Action Run)> SpecialHandDropActions(CardData card, (CardInstance? AllyDigimon, CardInstance? OpponentDigimon, bool OverBattleZone, bool OverBreedingZone, bool OverOpponentSecurityZone, bool OverOpponentBattleZone) info)
     {
-        var options = new List<string> { otherAction, LinkLabel(card, target) };
-        int pick = _engine.PlayerChoices?.ChooseOption(_gameState, $"[{card.DisplayName}]을(를) 어떻게 쓸까요?", options, 0) ?? 0;
-        return pick == 1;
+        var actions = new List<(string Label, Action Run)>();
+        if (info.AllyDigimon is { } ally && GoldfishEngine.HasDna(card))
+        {
+            var partners = _engine.GetDnaPairs(card)
+                .Where(p => ReferenceEquals(p.Left, ally) || ReferenceEquals(p.Right, ally))
+                .Select(p => ReferenceEquals(p.Left, ally) ? p.Right : p.Left)
+                .Distinct()
+                .ToList();
+            if (partners.Count > 0)
+                actions.Add((DnaLabel(card, ally, partners), () => RunDnaDigivolve(card, ally, partners)));
+        }
+        if (LinkTargetOf(card, info) is { } linkTarget)
+            actions.Add((LinkLabel(card, linkTarget), () => ApplyActionResult(_engine.LinkFromHand(card, linkTarget))));
+        return actions;
+    }
+
+    private static string DnaLabel(CardData card, CardInstance ally, IReadOnlyList<CardInstance> partners) =>
+        $"🧬🧬 DNA 진화: [{ally.TopCard.DisplayName}] + "
+        + (partners.Count == 1 ? $"[{partners[0].TopCard.DisplayName}]" : "짝 고르기")
+        + (GoldfishEngine.GetDnaCost(card) is int cost ? $" (코스트 {cost})" : "");
+
+    /// <summary>DNA 진화: 놓은 디지몬과 짝이 될 수 있는 디지몬이 여럿이면 짝을 고른다 (고르지 않으면 취소)</summary>
+    private void RunDnaDigivolve(CardData card, CardInstance ally, IReadOnlyList<CardInstance> partners)
+    {
+        var partner = partners.Count == 1
+            ? partners[0]
+            : _engine.PlayerChoices is { } choices
+                ? choices.ChooseDigimon(_gameState, $"[{card.DisplayName}] DNA 진화 — [{ally.TopCard.DisplayName}]과(와) 함께 진화할 디지몬을 고르세요.", partners, partners[0], optional: true)
+                : partners[0];
+        if (partner == null || !partners.Contains(partner))
+        {
+            ShowToast(false, "DNA 진화를 취소했습니다.");
+            RefreshAllSimulatorUi();
+            return;
+        }
+        ApplyActionResult(_engine.DnaDigivolve(card, ally, partner));
     }
 
     private void CompleteCardDrop(Point dropPos)
@@ -4043,13 +4079,22 @@ public partial class MainWindow : Window
 
         if (draggedHand != null)
         {
-            // 링크: 내 배틀 에어리어 디지몬 위에 놓았고 링크할 수 있으면 링크 (진화 · 등장 · 옵션도 가능하면 고르게 한다)
-            if (LinkTargetOf(draggedHand, info) is { } linkTarget)
+            // DNA 진화 · 링크: 내 디지몬 위에 놓았고 할 수 있으면 (진화 · 등장 · 옵션도 가능하면 무엇을 할지 고르게 한다)
+            var specials = SpecialHandDropActions(draggedHand, info);
+            if (specials.Count > 0)
             {
                 string? other = DescribeOtherHandDrop(draggedHand, info);
-                if (other == null || ChooseLinkOver(other, draggedHand, linkTarget))
+                var labels = new List<string>();
+                if (other != null)
+                    labels.Add(other);
+                labels.AddRange(specials.Select(s => s.Label));
+                int pick = labels.Count == 1
+                    ? 0
+                    : _engine.PlayerChoices?.ChooseOption(_gameState, $"[{draggedHand.DisplayName}]을(를) 어떻게 쓸까요?", labels, 0) ?? 0;
+                int specialIndex = other != null ? pick - 1 : pick;
+                if (specialIndex >= 0 && specialIndex < specials.Count)
                 {
-                    ApplyActionResult(_engine.LinkFromHand(draggedHand, linkTarget));
+                    specials[specialIndex].Run();
                     return;
                 }
             }
