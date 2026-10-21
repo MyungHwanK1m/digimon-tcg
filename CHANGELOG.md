@@ -10,6 +10,17 @@
 
 ---
 
+## v0.10.0 — 2026-10-22
+"덱 위 N장 공개" 효과의 여러 표기와 공개한 카드에 하는 일
+- 공개 앞에 붙는 비용 · 조건: "By suspending this Digimon, reveal ~" · "If it's your opponent's turn, reveal ~" · "suspend this Tamer to reveal ~"
+- 공개한 카드로 여러 가지: 패에 넣기 + 파기 · 패에 넣기 + 등장 · 진화원 아래에 놓기(이 디지몬 · 테이머 아래 · 고른 디지몬) · 패에 넣거나 진화원 아래에 놓기
+- "1 such Tamer card"(앞 카드와 같은 조건), "2-color black card" · "card with 2 or more colors", "―both with the [X] trait―"
+- 나머지 처리: "to the top of the deck"(덱 위로) · "Return the revealed cards ~" · "Trash the revealed cards"
+- 덱 위 1장 공개: "If that card has the [X] trait" · "Trash the rest" · "Reveal 1 card from the top of your deck"
+- 공개 뒤 조건 "If you added cards" · "If this effect added to a hand" · "If a card is placed by this effect"
+- 시나리오 테스트 RevealVariantTests 11개
+- 도감 효과 문장 지원 6,130 → 6,198 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.9.0 — 2026-10-22
 새 발동 시점 — 시큐리티에서 카드가 빠졌을 때 / 놓였을 때
 - "When your security stack is removed from" · "When a card is removed from your (opponent's) security stack" · "When security stacks are removed from" · "When a card is added to your security stack"

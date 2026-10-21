@@ -461,6 +461,11 @@ internal static class SentenceParser
         // "To 1 of your opponent's Digimon, give -3000 DP until their turn ends" → "1 of your opponent's Digimon gets -3000 DP until their turn ends"
         s = Regex.Replace(s, @"\bTo (?<t>(?:\d+|all) of (?:your|your opponent's|their) [^,]*?Digimon), give (?<dp>[+-]\d+ DP)\b", "${t} gets ${dp}", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"\bbatttle\b", "battle", RegexOptions.IgnoreCase);   // 원문 오타
+        s = Regex.Replace(s, @"\b(rest|cards) the the (bottom|top)\b", "$1 to the $2", RegexOptions.IgnoreCase);   // 원문 오타 "Return the rest the the bottom"
+        s = Regex.Replace(s, @"\bBy Reveal\b", "Reveal");   // 원문 오타 "By Reveal the top 4 cards"
+        s = Regex.Replace(s, @"\[(?<a>[^\]]+)\] trait or \[(?<b>[^\]]+)\] trait\b", "[${a}] or [${b}] trait");   // "the [A] trait or [B] trait" = "the [A] or [B] trait"
+        // "Add 1 Digimon card and 1 Tamer card―both with the [Xros Heart] trait―among them" → 조건을 양쪽에 붙인다
+        s = Regex.Replace(s, @"\b(?<a>\d+ (?:Digimon|Tamer|Option) cards?) and (?<b>\d+ (?:Digimon|Tamer|Option) cards?)\s*[―—-]\s*both (?<w>with [^―—]+?)\s*[―—-]\s*", "${a} ${w} and ${b} ${w} ", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"\byou have (\d+) or (fewer|less|more) cards in your security stack\b", "you have $1 or $2 security cards", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"\byou have (\d+) security cards or (fewer|less|more)\b", "you have $1 or $2 security cards", RegexOptions.IgnoreCase);
         // ＜Recovery +1 (Deck)＞ 같은 키워드 안 괄호를 잠시 바꿔 두고, 설명문 괄호를 지운다
@@ -1419,10 +1424,11 @@ internal static class SentenceParser
         for (int i = 0; i < sentences.Count; i++)
         {
             // "Reveal the top card of your deck. Add it to your hand if it's a green Digimon card. Otherwise, place it at the bottom of your deck."
-            if (Regex.IsMatch(sentences[i], @"^(?:Then, )?Reveal the top card of your deck\.?$", RegexOptions.IgnoreCase)
+            //  · "By suspending this Tamer, reveal 1 card from the top of your deck. If that card has the [X] trait, add it to your hand. Trash the rest."
+            if (Regex.IsMatch(sentences[i], @"^(?:[^.]*?\b)?Reveal (?:the top card of your deck|1 card from the top of your deck)\.?$", RegexOptions.IgnoreCase)
                 && i + 2 < sentences.Count
-                && Regex.IsMatch(sentences[i + 1], @"^(?:Add it to (?:the|your) hand if it's|If (?:that card|it) is) ", RegexOptions.IgnoreCase)
-                && Regex.IsMatch(sentences[i + 2], @"^Otherwise", RegexOptions.IgnoreCase))
+                && Regex.IsMatch(sentences[i + 1], @"^(?:Add it to (?:the|your) hand if it's|If (?:that card|it) (?:is|has)) ", RegexOptions.IgnoreCase)
+                && Regex.IsMatch(sentences[i + 2], @"^(?:Otherwise|Trash the rest\.?$|Place the rest at the bottom of (?:the|your) deck\.?$)", RegexOptions.IgnoreCase))
             {
                 result.Add($"{sentences[i]} {sentences[i + 1]} {sentences[i + 2]}");
                 i += 2;
@@ -1431,6 +1437,15 @@ internal static class SentenceParser
             if (Regex.IsMatch(sentences[i], @"^(?:Then, )?(?:You may )?Reveal (?:the top \d+ cards? of your deck|\d+ cards? from the top of your deck)(?: for each [^.]+)?\.?$", RegexOptions.IgnoreCase)
                 && i + 2 < sentences.Count
                 && Regex.IsMatch(sentences[i + 1], @"^(?:Add .+ among them to (?:the|your) hand|(?:You may )?play .+ among them(?: without paying .+)?)\.?$", RegexOptions.IgnoreCase))
+            {
+                result.Add($"{sentences[i]} {sentences[i + 1]} {sentences[i + 2]}");
+                i += 2;
+            }
+            // "By suspending this Digimon, reveal the top 3 cards ~. Among them, add ~ and trash 1 such card. Return the rest ~."
+            else if (Regex.IsMatch(sentences[i], @"^(?:[^.]*?\b)?Reveal (?:the top \d+ cards? of your deck|\d+ cards? from the top of your deck)(?: for each [^.]+)?\.?$", RegexOptions.IgnoreCase)
+                     && i + 2 < sentences.Count
+                     && Regex.IsMatch(sentences[i + 1], @"^(?:Among them, )?(?:You may )?(?:Add|Play|Trash|Place) .+$", RegexOptions.IgnoreCase)
+                     && Regex.IsMatch(sentences[i + 2], $@"^{RevealRest}\.?$", RegexOptions.IgnoreCase))
             {
                 result.Add($"{sentences[i]} {sentences[i + 1]} {sentences[i + 2]}");
                 i += 2;
@@ -1860,6 +1875,9 @@ internal static class SentenceParser
             return c => c.Engine.CurrentDeletionCause == GoldfishEngine.DeletionCause.Battle;
         if (Regex.IsMatch(cond, @"^you do$", RegexOptions.IgnoreCase))
             return c => c.LastStepResolved;   // "If you do, ~" — 앞 문장을 실제로 처리했을 때
+        // 공개 효과 뒤: "If you added cards" · "If this effect added to a hand" · "If a card is placed by this effect" — 공개한 카드를 1장이라도 가져갔을 때
+        if (Regex.IsMatch(cond, @"^(?:you added (?:a card|cards?)(?: to (?:the|your) hand)?|this effect added (?:a card |cards )?to (?:a|the|your) hand|a card (?:is|was) placed by this effect|this effect placed(?: a card| cards)?)$", RegexOptions.IgnoreCase))
+            return c => c.LastStepResolved;
         if (Regex.IsMatch(cond, @"^no Digimon (?:was|were|is) deleted by this effect$", RegexOptions.IgnoreCase))
             return c => !c.LastTargets.Any(d => !c.Owner.BattleArea.Contains(d) && !c.Enemy.BattleArea.Contains(d));
         if (Regex.IsMatch(cond, @"^you have no other Digimon(?: in play)?$", RegexOptions.IgnoreCase))
@@ -2403,7 +2421,7 @@ internal static class SentenceParser
             int n = int.Parse(m.Groups["n"].Value);
             return (c => Emit(c, label, $"패 {c.Engine.DiscardFromHand(c.Owner, n)}장 파기"), null);
         }
-        if ((m = Regex.Match(s, @"^Reveal (?:the top (?<n>\d+) cards? of your deck|(?<n>\d+) cards? from the top of your deck)(?: for each (?<counter>[^.]+?))?\.? (?:Add (?<adds>.+?) among them to (?:the|your) hand|(?:You may )?play (?<play>.+?) among them(?: without paying (?:its|the|their) (?:memory )?costs?)?(?<noplay> ⟦no-onplay⟧)?)\.? (?<rest>.+?)\.?$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(s, $@"^Reveal (?:the top (?<n>\d+) cards? of your deck|(?<n>\d+) cards? from the top of your deck)(?: for each (?<counter>[^.]+?))?\.? (?<mid>(?!Add it\b)(?:Among them, )?(?:You may )?(?:Add|Play|Trash|Place) .+?)\.? (?<rest>{RevealRest})\.?$", RegexOptions.IgnoreCase)).Success)
             return ParseReveal(m, label, card, triggers);
 
         if ((m = Regex.Match(s, @"^At (?:the )?end of (?:the |this )?turn, lose (?<n>\d+) memory$", RegexOptions.IgnoreCase)).Success)
@@ -2583,17 +2601,20 @@ internal static class SentenceParser
         }
 
         // 덱 위 1장 공개 → 조건에 맞으면 패, 아니면 덱 아래
-        if ((m = Regex.Match(s, @"^(?:Then, )?Reveal the top card of your deck\.? (?:Add it to (?:the|your) hand if it's (?<pick>an? [^.]+?)|If (?:that card|it) is (?<pick>an? [^,]+?), add it to (?:the|your) hand)\.? Otherwise,? (?:place|put|return) it (?:at|on|to) the bottom of (?:the|your) deck$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(s, @"^(?:Then, )?Reveal (?:the top card of your deck|1 card from the top of your deck)\.? (?:Add it to (?:the|your) hand if it's (?<pick>an? [^.]+?)|If (?:that card|it) is (?<pick>an? [^,]+?), add it to (?:the|your) hand|If (?:that card|it) has (?<has>[^,]+?), add it to (?:the|your) hand)\.? (?:Otherwise,? (?:place|put|return) it (?:at|on|to) the bottom of (?:the|your) deck|(?<trash>Trash the rest)|Place the rest at the bottom of (?:the|your) deck)$", RegexOptions.IgnoreCase)).Success)
         {
-            var pick = ParseCardPick(Regex.Replace(m.Groups["pick"].Value, @"^an? ", "1 "));
-            if (pick == null) return (null, $"미지원 공개 조건 ({m.Groups["pick"].Value})");
+            string pickText = m.Groups["has"].Success ? $"1 card with {m.Groups["has"].Value}" : Regex.Replace(m.Groups["pick"].Value, @"^an? ", "1 ");
+            var pick = ParseCardPick(pickText);
+            if (pick == null) return (null, $"미지원 공개 조건 ({pickText})");
             var match = pick.Value.Match;
+            bool trashMiss = m.Groups["trash"].Success;
             return (c =>
             {
                 if (c.Owner.MainDeck.Count == 0) { Emit(c, label, "덱이 없습니다"); return; }
                 var top = c.Owner.MainDeck[0];
                 c.Owner.MainDeck.RemoveAt(0);
                 if (match(top)) { c.Owner.Hand.Add(top); Emit(c, label, $"덱 위 [{top.Name}] 공개 → 패에 추가"); }
+                else if (trashMiss) { c.Owner.Trash.Add(top); Emit(c, label, $"덱 위 [{top.Name}] 공개 → 파기"); }
                 else { c.Owner.MainDeck.Add(top); Emit(c, label, $"덱 위 [{top.Name}] 공개 → 덱 아래로"); }
             }, null);
         }
@@ -3043,33 +3064,78 @@ internal static class SentenceParser
 
     // ---- 덱 위 공개 ----
 
+    private enum RevealVerb { Add, Play, Trash, Place, AddOrPlace }
+
+    /// <summary>공개한 카드에 하는 일 하나: "add 1 X to the hand" · "play 1 X without paying the cost" · "trash 1 such card" · "place 1 X under this Digimon"</summary>
+    private sealed record RevealAction(RevealVerb Verb, List<(int Count, Func<CardData, bool> Match, bool UpTo)> Picks, Func<EffectContext, CardData, bool>? Place, bool NoOnPlay);
+
+    /// <summary>공개 효과의 마지막 문장: "Return the rest to the bottom of the deck" · "Trash the remaining cards" · "Return the revealed cards to the top or bottom of the deck"</summary>
+    internal const string RevealRest = @"(?:Return|Place|Put|Trash) (?:the |those )?(?:rest|remaining cards?|revealed cards?|cards)\b[^.]*";
+
     private static (Action<EffectContext>? Act, string? Error) ParseReveal(Match m, string label, CardData card, List<EffectTrigger> triggers)
     {
         int n = int.Parse(m.Groups["n"].Value);
         Func<PlayerZones, PlayerZones, CardInstance?, int>? perCount = null;
         if (m.Groups["counter"].Success && (perCount = ParseCounter(m.Groups["counter"].Value)) == null)
             return (null, $"미지원 공개 매수: for each {m.Groups["counter"].Value}");
-        bool play = m.Groups["play"].Success;
-        // "You may play ~ among them" — 등장시키지 않아도 된다
-        bool mayPlay = play && Regex.IsMatch(m.Value, @"\bYou may play\b", RegexOptions.IgnoreCase);
-        var picks = new List<(int Count, Func<CardData, bool> Match, bool UpTo)>();
-        var parts = Regex.Split(m.Groups[play ? "play" : "adds"].Value, @"\s+and\s+(?=(?:up to )?\d+ )", RegexOptions.IgnoreCase);
-        // "1 blue and 1 green Digimon card" — 앞 조건에 뒤의 종류를 붙인다
-        string kindTail = Regex.Match(parts[^1], @"(?:Digimon|Tamer|Option) cards?$", RegexOptions.IgnoreCase).Value;
-        foreach (var raw in parts)
+        bool security = triggers.Contains(EffectTrigger.Security);
+
+        // "Among them, add ~ and trash 1 such card" · "You may add ~, and play ~"
+        string mid = Regex.Replace(m.Groups["mid"].Value.Trim().TrimEnd('.'), @"^Among them,\s*", "", RegexOptions.IgnoreCase);
+        bool mayAll = Regex.IsMatch(mid, @"^You may ", RegexOptions.IgnoreCase);
+        if (mayAll) mid = mid[8..];
+        var actions = new List<RevealAction>();
+        string? prevPart = null;
+        foreach (var rawAction in Regex.Split(mid, @",? and (?=(?:you may )?(?:add|play|place|trash) )", RegexOptions.IgnoreCase))
         {
-            string part = kindTail.Length > 0 && !Regex.IsMatch(raw, @"\b(?:cards?|Digimon|Tamers?|Options?)\b|\[", RegexOptions.IgnoreCase) ? $"{raw} {kindTail}" : raw;
-            var pick = ParseCardPick(part) ?? ParseNamePick(part);
-            if (pick == null) return (null, $"미지원 공개 조건 ({part})");
-            picks.Add((pick.Value.Count, pick.Value.Match, mayPlay || IsUpTo(part)));
+            string a = rawAction.Trim();
+            bool may = mayAll || Regex.IsMatch(a, @"^you may ", RegexOptions.IgnoreCase);
+            a = Regex.Replace(a, @"^you may ", "", RegexOptions.IgnoreCase);
+            bool noOnPlay = a.Contains("⟦no-onplay⟧");
+            a = a.Replace("⟦no-onplay⟧", "").Trim();
+            Match am;
+            RevealVerb verb;
+            string picksText;
+            Func<EffectContext, CardData, bool>? place = null;
+            // "add 1 X to the hand or place it under this Digimon as its bottom digivolution card" — 둘 중 하나를 고른다
+            if (((am = Regex.Match(a, @"^add (?<p>.+?)(?: (?:from )?among them)? to (?:the|your) hand,? or place (?:it|1 such card) (?<w>(?:face down )?(?:under|as) .+)$", RegexOptions.IgnoreCase)).Success
+                 || (am = Regex.Match(a, @"^place (?<p>.+?)(?: among them)? (?<w>(?:face down )?(?:under|as) .+?),? or add it to (?:the|your) hand$", RegexOptions.IgnoreCase)).Success)
+                && (place = ParseRevealPlace(am.Groups["w"].Value, security)) != null)
+                (verb, picksText) = (RevealVerb.AddOrPlace, am.Groups["p"].Value);
+            else if ((am = Regex.Match(a, @"^add (?<p>.+?)(?: (?:from )?among them)? to (?:the|your) hand$", RegexOptions.IgnoreCase)).Success)
+                (verb, picksText) = (RevealVerb.Add, am.Groups["p"].Value);
+            else if ((am = Regex.Match(a, @"^play (?<p>.+?)(?: (?:from )?among(?: them)?)?(?: without paying (?:its|the|their) (?:memory |play )?costs?)?$", RegexOptions.IgnoreCase)).Success)
+                (verb, picksText) = (RevealVerb.Play, am.Groups["p"].Value);
+            else if ((am = Regex.Match(a, @"^place (?<p>.+?)(?: among them)? (?<w>(?:face down )?(?:under|as) .+)$", RegexOptions.IgnoreCase)).Success
+                     && (place = ParseRevealPlace(am.Groups["w"].Value, security)) != null)
+                (verb, picksText) = (RevealVerb.Place, am.Groups["p"].Value);
+            else if ((am = Regex.Match(a, @"^trash (?<p>.+?)(?: among them)?$", RegexOptions.IgnoreCase)).Success)
+                (verb, picksText) = (RevealVerb.Trash, am.Groups["p"].Value);
+            else return (null, $"미지원 공개 후 처리: {a}");
+
+            var picks = new List<(int Count, Func<CardData, bool> Match, bool UpTo)>();
+            var parts = Regex.Split(picksText, @"\s+and\s+(?=(?:up to )?\d+ )", RegexOptions.IgnoreCase);
+            // "1 blue and 1 green Digimon card" — 앞 조건에 뒤의 종류를 붙인다
+            string kindTail = Regex.Match(parts[^1], @"(?:Digimon|Tamer|Option) cards?$", RegexOptions.IgnoreCase).Value;
+            foreach (var raw in parts)
+            {
+                string part = kindTail.Length > 0 && !Regex.IsMatch(raw, @"\b(?:cards?|Digimon|Tamers?|Options?)\b|\[", RegexOptions.IgnoreCase) ? $"{raw} {kindTail}" : raw;
+                bool such = Regex.IsMatch(part, @"^(?:up to )?\d+ such ", RegexOptions.IgnoreCase);
+                var pick = such ? ParseSuchPick(part, prevPart) : ParseCardPick(part) ?? ParseNamePick(part);
+                if (pick == null) return (null, $"미지원 공개 조건 ({part})");
+                picks.Add((pick.Value.Count, pick.Value.Match, may || IsUpTo(part)));
+                if (!such) prevPart = part;
+            }
+            actions.Add(new RevealAction(verb, picks, place, noOnPlay));
         }
+
         string rest = m.Groups["rest"].Value.TrimEnd('.');
-        bool trashRest;
-        if (Regex.IsMatch(rest, @"^(?:Return|Place) the (?:rest|remaining cards) (?:to|at|on) (?:the )?(?:top or |either the top or )?(?:bottom|top) of (?:the |your )?deck(?: in any order)?$|^Place the (?:rest|remaining cards|cards) (?:on|at) (?:the )?(?:top|bottom) of (?:the |your )?deck(?: in any order)?$", RegexOptions.IgnoreCase)) trashRest = false;
-        else if (Regex.IsMatch(rest, @"^Trash the (?:rest|remaining cards)$", RegexOptions.IgnoreCase)) trashRest = true;
+        int restMode;   // 0 덱 아래 · 1 덱 위 · 2 파기
+        if (Regex.IsMatch(rest, @"^Trash the (?:rest|remaining cards?|revealed cards?)$", RegexOptions.IgnoreCase)) restMode = 2;
+        else if (Regex.Match(rest, @"^(?:Return|Place|Put) (?:the |those )?(?:rest|remaining cards?|revealed cards?|cards) (?:to|at|on|in) (?:the )?(?<or>top or (?:the )?|either the top or (?:the )?)?(?<pos>bottom|top) of (?:the |your )?deck(?: in any order)?$", RegexOptions.IgnoreCase) is { Success: true } rm)
+            restMode = rm.Groups["pos"].Value.Equals("top", StringComparison.OrdinalIgnoreCase) && !rm.Groups["or"].Success ? 1 : 0;
         else return (null, $"미지원 공개 후 처리: {rest}");
 
-        bool noOnPlay = m.Groups["noplay"].Success;
         return (c =>
         {
             int total = perCount != null ? n * Math.Min(perCount(c.Owner, c.Enemy, c.Self), 20) : n;
@@ -3077,31 +3143,105 @@ internal static class SentenceParser
             var revealed = deck.Take(total).ToList();
             deck.RemoveRange(0, revealed.Count);
             var taken = new List<CardData>();
-            foreach (var (count, match, upTo) in picks)
+            var chosen = new List<(RevealAction Action, List<CardData> Cards)>();
+            foreach (var action in actions)
             {
-                var pool = revealed.Where(x => !taken.Contains(x) && match(x) && (!play || x.Type is CardType.Digimon or CardType.Tamer));
-                foreach (var pick in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Other, pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.DP).ToList(), count, upTo,
-                             play ? $"[{c.Card.Name}] 공개한 카드 중 등장시킬 카드를 고르세요." : $"[{c.Card.Name}] 공개한 카드 중 패에 넣을 카드를 고르세요."))
-                    taken.Add(pick);
+                var cards = new List<CardData>();
+                bool play = action.Verb == RevealVerb.Play;
+                string what = action.Verb switch { RevealVerb.Play => "등장시킬", RevealVerb.Trash => "파기할", RevealVerb.Place => "진화원 아래에 놓을", RevealVerb.AddOrPlace => "패에 넣거나 진화원 아래에 놓을", _ => "패에 넣을" };
+                foreach (var (count, match, upTo) in action.Picks)
+                {
+                    var pool = revealed.Where(x => !taken.Contains(x) && match(x) && (!play || x.Type is CardType.Digimon or CardType.Tamer));
+                    foreach (var pick in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Other, pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.DP).ToList(), count, upTo,
+                                 $"[{c.Card.Name}] 공개한 카드 중 {what} 카드를 고르세요."))
+                    { taken.Add(pick); cards.Add(pick); }
+                }
+                chosen.Add((action, cards));
             }
             foreach (var t in taken) revealed.Remove(t);
-            if (trashRest) c.Owner.Trash.AddRange(revealed); else deck.AddRange(revealed);
-            if (play)
+            if (restMode == 2) c.Owner.Trash.AddRange(revealed);
+            else if (restMode == 1) deck.InsertRange(0, revealed);
+            else deck.AddRange(revealed);
+
+            var log = new List<string>();
+            var toPlay = new List<(CardData Card, bool NoOnPlay)>();
+            foreach (var (action, cards) in chosen)
             {
-                // 공개한 카드 중에서 코스트 없이 등장 (남은 카드를 덱 아래로 보낸 뒤 — [등장 시] 효과가 덱을 볼 수 있게)
-                var played = new List<string>();
-                foreach (var t in taken)
+                if (cards.Count == 0) continue;
+                string names = string.Join(", ", cards.Select(x => x.Name));
+                switch (action.Verb)
                 {
-                    if (c.Owner.BattleArea.Count >= 12) { deck.Add(t); continue; }
-                    c.Engine.PlayWithoutCost(c.Owner, t, triggerOnPlay: !noOnPlay);
-                    played.Add(t.Name);
+                    case RevealVerb.Add: c.Owner.Hand.AddRange(cards); log.Add($"[{names}] 패에 추가"); break;
+                    case RevealVerb.Trash: c.Owner.Trash.AddRange(cards); log.Add($"[{names}] 파기"); break;
+                    case RevealVerb.Place:
+                        foreach (var x in cards)
+                            if (!action.Place!(c, x)) c.Owner.Trash.Add(x);   // 놓을 곳이 없으면 파기 (공개한 카드는 덱으로 돌아가지 않는다)
+                        c.RecalculateFieldBuffs();
+                        log.Add($"[{names}] 진화원 아래에");
+                        break;
+                    case RevealVerb.AddOrPlace:
+                        foreach (var x in cards)
+                        {
+                            // 놓을지 묻는다 (아니오 = 패에 추가). AI는 패에 넣는다
+                            if (c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] [{x.Name}]을(를) 진화원 아래에 놓을까요? (아니오 = 패에 추가)", false) && action.Place!(c, x))
+                            { c.RecalculateFieldBuffs(); log.Add($"[{x.Name}] 진화원 아래에"); }
+                            else { c.Owner.Hand.Add(x); log.Add($"[{x.Name}] 패에 추가"); }
+                        }
+                        break;
+                    default: toPlay.AddRange(cards.Select(x => (x, action.NoOnPlay))); break;
                 }
-                Emit(c, label, played.Count > 0 ? $"덱 위 {total}장 공개 → [{string.Join(", ", played)}] 코스트 없이 등장" : $"덱 위 {total}장 공개 → 등장시킬 카드 없음");
-                return;
             }
-            foreach (var t in taken) c.Owner.Hand.Add(t);
-            Emit(c, label, taken.Count > 0 ? $"덱 위 {total}장 공개 → [{string.Join(", ", taken.Select(t => t.Name))}] 패에 추가" : $"덱 위 {total}장 공개 → 조건에 맞는 카드 없음");
+            // 공개한 카드 중에서 코스트 없이 등장 (남은 카드를 덱으로 보낸 뒤 — [등장 시] 효과가 덱을 볼 수 있게)
+            var played = new List<string>();
+            foreach (var (t, noOnPlay) in toPlay)
+            {
+                if (c.Owner.BattleArea.Count >= 12) { deck.Add(t); continue; }
+                c.Engine.PlayWithoutCost(c.Owner, t, triggerOnPlay: !noOnPlay);
+                played.Add(t.Name);
+            }
+            if (played.Count > 0) log.Add($"[{string.Join(", ", played)}] 코스트 없이 등장");
+            if (taken.Count == 0) c.LastStepResolved = false;   // "If you added cards, ~"
+            bool onlyPlay = actions.All(x => x.Verb == RevealVerb.Play);
+            Emit(c, label, log.Count > 0 ? $"덱 위 {total}장 공개 → {string.Join(" · ", log)}"
+                : onlyPlay ? $"덱 위 {total}장 공개 → 등장시킬 카드 없음" : $"덱 위 {total}장 공개 → 조건에 맞는 카드 없음");
         }, null);
+    }
+
+    /// <summary>"1 such Tamer card" — 앞에서 고른 카드의 조건(종류 제외)에 새 종류를 더한다</summary>
+    private static (int Count, Func<CardData, bool> Match)? ParseSuchPick(string part, string? prevPart)
+    {
+        var m = Regex.Match(part.Trim(), @"^(?:up to )?(?<n>\d+) such (?<k>.+)$", RegexOptions.IgnoreCase);
+        if (!m.Success || prevPart == null) return null;
+        var kind = ParseCardPick($"{m.Groups["n"].Value} {m.Groups["k"].Value}");
+        string baseText = Regex.Replace(prevPart, @"\b(?:Digimon|Tamer|Option) (?=cards?\b)", "", RegexOptions.IgnoreCase);
+        var basePick = ParseCardPick(baseText) ?? ParseNamePick(prevPart);
+        if (kind == null || basePick == null) return null;
+        var (km, bm) = (kind.Value.Match, basePick.Value.Match);
+        return (kind.Value.Count, x => km(x) && bm(x));
+    }
+
+    /// <summary>공개한 카드를 놓을 곳: "under this Digimon (as its bottom digivolution card)" · "under this Tamer" · "face down under any of your [X] trait Tamers" · "as the bottom digivolution card of 1 of your Digimon"</summary>
+    private static Func<EffectContext, CardData, bool>? ParseRevealPlace(string where, bool security)
+    {
+        where = where.Trim();
+        if (Regex.IsMatch(where, @"^(?:under this (?:Digimon|card)(?: as its bottom digivolution card)?|as (?:this Digimon's|its) bottom digivolution card)$", RegexOptions.IgnoreCase))
+            return (c, x) => { if (c.Self == null) return false; c.Self.AddBottomSource(x); return true; };
+        if (Regex.IsMatch(where, @"^(?:face down )?under (?:this Tamer|(?:any of |1 of |one of )?your (?:.+? )?Tamers?)$", RegexOptions.IgnoreCase))
+            return (c, x) => { if (c.Owner.Tamers.Count == 0) return false; c.Owner.UnderTamers.Add(x); return true; };
+        var m = Regex.Match(where, @"^(?:face down )?(?:as the bottom digivolution card of (?<t>.+)|under (?<t>.+?) as its bottom digivolution card)$", RegexOptions.IgnoreCase);
+        if (!m.Success) m = Regex.Match(where, @"^(?:face down )?as (?<t>.+?)'s bottom digivolution card$", RegexOptions.IgnoreCase);   // "as any of your blue Digimon's bottom digivolution card"
+        if (!m.Success) return null;
+        // "any of your Digimon with the [DM] trait" · "1 of your [Mother D-Reaper]s" — 한 마리를 고른다
+        string t = Regex.Replace(m.Groups["t"].Value, @"^any of your ", "1 of your ", RegexOptions.IgnoreCase);
+        t = Regex.Replace(t, @"\]s\b", "]");
+        if (TargetSpec.Parse(t) is not { } target) return null;
+        return (c, x) =>
+        {
+            var d = Pick(target, c, security).FirstOrDefault();
+            if (d == null) return false;
+            d.AddBottomSource(x);
+            return true;
+        };
     }
 
     /// <summary>"up to 2 ~" — 0장도 고를 수 있다 (ParseCardPick · ParseNamePick은 장수만 돌려준다)</summary>
@@ -3151,7 +3291,7 @@ internal static class SentenceParser
             return ParseSingleCardPick(part.Remove(nonEgg.Index, nonEgg.Length)) is { } inner
                 ? (inner.Count, c => c.Type != CardType.Digitama && inner.Match(c)) : null;
         var m = Regex.Match(part.Trim(),
-            $@"^(?:up to )?(?<n>\d+|a|an|all) (?<adj>(?:(?:{TargetSpec.NameList}(?: traits?)?|level \d+(?: or (?:lower|higher|(?:level )?\d+))?|play costs? \d+ or (?:lower|higher|less|more)|(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)\s+)*)(?<kind>Digimon|Tamer|Option)?\s*(?:cards?)?(?<filter>.*)$",
+            $@"^(?:up to )?(?<n>\d+|a|an|all) (?<adj>(?:(?:\d+-colou?r|{TargetSpec.NameList}(?: traits?)?|level \d+(?: or (?:lower|higher|(?:level )?\d+))?|play costs? \d+ or (?:lower|higher|less|more)|(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)\s+)*)(?<kind>Digimon|Tamer|Option)?\s*(?:cards?)?(?<filter>.*)$",
             RegexOptions.IgnoreCase);
         if (!m.Success) return null;
         int count = int.TryParse(m.Groups["n"].Value, out int k) ? k : m.Groups["n"].Value.Equals("all", StringComparison.OrdinalIgnoreCase) ? 99 : 1;
@@ -3162,9 +3302,14 @@ internal static class SentenceParser
         else if (kind == "option") filters.Add(c => c.Type == CardType.Option);
 
         string adj = m.Groups["adj"].Value;
-        foreach (Match a in Regex.Matches(adj, $@"(?<names>{TargetSpec.NameList})(?<trait> traits?)?|level (?<lv>\d+)(?: or (?:(?<dir>lower|higher)|(?:level )?(?<lv2>\d+)))?|play costs? (?<pc>\d+) or (?<pdir>lower|higher|less|more)|(?<colors>(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)", RegexOptions.IgnoreCase))
+        foreach (Match a in Regex.Matches(adj, $@"(?<multi>\d+)-colou?r|(?<names>{TargetSpec.NameList})(?<trait> traits?)?|level (?<lv>\d+)(?: or (?:(?<dir>lower|higher)|(?:level )?(?<lv2>\d+)))?|play costs? (?<pc>\d+) or (?<pdir>lower|higher|less|more)|(?<colors>(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)", RegexOptions.IgnoreCase))
         {
-            if (a.Groups["names"].Success)
+            if (a.Groups["multi"].Success)
+            {
+                int colors = int.Parse(a.Groups["multi"].Value);   // "2-color black card" — 색이 2개
+                filters.Add(c => c.AllColors.Count == colors);
+            }
+            else if (a.Groups["names"].Success)
             {
                 var xs = TargetSpec.Names(a.Groups["names"].Value);
                 filters.Add(a.Groups["trait"].Success ? c => xs.Any(x => TargetSpec.HasTrait(c, x)) : c => xs.Any(x => TargetSpec.NameHas(c, x) || TargetSpec.HasTrait(c, x)));
@@ -3217,6 +3362,8 @@ internal static class SentenceParser
             { var xs = TargetSpec.Names(f.Groups["x"].Value); filters.Add(c => !xs.Any(x => c.Name.Equals(x, StringComparison.OrdinalIgnoreCase))); }
             else if ((f = Regex.Match(rest, $@"^(?<x>{TargetSpec.NameList})", RegexOptions.IgnoreCase)).Success)
             { var xs = TargetSpec.Names(f.Groups["x"].Value); filters.Add(c => xs.Any(x => TargetSpec.NameHas(c, x) || TargetSpec.HasTrait(c, x))); }
+            else if ((f = Regex.Match(rest, @"^(?:with |and )?(?<n>\d+) or more colou?rs", RegexOptions.IgnoreCase)).Success)
+            { int v = int.Parse(f.Groups["n"].Value); filters.Add(c => c.AllColors.Count >= v); }
             else if ((f = Regex.Match(rest, @"^with (?:an? )?inherited effects?", RegexOptions.IgnoreCase)).Success)
             { filters.Add(c => c.InheritedEffectText.Trim().Length > 0); }
             else if ((f = Regex.Match(rest, @"^with (?:a )?(?:memory |play )?cost of (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
