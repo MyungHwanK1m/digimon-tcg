@@ -2745,17 +2745,20 @@ public partial class MainWindow : Window
             : "50장 메인 덱 맨 위 5장 무작위 배치됨";
 
         TxtPlayerZonesSummary.Text =
-            $"메인 덱: {_gameState.Player.MainDeck.Count}장 | 🛡️ 내 시큐리티: {_gameState.Player.SecurityStack.Count}/5장 | 트래시: {_gameState.Player.Trash.Count}장";
+            $"메인 덱: {_gameState.Player.MainDeck.Count}장 | 🛡️ 내 시큐리티: {_gameState.Player.SecurityStack.Count}장 | 트래시: {_gameState.Player.Trash.Count}장";
 
         // 1) 플레이매트 좌측 상단: 내 시큐리티 5장 미니 카드 스택 렌더링
-        TxtMySecurityCountBadge.Text = $"{_gameState.Player.SecurityStack.Count} / 5장";
+        int myRemainingCount = _gameState.Player.SecurityStack.Count;
+        TxtMySecurityCountBadge.Text = myRemainingCount > 5 ? $"{myRemainingCount}장" : $"{myRemainingCount} / 5장";
         TxtMySecurityLastEvent.Text = myLastSecInfo;
         TxtMySecurityLastEvent.Foreground = BrushFromHex(_gameState.PlayerSecurityCheckHistory.Count > 0 ? "#F9E2AF" : "#A6ADC8");
 
         MySecurityVisualStack.Children.Clear();
-        int myRemainingCount = _gameState.Player.SecurityStack.Count;
+        // ≪회복≫ · "시큐리티 맨 아래에 앞면으로" 등으로 5장을 넘으면 칸을 늘린다 (맨 아래에 놓인 앞면 카드도 보이도록)
+        int securitySlots = Math.Max(5, myRemainingCount);
+        MySecurityVisualStack.Columns = securitySlots;
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < securitySlots; i++)
         {
             if (i < myRemainingCount && _gameState.Player.SecurityStack[i] is var mySec && GoldfishEngine.IsFaceUp(_gameState.Player, mySec))
             {
