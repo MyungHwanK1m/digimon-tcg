@@ -181,8 +181,43 @@ public sealed class SmartAiPolicy : IAiPolicy
         return best;
     }
 
-    /// <summary>AI의 DNA 진화 후보를 엔진이 열어 주면(GetDnaPairsFor) 판단을 붙인다 — 그 전까지는 하지 않는다</summary>
-    public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
+    /// <summary>
+    /// DNA 진화: 두 마리를 겹쳐 더 센 한 마리(액티브 · 두 묶음의 진화원 · 1장 드로우)로 만든다.
+    /// 이득 = 진화한 디지몬의 가치 − 두 마리 중 센 쪽의 가치 − 필드 한 자리를 잃는 손해(약한 쪽 가치의 일부) − 코스트.
+    /// 어택 전이면 액티브로 바로 어택할 수 있는 이득을 더한다. 이득이 있는 조합 중 가장 좋은 것.
+    /// </summary>
+    public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks)
+    {
+        var ai = engine.State.DummyOpponent;
+        int limit = beforeAttacks ? memory : memory + MaxMemoryHandOver;
+        AiDnaEvolution? best = null;
+        double bestScore = 0.5;
+        foreach (var card in ai.Hand.Where(c => c.Type == CardType.Digimon && GoldfishEngine.HasDna(c)).Distinct())
+        {
+            if (GoldfishEngine.GetDnaCost(card) is not int cost || cost > limit)
+                continue;
+            foreach (var (left, right) in engine.GetDnaPairsFor(ai, card))
+            {
+                double stronger = Math.Max(AiBoard.Value(left), AiBoard.Value(right));
+                double weaker = Math.Min(AiBoard.Value(left), AiBoard.Value(right));
+                int sources = left.EvolutionSources.Count + right.EvolutionSources.Count + 2;
+                double result = card.DP / 1000.0 + card.Level + Math.Min(sources, 5) * 0.6 + (card.IsBlocker ? 1.5 : 0);
+                double score = result - stronger
+                    + 1.5                                                   // 1장 드로우
+                    + (beforeAttacks ? 1.5 : 0)                             // 액티브 — 진화한 그대로 어택
+                    + Math.Max(0, AiBoard.TextValue(AiBoard.MainPart(card.EffectText))) * 0.5
+                    - weaker * 0.4                                          // 필드 한 자리를 잃는다
+                    - cost * 0.35
+                    - Math.Max(0, cost - memory) * 0.4;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = new AiDnaEvolution(card, left, right);
+                }
+            }
+        }
+        return best;
+    }
 
     /// <summary>
     /// ≪볼텍스≫ · ≪에그제큐트≫: 대상(과 시큐리티)마다 어택 점수를 어림해 가장 좋은 것. ≪에그제큐트≫(canAttackSecurity)는
