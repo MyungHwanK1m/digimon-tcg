@@ -116,6 +116,21 @@ public class MultiChoiceTests
     }
 
     [Fact]
+    public void ChooseCards_ForPlayer_ShouldAskEvenWithOnlyOneCandidate()
+    {
+        // 트래시에 맞는 카드가 1장뿐이어도 패 · 트래시를 오가는 효과는 창을 건너뛰지 않는다 (그 1장을 골라 둔 채 확인)
+        var (state, engine, choices, cards) = Setup();
+        var trash = new List<CardData> { cards["ST1-07"] };
+
+        var picked = engine.ChooseCards(state.Player, CardChoiceZone.Trash, trash, 1, upTo: false, "패로 되돌릴 카드 1장");
+
+        Assert.Equal(1, choices.Calls);
+        Assert.Equal((1, 1), (choices.LastCardArgs!.Value.Min, choices.LastCardArgs.Value.Max));
+        Assert.Equal(new[] { 0 }, choices.LastCardArgs.Value.Recommended);
+        Assert.Equal(trash, picked);
+    }
+
+    [Fact]
     public void ChooseCards_InvalidIndexes_ShouldFallBackToRecommendation()
     {
         var (state, engine, choices, cards) = Setup();

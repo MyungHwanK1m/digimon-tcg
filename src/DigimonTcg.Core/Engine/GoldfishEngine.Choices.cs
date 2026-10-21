@@ -40,11 +40,15 @@ public partial class GoldfishEngine
     internal List<CardData> ChooseCards(PlayerZones owner, CardChoiceZone zone, IReadOnlyList<CardData> ranked, int count, bool upTo, string question) =>
         ChooseCardIndexes(owner, zone, ranked, count, upTo, question).Select(i => ranked[i]).ToList();
 
-    /// <summary>ChooseCards와 같지만 고른 번호를 돌려준다 — 여러 곳(패 · 트래시 …)에서 모은 후보라 고른 카드가 있던 곳을 알아야 할 때</summary>
+    /// <summary>
+    /// ChooseCards와 같지만 고른 번호를 돌려준다 — 여러 곳(패 · 트래시 …)에서 모은 후보라 고른 카드가 있던 곳을 알아야 할 때.
+    /// 디지몬 고르기와 달리 후보가 count장 이하여도 플레이어에게 창을 보여 준다 (패 · 트래시 사이를 오가는 카드를 효과가 몰래 옮기지 않도록,
+    /// 반드시 골라야 하면 전부 미리 골라 둔 채 확인만 받는다).
+    /// </summary>
     internal List<int> ChooseCardIndexes(PlayerZones owner, CardChoiceZone zone, IReadOnlyList<CardData> ranked, int count, bool upTo, string question)
     {
         var recommended = Enumerable.Range(0, Math.Min(Math.Max(0, count), ranked.Count)).ToList();
-        if (!ShouldAskPlayer(owner) || ranked.Count == 0 || count <= 0 || (ranked.Count <= count && !upTo))
+        if (!ShouldAskPlayer(owner) || ranked.Count == 0 || count <= 0)
             return recommended;
 
         int max = Math.Min(count, ranked.Count);
