@@ -10,6 +10,10 @@
 
 ---
 
+## v0.8.2 — 2026-10-21
+- ≪리커버리≫ 확인 · 보강: 내장 카드(엔젤우몬 · 홀리엔젤몬 · 홀리드라몬)와 실제 도감 카드 문장으로 시나리오 테스트(RecoveryTests 15개)
+- 문장 파서: "N or fewer cards in your security stack" · "N security cards or fewer" 조건 표기, 원문 오타 "3 of fewer", "≪리커버리≫ until there are N cards in your security stack"(N장이 될 때까지 반복) 인식 → 리커버리 문장 지원 48 → 52 / 112
+
 ## v0.8.1 — 2026-10-21
 - 앱 버전 관리 추가: 버전 번호 한 곳 관리, 빌드한 커밋 해시 자동 표시(로비 · 창 제목 · 오류 로그), 이 변경 기록과 버전 태그
 

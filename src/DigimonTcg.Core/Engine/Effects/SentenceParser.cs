@@ -454,6 +454,11 @@ internal static class SentenceParser
         // "During your opponent's next unsuspend phase, none of your opponent's Digimon can unsuspend" → "~ don't unsuspend during ~"
         s = Regex.Replace(s, @"During (?<who>your opponent's|their) next unsuspend phase, none of (?<t>[^.]+?) can unsuspend", "All of ${t} don't unsuspend during ${who} next unsuspend phase", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"\byou can (?!ignore)", "you may ", RegexOptions.IgnoreCase);
+        // 시큐리티 장수 조건의 다른 표기 → "you have N or fewer security cards"
+        //   "3 of fewer"(원문 오타) · "N or fewer cards in your security stack" · "N security cards or fewer"
+        s = Regex.Replace(s, @"\b(\d+) of (fewer|less|more)\b", "$1 or $2", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\byou have (\d+) or (fewer|less|more) cards in your security stack\b", "you have $1 or $2 security cards", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\byou have (\d+) security cards or (fewer|less|more)\b", "you have $1 or $2 security cards", RegexOptions.IgnoreCase);
         // ＜Recovery +1 (Deck)＞ 같은 키워드 안 괄호를 잠시 바꿔 두고, 설명문 괄호를 지운다
         s = Regex.Replace(s, @"[＜<]([^＞>]*)[＞>]", m => "＜" + m.Groups[1].Value.Replace("(", "⟮").Replace(")", "⟯") + "＞");
         s = Regex.Replace(s, @"\s*\((?:[^()]|\([^()]*\))*\)", "");
@@ -2280,6 +2285,22 @@ internal static class SentenceParser
         {
             int n = int.Parse(m.Groups["n"].Value);
             return (c => Emit(c, label, $"≪리커버리 +{n}≫ 시큐리티 {c.Recovery(n)}장 추가"), null);
+        }
+        // "＜Recovery +1 (Deck)＞ until there are 3 cards in your security stack" — 시큐리티가 K장이 될 때까지 반복
+        if ((m = Regex.Match(s, @"^＜Recovery \+(?<n>\d+)\s*(?:\(Deck\))?\s*＞ until (?:there are|you have) (?<k>\d+) (?:cards in your security stack|security cards)$", RegexOptions.IgnoreCase)).Success)
+        {
+            int n = int.Parse(m.Groups["n"].Value), k = int.Parse(m.Groups["k"].Value);
+            return (c =>
+            {
+                int added = 0;
+                while (c.Owner.SecurityStack.Count < k)
+                {
+                    int got = c.Recovery(Math.Min(n, k - c.Owner.SecurityStack.Count));
+                    if (got == 0) break;   // 덱이 비었다
+                    added += got;
+                }
+                Emit(c, label, $"≪리커버리 +{n}≫ 시큐리티 {k}장이 될 때까지 — {added}장 추가");
+            }, null);
         }
         if ((m = Regex.Match(s, @"^＜De-Digivolve (?<n>\d+)＞ (?<t>.+)$", RegexOptions.IgnoreCase)).Success)
         {
