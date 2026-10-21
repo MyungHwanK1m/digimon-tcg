@@ -66,6 +66,9 @@ public partial class GoldfishEngine
         return KoreanLink(card)?.Cost;
     }
 
+    /// <summary>패에서 링크할 때의 코스트 — 화면 표시용 (모르면 null)</summary>
+    public int? GetLinkCost(CardData card) => LinkCostOf(card);
+
     /// <summary>〈링크 중〉 이 디지몬의 DP +N (공식 한글 문구가 있을 때만)</summary>
     internal static int LinkDp(CardData card) => KoreanLink(card)?.Dp ?? 0;
 
