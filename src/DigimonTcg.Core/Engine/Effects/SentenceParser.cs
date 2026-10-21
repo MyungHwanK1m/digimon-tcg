@@ -548,6 +548,17 @@ internal static class SentenceParser
             if ((ParseCardPick(Regex.Replace(m.Groups["pick"].Value, @"^an? ", "1 ")) ?? ParseNamePick("1 " + m.Groups["pick"].Value)) is not { } dnaPick) return null;
             return One(EffectTrigger.ThisDigimonWouldDnaDigivolve, c => c.TriggerCard != null && dnaPick.Match(c.TriggerCard));
         }
+        // 시큐리티에서 카드가 빠졌을 때 / 놓였을 때
+        //   "When your security stack is removed from" · "When a card is removed from your security stack" · "When cards are trashed from your security stack"
+        if (Regex.IsMatch(ev, @"^(?:your security stack is removed from|(?:a card is|cards are|one or more cards are) (?:removed|trashed) from your security stack|your security cards? (?:is|are) (?:removed|trashed))$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllySecurityRemoved);
+        if (Regex.IsMatch(ev, @"^(?:your opponent's security stack is removed from|(?:a card is|cards are|one or more cards are) (?:removed|trashed) from your opponent's security stack|your opponent's security cards? (?:is|are) (?:removed|trashed))$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.OpponentSecurityRemoved);
+        if (Regex.IsMatch(ev, @"^(?:security stacks are removed from|any security stack is removed from|(?:a card is|cards are) removed from (?:a|any) (?:player's )?security stack)$", RegexOptions.IgnoreCase))
+            return (new List<EffectTrigger> { EffectTrigger.AllySecurityRemoved, EffectTrigger.OpponentSecurityRemoved }, null);
+        if (Regex.IsMatch(ev, @"^(?:a card is|cards are) (?:added to|placed in|placed on top of|placed at the top of) your security stack$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllySecurityAdded);
+
         // 앞면 시큐리티: "When this Digimon checks a face-up security card" · "When any of your Digimon check face-up security cards"
         if (Regex.IsMatch(ev, @"^this Digimon checks (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.AllyCheckedFaceUpSecurity, c => ReferenceEquals(c.Other, c.Self));
@@ -1613,7 +1624,7 @@ internal static class SentenceParser
         }
         if (Regex.IsMatch(cost, @"^trashing (?:the top card of your security stack|your top security card)$", RegexOptions.IgnoreCase))
             return (c => c.Owner.SecurityStack.Count > 0,
-                    c => { c.Owner.Trash.Add(c.Owner.SecurityStack[0]); c.Owner.SecurityStack.RemoveAt(0); },
+                    c => { c.Owner.Trash.Add(c.Owner.SecurityStack[0]); c.Owner.SecurityStack.RemoveAt(0); c.Engine.NotifySecurityRemoved(c.Owner); },
                     c => c.Owner.SecurityStack.Count >= 3, "시큐리티 위 1장을 파기하여");
         if ((m = Regex.Match(cost, @"^trashing (?<n>\d+) cards? (?:in|from) your hand$", RegexOptions.IgnoreCase)).Success)
         {
@@ -1768,7 +1779,7 @@ internal static class SentenceParser
         // "adding the top card of your security stack to your hand"
         if (Regex.IsMatch(cost, @"^adding (?:the top card of your security stack|your top security card) to (?:the|your) hand$", RegexOptions.IgnoreCase))
             return (c => c.Owner.SecurityStack.Count > 0,
-                    c => { c.Owner.Hand.Add(c.Owner.SecurityStack[0]); c.Owner.SecurityStack.RemoveAt(0); },
+                    c => { c.Owner.Hand.Add(c.Owner.SecurityStack[0]); c.Owner.SecurityStack.RemoveAt(0); c.Engine.NotifySecurityRemoved(c.Owner); },
                     c => c.Owner.SecurityStack.Count >= 3, "시큐리티 위 1장을 패에 넣어");
         // "placing 1 [Durandamon] or [BryweLudramon] from your hand on top of this card's digivolution cards"
         if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) from your hand (?:on top of|at the top of) this (?:card|Digimon)'s digivolution cards$", RegexOptions.IgnoreCase)).Success
@@ -2089,6 +2100,7 @@ internal static class SentenceParser
                 var x = c.Owner.SecurityStack.FirstOrDefault(sc => !GoldfishEngine.IsFaceUp(c.Owner, sc));
                 if (x == null) { c.LastStepResolved = false; Emit(c, label, "뒷면 시큐리티가 없습니다"); return; }
                 c.Owner.SecurityStack.Remove(x);
+                c.Engine.NotifySecurityRemoved(c.Owner, x);
                 c.Owner.Hand.Add(x);
                 Emit(c, label, "뒷면 시큐리티 맨 위 1장을 패에 넣는다");
             }, null);
@@ -2377,7 +2389,7 @@ internal static class SentenceParser
             return (c =>
             {
                 int k = 0;
-                while (k < n && c.Enemy.SecurityStack.Count > 0) { c.Enemy.Trash.Add(c.Enemy.SecurityStack[0]); c.Enemy.SecurityStack.RemoveAt(0); k++; }
+                while (k < n && c.Enemy.SecurityStack.Count > 0) { c.Enemy.Trash.Add(c.Enemy.SecurityStack[0]); c.Enemy.SecurityStack.RemoveAt(0); c.Engine.NotifySecurityRemoved(c.Enemy); k++; }
                 Emit(c, label, $"상대 시큐리티 위에서 {k}장 파기");
             }, null);
         }
@@ -2405,6 +2417,7 @@ internal static class SentenceParser
                 if (c.Owner.SecurityStack.Count == 0) return;
                 c.Owner.Trash.Add(c.Owner.SecurityStack[0]);
                 c.Owner.SecurityStack.RemoveAt(0);
+                c.Engine.NotifySecurityRemoved(c.Owner);
                 Emit(c, label, "자신의 시큐리티 위에서 1장 파기");
             }, null);
         if ((m = Regex.Match(s, @"^Trash (?:up to )?(?<n>\d+) digivolution cards? from the (?<pos>top|bottom) of (?<t>.+)$", RegexOptions.IgnoreCase)).Success)
@@ -2696,7 +2709,7 @@ internal static class SentenceParser
             return (c =>
             {
                 foreach (var z in new[] { c.Owner, c.Enemy })
-                    for (int i = 0; i < n && z.SecurityStack.Count > 0; i++) { z.Trash.Add(z.SecurityStack[0]); z.SecurityStack.RemoveAt(0); }
+                    for (int i = 0; i < n && z.SecurityStack.Count > 0; i++) { z.Trash.Add(z.SecurityStack[0]); z.SecurityStack.RemoveAt(0); c.Engine.NotifySecurityRemoved(z); }
                 Emit(c, label, $"양쪽 시큐리티 위 {n}장 파기");
             }, null);
         }
@@ -2711,6 +2724,7 @@ internal static class SentenceParser
             {
                 if (!c.Owner.Trash.Remove(c.Card)) return;
                 c.Owner.SecurityStack.Insert(0, c.Card);
+                c.Engine.NotifySecurityAdded(c.Owner, c.Card);
                 Emit(c, label, "이 카드를 시큐리티 맨 위에 놓는다");
             }, null);
         if ((m = Regex.Match(s, @"^Place (?<pick>.+?) from your trash (?:on|at the) top of your security stack(?: face down)?$", RegexOptions.IgnoreCase)).Success)
@@ -2722,7 +2736,7 @@ internal static class SentenceParser
             return (c =>
             {
                 var cards = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(match).OrderByDescending(x => x.DP).ToList(), count, upTo, $"[{c.Card.Name}] 시큐리티 위에 놓을 카드를 {(upTo ? $"{count}장까지" : $"{count}장")} 고르세요.");
-                foreach (var x in cards) { c.Owner.Trash.Remove(x); c.Owner.SecurityStack.Insert(0, x); }
+                foreach (var x in cards) { c.Owner.Trash.Remove(x); c.Owner.SecurityStack.Insert(0, x); c.Engine.NotifySecurityAdded(c.Owner, x); }
                 Emit(c, label, cards.Count > 0 ? $"트래시의 [{string.Join(", ", cards.Select(x => x.Name))}] 시큐리티 맨 위에" : "놓을 카드가 없습니다");
             }, null);
         }

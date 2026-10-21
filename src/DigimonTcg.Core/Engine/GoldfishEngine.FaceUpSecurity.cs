@@ -40,6 +40,7 @@ public partial class GoldfishEngine
         if (top) owner.SecurityStack.Insert(0, faceUp);
         else owner.SecurityStack.Add(faceUp);
         owner.FaceUpSecurity.Add(faceUp);
+        NotifySecurityAdded(owner, faceUp);
         EffectLog(owner, $"[앞면 시큐리티] [{card.Name}]을(를) 시큐리티 맨 {(top ? "위" : "아래")}에 앞면으로");
         FireForSide(EffectTrigger.AllyFaceUpSecurityPlaced, owner, null, triggerCard: faceUp);
         FireForSide(EffectTrigger.OpponentFaceUpSecurityPlaced, EnemyOf(owner), null, triggerCard: faceUp);

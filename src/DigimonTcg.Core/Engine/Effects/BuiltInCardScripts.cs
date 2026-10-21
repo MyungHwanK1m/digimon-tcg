@@ -419,6 +419,7 @@ internal static class BuiltInCardScripts
             if (c.Enemy.SecurityStack.Count == 0) return;
             c.Enemy.Trash.Add(c.Enemy.SecurityStack[0]);
             c.Enemy.SecurityStack.RemoveAt(0);
+            c.Engine.NotifySecurityRemoved(c.Enemy);
             c.Log($"[진화원 효과] 아트라캅테리몬: {c.Engine.SideName(c.Enemy)} 시큐리티를 위에서부터 1장 파기!");
         }, oncePerTurn: true);
 
@@ -790,6 +791,7 @@ internal static class BuiltInCardScripts
                 {
                     c.Enemy.Trash.Add(c.Enemy.SecurityStack[0]);
                     c.Enemy.SecurityStack.RemoveAt(0);
+                    c.Engine.NotifySecurityRemoved(c.Enemy);
                 }
                 if (n > 0) c.Log($"[어택 시] 듀크몬: 상대 시큐리티 {n}장 파기!");
             });

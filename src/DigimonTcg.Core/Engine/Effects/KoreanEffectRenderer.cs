@@ -664,6 +664,15 @@ public static class KoreanEffectRenderer
             && TargetKo("all of your opponent's " + m.Groups["spec"].Value, bare: true) is { } del)
             return $"이 디지몬이 배틀에서 {del}{J(del, "을", "를")} 소멸시켰을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon wins a battle$", RegexOptions.IgnoreCase)) return "이 디지몬이 배틀에서 이겼을 때,";
+        // 시큐리티에서 카드가 빠졌을 때 / 놓였을 때 (SentenceParser.ParseEventPhrase와 같은 표기)
+        if (Regex.IsMatch(ev, @"^(?:your security stack is removed from|(?:a card is|cards are|one or more cards are) (?:removed|trashed) from your security stack|your security cards? (?:is|are) (?:removed|trashed))$", RegexOptions.IgnoreCase))
+            return "자신의 시큐리티에서 카드가 없어졌을 때,";
+        if (Regex.IsMatch(ev, @"^(?:your opponent's security stack is removed from|(?:a card is|cards are|one or more cards are) (?:removed|trashed) from your opponent's security stack|your opponent's security cards? (?:is|are) (?:removed|trashed))$", RegexOptions.IgnoreCase))
+            return "상대의 시큐리티에서 카드가 없어졌을 때,";
+        if (Regex.IsMatch(ev, @"^(?:security stacks are removed from|any security stack is removed from|(?:a card is|cards are) removed from (?:a|any) (?:player's )?security stack)$", RegexOptions.IgnoreCase))
+            return "어느 쪽이든 시큐리티에서 카드가 없어졌을 때,";
+        if (Regex.IsMatch(ev, @"^(?:a card is|cards are) (?:added to|placed in|placed on top of|placed at the top of) your security stack$", RegexOptions.IgnoreCase))
+            return "자신의 시큐리티에 카드가 놓였을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon (?:suspends|becomes suspended|is suspended)$", RegexOptions.IgnoreCase)) return "이 디지몬이 레스트 상태가 되었을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon (?:becomes unsuspended|unsuspends) during your main phase$", RegexOptions.IgnoreCase)) return "자신의 메인 페이즈에 이 디지몬이 액티브가 되었을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon (?:becomes unsuspended|unsuspends) during your unsuspend phase$", RegexOptions.IgnoreCase)) return "자신의 액티브 페이즈에 이 디지몬이 액티브가 되었을 때,";

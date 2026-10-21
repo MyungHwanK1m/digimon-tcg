@@ -538,6 +538,7 @@ public partial class GoldfishEngine
         {
             zones.Trash.Add(zones.SecurityStack[0]);
             zones.SecurityStack.RemoveAt(0);
+            NotifySecurityRemoved(zones);
             EffectLog(zones, $"[≪방벽≫] [{name}]: 시큐리티를 위에서 1장 파기하고 소멸하지 않습니다. (남은 시큐리티 {zones.SecurityStack.Count}장)");
             return true;
         }
@@ -862,8 +863,10 @@ public partial class GoldfishEngine
         int n = 0;
         while (n < count && zones.MainDeck.Count > 0)
         {
+            var recovered = zones.MainDeck[0];
             zones.SecurityStack.Insert(0, zones.MainDeck[0]);
             zones.MainDeck.RemoveAt(0);
+            NotifySecurityAdded(zones, recovered);
             n++;
         }
         return n;
@@ -992,7 +995,10 @@ public partial class GoldfishEngine
         while (inst.EvolutionSources.Count > 0)
             zones.Trash.Add(inst.EvolutionSources.Pop());
         if (!IsToken(inst.TopCard))
+        {
             zones.SecurityStack.Insert(0, inst.TopCard);
+            NotifySecurityAdded(zones, inst.TopCard);
+        }
         PurgeTokens(zones);
     }
 
@@ -1232,6 +1238,21 @@ public partial class GoldfishEngine
         FireForSide(EffectTrigger.AllyDigimonSuspended, owner, inst);
         FireForSide(EffectTrigger.OpponentDigimonSuspended, EnemyOf(owner), inst);
     }
+
+    /// <summary>
+    /// zones의 시큐리티에서 카드가 빠졌다 (체크 · 효과로 파기 · 패에 추가 · 등장 등) —
+    /// 주인 쪽 "When your security stack is removed from", 상대 쪽 "When your opponent's security stack is removed from".
+    /// 시큐리티를 빼는 곳에서 빼고 난 뒤 부른다.
+    /// </summary>
+    internal void NotifySecurityRemoved(PlayerZones zones, CardData? card = null)
+    {
+        FireForSide(EffectTrigger.AllySecurityRemoved, zones, null, triggerCard: card);
+        FireForSide(EffectTrigger.OpponentSecurityRemoved, EnemyOf(zones), null, triggerCard: card);
+    }
+
+    /// <summary>zones의 시큐리티에 카드가 놓였다 (≪리커버리≫ 등) — "When a card is added to your security stack"</summary>
+    internal void NotifySecurityAdded(PlayerZones zones, CardData? card = null) =>
+        FireForSide(EffectTrigger.AllySecurityAdded, zones, null, triggerCard: card);
 
     /// <summary>owner 쪽 디지몬(메인 · 진화원)과 테이머 전부에 trigger 시점을 알린다 (other = 그 일을 일으킨 디지몬)</summary>
     internal void FireForSide(EffectTrigger trigger, PlayerZones owner, CardInstance? other, CardData? triggerCard = null)

@@ -10,6 +10,13 @@
 
 ---
 
+## v0.9.0 — 2026-10-22
+새 발동 시점 — 시큐리티에서 카드가 빠졌을 때 / 놓였을 때
+- "When your security stack is removed from" · "When a card is removed from your (opponent's) security stack" · "When security stacks are removed from" · "When a card is added to your security stack"
+- 엔진에서 시큐리티가 빠지는 11곳(체크 · 효과로 파기 · 패에 추가 · ≪방벽≫ 등)과 놓이는 곳(≪리커버리≫ · 앞면으로 놓기 · 디지몬을 시큐리티로)에서 알림
+- 한글 생성 문구 추가, 시나리오 테스트 SecurityEventTests 6개
+- 도감 효과 문장 지원 6,066 → 6,130 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.8.3 — 2026-10-21
 - 효과 문장 표기 점검: 같은 뜻인데 표기만 달라 못 읽던 문장 84개를 읽게 함 (도감 효과 문장 5,982 → 6,066 / 10,279, 기존에 되던 문장 중 깨진 것 0)
   - 손패 · 트래시 · 테이머 · 디지몬 장수, "상대에게 액티브 디지몬이 없음", 양쪽 시큐리티 합계 같은 조건을 "If ~"와 "While ~" 양쪽에서 같이 읽음
