@@ -107,7 +107,7 @@ public sealed class SmartAiPolicy : IAiPolicy
             return null;
 
         var targets = new List<CardInstance?> { null };
-        targets.AddRange(state.Player.BattleArea.Where(d => d.IsSuspended));
+        targets.AddRange(state.Player.BattleArea.Where(EffectRules.CanBeAttackTarget));
 
         AiAttack? best = null;
         double bestScore = Tuning.AttackThreshold;

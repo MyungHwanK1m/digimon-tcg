@@ -3,6 +3,7 @@ using System.Linq;
 using DigimonTcg.Core.Data;
 using DigimonTcg.Core.Engine;
 using DigimonTcg.Core.Engine.Ai;
+using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 using Xunit;
 
@@ -133,5 +134,88 @@ public class AiPolicyTests
 
         Assert.Equal(ready, evo?.Base);
         Assert.Equal(cards["ST1-07"], evo?.Card);
+    }
+
+    [Fact]
+    public void Smart_ShouldNotTargetADigimonThatCannotBeAttacked()
+    {
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-04"]);    // 드라코몬 DP 4000
+        var restedWeak = Field(state.Player, cards["ST1-03"], suspended: true);
+        restedWeak.ActiveKeywords.Add(Keyword.CannotBeAttacked);       // "이 디지몬은 어택당하지 않는다"
+
+        var attack = new SmartAiPolicy().ChooseNextAttack(engine, memory: 2);
+
+        Assert.NotEqual(restedWeak, attack?.Target);
+    }
+
+    /// <summary>어택만 정해 둔 답을 내는 정책 (나머지는 기존 AI) — 엔진의 AI 어택 처리를 확인한다</summary>
+    private sealed class ScriptedAttackPolicy : IAiPolicy
+    {
+        private readonly LegacyAiPolicy _legacy = new();
+        public AiAttack? Next;
+        public string Name => "정해 둔 어택";
+        public int MaxMemoryHandOver => _legacy.MaxMemoryHandOver;
+        public AiEvolution? ChooseEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
+        public AiOptionUse? ChooseOption(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
+        public bool ShouldUseMainAbility(GoldfishEngine engine, GoldfishEngine.MainAbility ability, int memory) => false;
+        public CardData? ChooseTamerToPlay(GoldfishEngine engine, int memory) => null;
+        public CardData? ChooseDigimonToPlay(GoldfishEngine engine, int memory) => null;
+
+        public AiAttack? ChooseNextAttack(GoldfishEngine engine, int memory)
+        {
+            var next = Next;
+            Next = null;
+            return next;
+        }
+    }
+
+    /// <summary>내 메인 페이즈 → 턴 종료하면 AI 턴이 정해 둔 어택 1번을 한다</summary>
+    private static (GameState State, GoldfishEngine Engine, ScriptedAttackPolicy Policy, Dictionary<string, CardData> Cards) PlayerTurnBeforeAi()
+    {
+        var state = new GameState { CurrentTurn = 3, CurrentPhase = Phase.Main, TurnSequence = 5, CurrentStage = PracticeStage.Stage3_AiBattle };
+        var cards = StarterDecks.GetAllCatalogCards().ToDictionary(c => c.CardId);
+        var policy = new ScriptedAttackPolicy();
+        for (int i = 0; i < 5; i++)
+        {
+            state.Player.MainDeck.Add(cards["ST1-02"]);
+            state.DummyOpponent.MainDeck.Add(cards["ST1-02"]);
+        }
+        for (int i = 0; i < 3; i++)
+            state.Player.SecurityStack.Add(cards["ST2-02"]);
+        return (state, new GoldfishEngine(state) { AiPolicy = policy }, policy, cards);
+    }
+
+    [Fact]
+    public void AiAttack_OnAnActiveDigimon_ShouldBecomeASecurityAttack()
+    {
+        var (state, engine, policy, cards) = PlayerTurnBeforeAi();
+        var attacker = Field(state.DummyOpponent, cards["ST1-11"]);    // 워그레이몬 DP 12000
+        var active = Field(state.Player, cards["ST1-03"]);             // 액티브 — 어택 대상이 될 수 없다
+        policy.Next = new AiAttack(attacker, active);
+
+        engine.PassTurn();
+
+        Assert.Contains(active, state.Player.BattleArea);
+        Assert.Equal(2, state.Player.SecurityStack.Count);
+    }
+
+    [Fact]
+    public void AiAttack_OnADigimon_ShouldPassTheTargetToWhenAttackingEffects()
+    {
+        var (state, engine, policy, cards) = PlayerTurnBeforeAi();
+        var striker = new CardData
+        {
+            CardId = "AIP-ATK-PLAYER", Name = "AIP-ATK-PLAYER", Type = CardType.Digimon, Color = CardColor.Red, Level = 6, DP = 12000,
+            EffectText = "[All Turns] When this Digimon attacks a player, ＜Draw 1＞ (Draw 1 card from your deck.)",
+        };
+        var attacker = Field(state.DummyOpponent, striker);
+        var rested = Field(state.Player, cards["ST1-03"], suspended: true);
+        policy.Next = new AiAttack(attacker, rested);
+
+        engine.PassTurn();
+
+        Assert.DoesNotContain(rested, state.Player.BattleArea);        // 디지몬 어택 → 배틀
+        Assert.Equal(4, state.DummyOpponent.MainDeck.Count);           // 드로우 페이즈 1장만 ("플레이어를 어택했을 때"가 아니다)
     }
 }

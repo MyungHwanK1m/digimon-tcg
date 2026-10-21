@@ -86,6 +86,10 @@ public static class EffectRules
         // API 카드는 옵션 · 테이머의 [시큐리티] 효과가 진화원 효과 칸("Security Effect [Security] ~")에 들어 있다
         || card.InheritedEffectText.Contains("[Security]", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>디지몬 어택의 대상이 될 수 있는지 (레스트 상태 · "어택당하지 않는다" 아님)</summary>
+    public static bool CanBeAttackTarget(CardInstance digimon) =>
+        digimon.IsSuspended && !CardScripts.HasKeyword(digimon, Keyword.CannotBeAttacked);
+
     public static bool IsAttackLocked(GameState state, CardInstance digimon) =>
         IsActive(digimon.CannotAttackUntil, state) || CardScripts.HasKeyword(digimon, Keyword.CannotAttack);
 }
@@ -506,7 +510,9 @@ public partial class GoldfishEngine
             return false;
         if (TryPreventDeletion(zones, instance, cause))
             return false;
-        if (TryPreventLeave(zones, instance, deletion: true, inBattle: cause == DeletionCause.Battle))
+        // "would be deleted" 효과로도 DP 0 소멸 · 코스트 소멸은 막지 않는다 (≪회피≫와 같은 규칙)
+        if (cause is not (DeletionCause.ZeroDp or DeletionCause.Cost)
+            && TryPreventLeave(zones, instance, deletion: true, inBattle: cause == DeletionCause.Battle))
             return false;
         RemoveDeleted(zones, instance, cause);
         return true;
@@ -758,7 +764,15 @@ public partial class GoldfishEngine
             RunEffects(EffectTrigger.StartOfYourTurn, owner, d, d.TopCard);
         foreach (var tamer in owner.Tamers.ToList())
             RunEffects(EffectTrigger.StartOfYourTurn, owner, null, tamer, includeInherited: false);
+        RunPlacedOptions(EffectTrigger.StartOfYourTurn, owner);
         RecalculateFieldBuffs();
+    }
+
+    /// <summary>배틀 에어리어의 옵션(≪딜레이≫)에도 시점을 알린다 (같은 카드 여러 장은 한 번)</summary>
+    private void RunPlacedOptions(EffectTrigger trigger, PlayerZones owner, CardInstance? other = null, CardData? triggerCard = null)
+    {
+        foreach (var option in owner.OptionsInPlay.Select(p => p.Card).Distinct().ToList())
+            RunEffects(trigger, owner, null, option, other: other, includeInherited: false, triggerCard: triggerCard);
     }
 
     /// <summary>
@@ -896,7 +910,8 @@ public partial class GoldfishEngine
         if (target.TopCard.DP + target.GetTotalBonusDP() > 0)
             return false;
 
-        DeleteFrom(zones, target, DeletionCause.ZeroDp);
+        if (!DeleteFrom(zones, target, DeletionCause.ZeroDp))
+            return false;
         Log($"[효과] {SideName(zones)} [{target.TopCard.Name}]의 DP가 0이 되어 소멸했습니다.");
 
         // 상대 디지몬이 DP 0으로 소멸했을 때 (토코몬 · 파닥몬 진화원 등)
@@ -926,7 +941,8 @@ public partial class GoldfishEngine
         RecalculateFieldBuffs();
         if (dp >= 0 || target.TopCard.DP + target.GetTotalBonusDP() > 0)
             return false;
-        DeleteFrom(zones, target, DeletionCause.ZeroDp);
+        if (!DeleteFrom(zones, target, DeletionCause.ZeroDp))
+            return false;
         Log($"[효과] {SideName(zones)} [{target.TopCard.Name}]의 DP가 0이 되어 소멸했습니다.");
         var other = EnemyOf(zones);
         foreach (var d in other.BattleArea.ToList())
@@ -1092,6 +1108,7 @@ public partial class GoldfishEngine
             RunEffects(EffectTrigger.StartOfYourMainPhase, owner, d, d.TopCard);
         foreach (var tamer in owner.Tamers.ToList())
             RunEffects(EffectTrigger.StartOfYourMainPhase, owner, null, tamer, includeInherited: false);
+        RunPlacedOptions(EffectTrigger.StartOfYourMainPhase, owner);
         RecalculateFieldBuffs();
     }
 
@@ -1198,8 +1215,7 @@ public partial class GoldfishEngine
             RunEffects(trigger, owner, d, d.TopCard, other: other, triggerCard: triggerCard);
         foreach (var tamer in owner.Tamers.ToList())
             RunEffects(trigger, owner, null, tamer, other: other, includeInherited: false, triggerCard: triggerCard);
-        foreach (var option in owner.OptionsInPlay.Select(p => p.Card).Distinct().ToList())   // ≪딜레이≫ 옵션의 "When ~, ＜Delay＞"
-            RunEffects(trigger, owner, null, option, other: other, includeInherited: false, triggerCard: triggerCard);
+        RunPlacedOptions(trigger, owner, other, triggerCard);   // ≪딜레이≫ 옵션의 "When ~, ＜Delay＞"
         RecalculateFieldBuffs();
     }
 
@@ -1298,6 +1314,7 @@ public partial class GoldfishEngine
             RunEffects(EffectTrigger.EndOfOpponentsTurn, owner, d, d.TopCard);
         foreach (var tamer in owner.Tamers.ToList())
             RunEffects(EffectTrigger.EndOfOpponentsTurn, owner, null, tamer, includeInherited: false);
+        RunPlacedOptions(EffectTrigger.EndOfOpponentsTurn, owner);
         RecalculateFieldBuffs();
     }
 
@@ -1308,6 +1325,7 @@ public partial class GoldfishEngine
             RunEffects(EffectTrigger.EndOfYourTurn, owner, d, d.TopCard);
         foreach (var tamer in owner.Tamers.ToList())
             RunEffects(EffectTrigger.EndOfYourTurn, owner, null, tamer, includeInherited: false);
+        RunPlacedOptions(EffectTrigger.EndOfYourTurn, owner);
         RecalculateFieldBuffs();
     }
 
@@ -1385,16 +1403,18 @@ public partial class GoldfishEngine
         if (attackerDeleted && !defenderLoses && HasRetaliation(attacker))
         {
             Log($"[≪길동무≫] 배틀에서 진 [{attacker.TopCard.Name}]이(가) [{defender.TopCard.Name}]을(를) 함께 소멸시킵니다!");
+            bool outer = _deletingByOpponentEffect;
             _deletingByOpponentEffect = true;   // ≪길동무≫는 상대 디지몬의 효과 (≪스케이프고트≫ 판단)
             defenderDeleted = !TryPreventDeletion(defZones, defender, DeletionCause.Effect);
-            _deletingByOpponentEffect = false;
+            _deletingByOpponentEffect = outer;
         }
         else if (defenderDeleted && !attackerLoses && HasRetaliation(defender))
         {
             Log($"[≪길동무≫] 배틀에서 진 [{defender.TopCard.Name}]이(가) [{attacker.TopCard.Name}]을(를) 함께 소멸시킵니다!");
+            bool outer = _deletingByOpponentEffect;
             _deletingByOpponentEffect = true;
             attackerDeleted = !TryPreventDeletion(atkZones, attacker, DeletionCause.Effect);
-            _deletingByOpponentEffect = false;
+            _deletingByOpponentEffect = outer;
         }
 
         if (defenderDeleted) RemoveDeleted(defZones, defender);

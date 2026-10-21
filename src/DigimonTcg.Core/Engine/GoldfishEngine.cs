@@ -1191,7 +1191,8 @@ public partial class GoldfishEngine
                 }
                 ctx.AttacksDeclared++;
                 ctx.Attackers.Enqueue(next.Attacker);
-                ctx.AttackTarget = next.Target != null && State.Player.BattleArea.Contains(next.Target) ? next.Target : null;
+                // 정책이 고른 대상이 어택할 수 없는 디지몬(액티브 · 어택당하지 않음)이면 시큐리티로
+                ctx.AttackTarget = next.Target != null && State.Player.BattleArea.Contains(next.Target) && EffectRules.CanBeAttackTarget(next.Target) ? next.Target : null;
             }
 
             // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료! (≪진격≫ 어택은 예외)
@@ -1214,7 +1215,7 @@ public partial class GoldfishEngine
             // AI 디지몬의 [어택 시] 효과 (플레이어와 같은 카드 스크립트) → ≪연계≫ · ≪돌진≫
             var attackEffects = CaptureEffectLogs(() =>
             {
-                TriggerWhenAttackingEffects(aiAttacker, null);
+                TriggerWhenAttackingEffects(aiAttacker, ctx.AttackTarget);
                 FireForSide(EffectTrigger.OpponentDigimonAttacks, State.Player, aiAttacker, triggerCard: ctx.AttackTarget?.TopCard);
                 FireForSide(EffectTrigger.AllyDigimonAttacks, State.DummyOpponent, aiAttacker, triggerCard: ctx.AttackTarget?.TopCard);
                 ctx.AttackTarget = ApplyAttackKeywords(aiAttacker, ctx.AttackTarget) ?? ctx.AttackTarget;   // 상대(나) 효과로 바뀐 대상 유지
@@ -1317,7 +1318,7 @@ public partial class GoldfishEngine
         int aiDp = aiAttacker.GetCurrentDP();
         int aiChecks = aiAttacker.GetSecurityAttackCount();
 
-        // ≪돌진≫으로 내 디지몬을 어택 중 (블록하지 않았을 때)
+        // 내 디지몬을 어택 중 (정책이 고른 레스트 디지몬 · ≪돌진≫ — 블록하지 않았을 때)
         if (playerBlocker == null && ctx.AttackTarget is { } raidTarget)
         {
             string ai = aiAttacker.TopCard.Name, mine = raidTarget.TopCard.Name;
@@ -1328,8 +1329,8 @@ public partial class GoldfishEngine
             }
             var (aiLost, mineLost, aiBattleDp, myDp) = ResolveDigimonBattle(aiAttacker, raidTarget);
             string result = mineLost && !aiLost ? $"내 [{mine}] 소멸" : aiLost && !mineLost ? $"AI [{ai}] 소멸" : aiLost ? "양쪽 소멸" : "양쪽 생존";
-            Log($"⚔️ [≪돌진≫ 배틀] AI [{ai}(DP {aiBattleDp})] vs 내 [{mine}(DP {myDp})] → {result}");
-            AddOpponentEvent(OpponentActionKind.Block, "≪돌진≫ 배틀", $"{ai} (DP {aiBattleDp:N0}) vs 내 {mine} (DP {myDp:N0}) → {result}", aiAttacker.TopCard, raidTarget.TopCard);
+            Log($"⚔️ [디지몬 배틀] AI [{ai}(DP {aiBattleDp})] vs 내 [{mine}(DP {myDp})] → {result}");
+            AddOpponentEvent(OpponentActionKind.Block, "디지몬 배틀", $"{ai} (DP {aiBattleDp:N0}) vs 내 {mine} (DP {myDp:N0}) → {result}", aiAttacker.TopCard, raidTarget.TopCard);
             if (mineLost && !aiLost && HasPiercing(aiAttacker) && aiAttacker.GetSecurityAttackCount() > 0)
             {
                 Log($"🤖 [≪관통≫] AI [{ai}]이(가) 내 디지몬을 쓰러뜨리고 내 시큐리티를 체크합니다!");

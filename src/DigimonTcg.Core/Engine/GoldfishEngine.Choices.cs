@@ -37,21 +37,24 @@ public partial class GoldfishEngine
     /// upTo면 0 ~ count장. 같은 카드 여러 장은 같은 객체일 수 있으므로 플레이어에게는 번호로 묻는다.
     /// 돌려준 카드를 zone에서 뺄 때는 List.Remove(card)로 같은 카드 한 장씩 빼면 된다.
     /// </summary>
-    internal List<CardData> ChooseCards(PlayerZones owner, CardChoiceZone zone, IReadOnlyList<CardData> ranked, int count, bool upTo, string question)
+    internal List<CardData> ChooseCards(PlayerZones owner, CardChoiceZone zone, IReadOnlyList<CardData> ranked, int count, bool upTo, string question) =>
+        ChooseCardIndexes(owner, zone, ranked, count, upTo, question).Select(i => ranked[i]).ToList();
+
+    /// <summary>ChooseCards와 같지만 고른 번호를 돌려준다 — 여러 곳(패 · 트래시 …)에서 모은 후보라 고른 카드가 있던 곳을 알아야 할 때</summary>
+    internal List<int> ChooseCardIndexes(PlayerZones owner, CardChoiceZone zone, IReadOnlyList<CardData> ranked, int count, bool upTo, string question)
     {
-        var recommended = ranked.Take(Math.Max(0, count)).ToList();
+        var recommended = Enumerable.Range(0, Math.Min(Math.Max(0, count), ranked.Count)).ToList();
         if (!ShouldAskPlayer(owner) || ranked.Count == 0 || count <= 0 || (ranked.Count <= count && !upTo))
             return recommended;
 
         int max = Math.Min(count, ranked.Count);
         int min = upTo ? 0 : max;
-        var recommendedIndexes = Enumerable.Range(0, recommended.Count).ToList();
-        var picked = PlayerChoices!.ChooseCards(State, question, zone, ranked, min, max, recommendedIndexes);
+        var picked = PlayerChoices!.ChooseCards(State, question, zone, ranked, min, max, recommended);
         bool valid = picked != null
             && picked.Count >= min && picked.Count <= max
             && picked.All(i => i >= 0 && i < ranked.Count)
             && picked.Distinct().Count() == picked.Count;
-        return valid ? picked!.Select(i => ranked[i]).ToList() : recommended;
+        return valid ? picked!.ToList() : recommended;
     }
 
     private bool ShouldAskPlayer(PlayerZones owner) => ReferenceEquals(owner, State.Player) && PlayerChoices != null;

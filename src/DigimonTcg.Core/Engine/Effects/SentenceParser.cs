@@ -271,9 +271,11 @@ internal static class SentenceParser
             // 배틀 에어리어에 놓은 다음 턴 이후의 이 카드를 파기하는 것이 비용 — [메인]은 쓰는 것 자체가 선택, 사건은 묻는다
             bool activate = triggers.Contains(EffectTrigger.ActivateMain);
             var ev = delayEvent;
+            var ifCond = cond;   // "If ~, ＜Delay＞" — 파기하기 전에 본다
             cond = c =>
             {
                 if (ev != null && !ev(c)) return false;
+                if (ifCond != null && !ifCond(c)) return false;
                 if (c.Engine.ReadyPlacedOptions(c.Owner, c.Card) == 0) return false;
                 if (!activate && !c.Engine.AskYesNo(c.Owner, null, $"[{c.Card.Name}] ≪딜레이≫ — 배틀 에어리어의 이 카드를 파기하고 효과를 발휘할까요?", recommended: true)) return false;
                 return c.Engine.TrashPlacedOption(c.Owner, c.Card);
@@ -1768,17 +1770,17 @@ internal static class SentenceParser
             return (c =>
             {
                 if (c.Owner.Tamers.Count == 0) { c.LastStepResolved = false; Emit(c, label, "테이머가 없습니다"); return; }
-                var pool = new List<CardData>();
-                if (fromHand) pool.AddRange(c.Owner.Hand.Where(match));
-                if (fromTrash) pool.AddRange(c.Owner.Trash.Where(match));
-                if (fromSources && c.Self != null) pool.AddRange(c.Self.EvolutionSources.Where(match));
+                var pool = new List<PoolCard>();
+                if (fromHand) pool.AddRange(PoolFrom(c.Owner.Hand, match));
+                if (fromTrash) pool.AddRange(PoolFrom(c.Owner.Trash, match));
+                if (fromSources && c.Self != null) pool.AddRange(c.Self.EvolutionSources.Where(match).Select(x => new PoolCard(x, null)));
                 var zone = fromSources ? CardChoiceZone.DigivolutionCards : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
-                var picks = c.Engine.ChooseCards(c.Owner, zone, pool.OrderBy(x => x.Level).ToList(), count, upTo: false, $"[{c.Card.Name}] 테이머 아래에 놓을 카드 {count}장을 고르세요.");
-                foreach (var x in picks)
+                var picks = new List<CardData>();
+                foreach (var p in ChooseFromPool(c, zone, pool.OrderBy(x => x.Card.Level).ToList(), count, $"[{c.Card.Name}] 테이머 아래에 놓을 카드 {count}장을 고르세요."))
                 {
-                    if (!((fromHand && c.Owner.Hand.Remove(x)) || (fromTrash && c.Owner.Trash.Remove(x))
-                          || (fromSources && c.Self?.TakeSource(y => ReferenceEquals(y, x)) != null))) continue;
-                    c.Owner.UnderTamers.Add(x);
+                    if (!TakeFromPool(c, p)) continue;
+                    c.Owner.UnderTamers.Add(p.Card);
+                    picks.Add(p.Card);
                 }
                 if (picks.Count == 0) c.LastStepResolved = false;
                 Emit(c, label, picks.Count > 0 ? $"[{string.Join(", ", picks.Select(x => x.Name))}]을(를) 테이머 아래에" : "놓을 카드가 없습니다");
@@ -1917,21 +1919,20 @@ internal static class SentenceParser
             return (c =>
             {
                 var played = new List<string>();
-                var pool = new List<CardData>();
-                if (fromUnder) pool.AddRange(c.Owner.UnderTamers.Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)));
-                if (fromHand) pool.AddRange(c.Owner.Hand.Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)));
-                if (fromTrash) pool.AddRange(c.Owner.Trash.Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)));
-                if (fromSources && c.Self != null) pool.AddRange(c.Self.EvolutionSources.Where(x => x.Type == CardType.Digimon && match(x)));
+                Func<CardData, bool> playable = x => x.Type is CardType.Digimon or CardType.Tamer && match(x);
+                var pool = new List<PoolCard>();
+                if (fromUnder) pool.AddRange(PoolFrom(c.Owner.UnderTamers, playable));
+                if (fromHand) pool.AddRange(PoolFrom(c.Owner.Hand, playable));
+                if (fromTrash) pool.AddRange(PoolFrom(c.Owner.Trash, playable));
+                if (fromSources && c.Self != null) pool.AddRange(c.Self.EvolutionSources.Where(x => x.Type == CardType.Digimon && match(x)).Select(x => new PoolCard(x, null)));
                 var zone = fromSources ? CardChoiceZone.DigivolutionCards : fromUnder ? CardChoiceZone.Other : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
-                var ranked = pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.PlayCost).ToList();
-                foreach (var pick in c.Engine.ChooseCards(c.Owner, zone, ranked, count, upTo: false, $"[{c.Card.Name}] 코스트 없이 등장시킬 카드 {count}장을 고르세요."))
+                var ranked = pool.OrderByDescending(x => x.Card.Level).ThenByDescending(x => x.Card.PlayCost).ToList();
+                foreach (var pick in ChooseFromPool(c, zone, ranked, count, $"[{c.Card.Name}] 코스트 없이 등장시킬 카드 {count}장을 고르세요."))
                 {
                     if (c.Owner.BattleArea.Count >= 12) break;
-                    bool taken = (fromHand && c.Owner.Hand.Remove(pick)) || (fromTrash && c.Owner.Trash.Remove(pick)) || (fromUnder && c.Owner.UnderTamers.Remove(pick))
-                                 || (fromSources && c.Self?.TakeSource(x => ReferenceEquals(x, pick)) != null);
-                    if (!taken) continue;
-                    c.Engine.PlayWithoutCost(c.Owner, pick, triggerOnPlay: !noOnPlay, suspended: suspended);
-                    played.Add(pick.Name);
+                    if (!TakeFromPool(c, pick)) continue;
+                    c.Engine.PlayWithoutCost(c.Owner, pick.Card, triggerOnPlay: !noOnPlay, suspended: suspended);
+                    played.Add(pick.Card.Name);
                 }
                 Emit(c, label, played.Count > 0 ? $"[{string.Join(", ", played)}] 코스트 없이 등장" : "등장시킬 카드가 없습니다");
             }, null);
@@ -2043,17 +2044,18 @@ internal static class SentenceParser
             return (c =>
             {
                 var d = Pick(target, c, security).FirstOrDefault();
-                var pool = new List<CardData>();
-                if (fromHand) pool.AddRange(c.Owner.Hand.Where(match));
-                if (fromTrash) pool.AddRange(c.Owner.Trash.Where(match));
-                if (fromUnder) pool.AddRange(c.Owner.UnderTamers.Where(match));
+                var pool = new List<PoolCard>();
+                if (fromHand) pool.AddRange(PoolFrom(c.Owner.Hand, match));
+                if (fromTrash) pool.AddRange(PoolFrom(c.Owner.Trash, match));
+                if (fromUnder) pool.AddRange(PoolFrom(c.Owner.UnderTamers, match));
                 var zoneKind = fromUnder ? CardChoiceZone.Other : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
-                var cards = c.Engine.ChooseCards(c.Owner, zoneKind, pool.OrderBy(x => x.Level).ToList(), count, upTo: false, $"[{c.Card.Name}] 진화원 아래에 놓을 카드 {count}장을 고르세요.");
+                var picks = ChooseFromPool(c, zoneKind, pool.OrderBy(x => x.Card.Level).ToList(), count, $"[{c.Card.Name}] 진화원 아래에 놓을 카드 {count}장을 고르세요.");
+                var cards = picks.Select(p => p.Card).ToList();
                 if (d == null || cards.Count == 0) { c.LastStepResolved = false; Emit(c, label, "놓을 카드나 대상이 없습니다"); return; }
-                foreach (var x in cards)
+                foreach (var p in picks)
                 {
-                    if (!((fromHand && c.Owner.Hand.Remove(x)) || (fromTrash && c.Owner.Trash.Remove(x)) || (fromUnder && c.Owner.UnderTamers.Remove(x)))) continue;
-                    d.AddBottomSource(x);
+                    if (!TakeFromPool(c, p)) continue;
+                    d.AddBottomSource(p.Card);
                 }
                 c.RecalculateFieldBuffs();
                 Emit(c, label, $"[{string.Join(", ", cards.Select(x => x.Name))}]을(를) [{d.TopCard.Name}]의 진화원 맨 아래에");
@@ -2349,6 +2351,22 @@ internal static class SentenceParser
 
     /// <summary>대상 고르기에서 먼저 볼 디지몬: [시큐리티]면 어택 중인 디지몬, 그 밖엔 UI가 고른 대상 → 어택 대상</summary>
     private static CardInstance? Preferred(EffectContext c, bool security) => security ? c.Other : c.ChosenTarget ?? c.Other;
+
+    /// <summary>여러 곳에서 모은 후보 1장 — Zone = 있던 곳 (null이면 이 디지몬의 진화원)</summary>
+    private readonly record struct PoolCard(CardData Card, List<CardData>? Zone);
+
+    private static IEnumerable<PoolCard> PoolFrom(List<CardData> zone, Func<CardData, bool> match) => zone.Where(match).Select(x => new PoolCard(x, zone));
+
+    /// <summary>
+    /// 후보(추천 순서) 중 count장을 고른다. 같은 카드 여러 장은 같은 객체라 패와 트래시에 함께 있을 수 있으므로
+    /// 번호로 골라 그 후보가 있던 곳을 함께 돌려준다 (빼기는 TakeFromPool).
+    /// </summary>
+    private static List<PoolCard> ChooseFromPool(EffectContext c, CardChoiceZone zone, IReadOnlyList<PoolCard> ranked, int count, string question) =>
+        c.Engine.ChooseCardIndexes(c.Owner, zone, ranked.Select(p => p.Card).ToList(), count, upTo: false, question).Select(i => ranked[i]).ToList();
+
+    /// <summary>고른 후보를 그 후보가 있던 곳에서 뺀다 (이미 없으면 false)</summary>
+    private static bool TakeFromPool(EffectContext c, PoolCard p) =>
+        p.Zone != null ? p.Zone.Remove(p.Card) : c.Self?.TakeSource(x => ReferenceEquals(x, p.Card)) != null;
 
     /// <summary>효과 결과 기록: [메인] · [시큐리티]는 결과 메시지로, 그 밖엔 로그로</summary>
     private static void Emit(EffectContext c, string label, string text, bool attackerRemoved = false)

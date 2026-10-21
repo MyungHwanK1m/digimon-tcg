@@ -224,4 +224,134 @@ public class Phase7MechanicTests
         Assert.Contains(ice, state.Player.BattleArea);          // 2장 > 1장
         Assert.DoesNotContain(big, state.DummyOpponent.BattleArea);
     }
+
+    private const string DelayText = "＜Delay＞ (By trashing this card after the placing turn, activate the effect below.)\n・Gain 1 memory.";
+
+    [Fact]
+    public void Delay_IfCondition_ShouldBeCheckedBeforeTrashingTheCard()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var delay = Api("P7-DIF", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[End of Opponent's Turn] If you have a Digimon with [P7-DIF-NAME] in its name, " + DelayText);
+        state.Player.OptionsInPlay.Add(new PlacedOption { Card = delay, PlacedTurn = 1 });
+
+        engine.RunEffects(EffectTrigger.EndOfOpponentsTurn, state.Player, null, delay, includeInherited: false);
+        Assert.Single(state.Player.OptionsInPlay);          // 조건 불충족 — 파기하지 않는다
+        Assert.Equal(3, state.MemoryGauge);
+
+        state.Player.BattleArea.Add(new CardInstance(Api("P7-DIF-NAME", 4, 5000), 1));
+        engine.RunEffects(EffectTrigger.EndOfOpponentsTurn, state.Player, null, delay, includeInherited: false);
+        Assert.Empty(state.Player.OptionsInPlay);
+        Assert.Contains(delay, state.Player.Trash);
+        Assert.Equal(4, state.MemoryGauge);
+    }
+
+    [Fact]
+    public void Delay_TurnPhaseTrigger_ShouldFireForAnOptionInTheBattleArea()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.CurrentStage = PracticeStage.Stage3_AiBattle;
+        for (int i = 0; i < 3; i++)
+        {
+            state.Player.MainDeck.Add(cards["ST1-02"]);
+            state.DummyOpponent.MainDeck.Add(cards["ST1-02"]);
+            state.Player.SecurityStack.Add(cards["ST1-02"]);
+        }
+        var delay = Api("P7-DTURN", 0, 0, type: CardType.Option, playCost: 0, main: "[End of Opponent's Turn] " + DelayText);
+        state.Player.OptionsInPlay.Add(new PlacedOption { Card = delay, PlacedTurn = 1 });
+
+        engine.PassTurn();   // 상대 턴이 끝날 때 배틀 에어리어의 옵션에도 [상대의 턴 종료 시]
+
+        Assert.Empty(state.Player.OptionsInPlay);
+        Assert.Contains(delay, state.Player.Trash);
+    }
+
+    private const string StubbornText = "[All Turns] When this Digimon would be deleted, prevent that deletion.";
+
+    [Fact]
+    public void WouldBeDeleted_ShouldNotPreventDeletionByZeroDp()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var stubborn = new CardInstance(Api("P7-ZDP", 4, 4000, main: StubbornText), 1);
+        state.Player.BattleArea.Add(stubborn);
+
+        Assert.True(engine.ApplyDpMinus(stubborn, 5000, "test"));   // DP 0 소멸은 룰 처리 — ≪회피≫처럼 막지 못한다
+        Assert.DoesNotContain(stubborn, state.Player.BattleArea);
+
+        var other = new CardInstance(Api("P7-ZDP-EFF", 4, 4000, main: StubbornText), 1);
+        state.Player.BattleArea.Add(other);
+        Assert.False(engine.DeleteFrom(state.Player, other));          // 효과로 소멸은 막는다
+        Assert.Contains(other, state.Player.BattleArea);
+    }
+
+    [Fact]
+    public void WouldBeDeleted_ShouldNotPreventDeletionAsACost()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var scapegoat = new CardInstance(Api("P7-COST-SG", 5, 7000,
+            main: "＜Scapegoat＞ (When this Digimon would be deleted other than by one of your effects, by deleting 1 of your other Digimon, prevent that deletion.)"), 1);
+        var victim = new CardInstance(Api("P7-COST-V", 3, 2000, main: StubbornText), 1);
+        state.DummyOpponent.BattleArea.Add(scapegoat);
+        state.DummyOpponent.BattleArea.Add(victim);
+        var killer = Api("P7-COST-KILL", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] Delete 1 of your opponent's Digimon.");
+
+        engine.RunEffects(EffectTrigger.Main, state.Player, null, killer, chosenTarget: scapegoat, includeInherited: false);
+
+        Assert.Contains(scapegoat, state.DummyOpponent.BattleArea);     // ≪스케이프고트≫로 막고
+        Assert.DoesNotContain(victim, state.DummyOpponent.BattleArea);  // 비용으로 소멸시킨 디지몬은 막지 못한다
+    }
+
+    /// <summary>ChooseCards에 정해 둔 번호를 답하는 선택기</summary>
+    private sealed class PickIndex : IChoiceProvider
+    {
+        public int Index;
+        public bool Confirm(GameState state, CardInstance? subject, string question, bool recommended) => true;
+        public CardInstance? ChooseDigimon(GameState state, string question, IReadOnlyList<CardInstance> options, CardInstance? recommended, bool optional) => recommended;
+        public int ChooseOption(GameState state, string question, IReadOnlyList<string> options, int recommended) => recommended;
+        public IReadOnlyList<int> ChooseCards(GameState state, string question, CardChoiceZone zone, IReadOnlyList<CardData> options, int min, int max, IReadOnlyList<int> recommended) =>
+            new[] { Index };
+    }
+
+    [Fact]
+    public void PlayFromHandOrTrash_ShouldTakeTheChosenCopyFromItsOwnZone()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        engine.PlayerChoices = new PickIndex { Index = 1 };   // 후보: [0] 패의 1장, [1] 트래시의 1장 (같은 카드 객체)
+        var copy = Api("P7-ZONE-AGU", 3, 2000);
+        state.Player.Hand.Add(copy);
+        state.Player.Trash.Add(copy);
+        var caller = Api("P7-ZONE-OPT", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] Play 1 [P7-ZONE-AGU] from your hand or trash without paying the cost.");
+
+        engine.RunEffects(EffectTrigger.Main, state.Player, null, caller, includeInherited: false);
+
+        Assert.Contains(copy, state.Player.Hand);           // 고른 트래시 쪽에서 나온다
+        Assert.DoesNotContain(copy, state.Player.Trash);
+        Assert.Contains(state.Player.BattleArea, d => d.TopCard == copy);
+    }
+
+    [Fact]
+    public void PlaceFromHandOrTrash_ShouldTakeTheChosenCopyFromItsOwnZone()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        engine.PlayerChoices = new PickIndex { Index = 1 };
+        state.Player.Tamers.Add(Api("P7-ZONE-TAMER", 0, 0, type: CardType.Tamer));
+        var copy = Api("P7-ZONE-SAVE", 3, 2000);
+        state.Player.Hand.Add(copy);
+        state.Player.Trash.Add(copy);
+        var target = new CardInstance(Api("P7-ZONE-TGT", 4, 5000), 1);
+        state.Player.BattleArea.Add(target);
+        var underTamer = Api("P7-ZONE-UT", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] Place 1 [P7-ZONE-SAVE] from your hand or trash under one of your Tamers.");
+        var underDigimon = Api("P7-ZONE-UD", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] Place 1 [P7-ZONE-SAVE] from your hand or trash under 1 of your Digimon as its bottom digivolution card.");
+
+        engine.RunEffects(EffectTrigger.Main, state.Player, null, underTamer, includeInherited: false);   // 테이머 아래
+        Assert.Contains(copy, state.Player.Hand);
+        Assert.DoesNotContain(copy, state.Player.Trash);
+        Assert.Contains(copy, state.Player.UnderTamers);
+
+        state.Player.Trash.Add(copy);
+        engine.RunEffects(EffectTrigger.Main, state.Player, null, underDigimon, chosenTarget: target, includeInherited: false);   // 진화원 맨 아래
+        Assert.Contains(copy, state.Player.Hand);
+        Assert.DoesNotContain(copy, state.Player.Trash);
+        Assert.Contains(copy, target.EvolutionSources);
+    }
 }
