@@ -1038,6 +1038,9 @@ public partial class MainWindow : Window
             detailLines.Add("🧬 진화원 스택: 없음 (바닥 등장)");
         }
 
+        if (instance.LinkedCards.Count > 0)
+            detailLines.Add($"🔗 링크 카드({instance.LinkedCards.Count}장): {string.Join(", ", instance.LinkedCards.Select(c => c.DisplayName))} (링크 DP는 위 DP에 포함)");
+
         TxtFieldTamerAndSources.Text = string.Join("\n", detailLines);
     }
 
@@ -2245,6 +2248,20 @@ public partial class MainWindow : Window
                 FontSize = 11.5
             });
 
+            if (opp.LinkedCards.Count > 0)
+            {
+                infoStack.Children.Add(new TextBlock
+                {
+                    Text = $"🔗 링크: {string.Join(", ", opp.LinkedCards.Select(c => c.DisplayName))}",
+                    Foreground = BrushFromHex("#89DCEB"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 10,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = OpponentZoneSlotWidth - 14,
+                    ToolTip = string.Join("\n\n", opp.LinkedCards.Select(c => $"[{c.CardId}] {c.DisplayName}\n{c.DisplayEffectText}"))
+                });
+            }
+
             if (isTargetForOption && _pendingHandCard != null)
             {
                 var btnOptTarget = new Button
@@ -2999,6 +3016,38 @@ public partial class MainWindow : Window
         }
         stack.Children.Add(cardArt);
 
+        // 3-1) 링크 카드: 디지몬 옆에 가로로 끼운 카드 (≪링크 +1≫이면 2장까지) — 링크 DP는 엔진이 이미 디지몬 DP에 더해 둔다
+        foreach (var link in instance.LinkedCards)
+        {
+            var linkStrip = new Border
+            {
+                Height = 18,
+                Background = BrushFromHex("#14303A"),
+                BorderBrush = BrushFromHex("#89DCEB"),
+                BorderThickness = new Thickness(1, 1, 3, 1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(5, 1, 5, 1),
+                Margin = new Thickness(0, 2, 0, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = $"링크 카드: [{link.CardId}] {link.DisplayName}\n{link.DisplayEffectText}",
+                Child = new TextBlock
+                {
+                    Text = $"🔗 링크 · {link.DisplayName}",
+                    Foreground = BrushFromHex("#89DCEB"),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 9.5,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            linkStrip.MouseEnter += (_, _) =>
+            {
+                UpdateCardInspector(link);
+                UpdateFieldDigimonBreakdown(instance, isPinned: isPinned, isOpponent: false);
+            };
+            stack.Children.Add(linkStrip);
+        }
+
         // 4) 카드 하단 1줄 컴팩트 전투력 배지 (상세 내역은 호버/클릭 시 우측 사이드바에서 확인!)
         if (instance.TopCard.Type == CardType.Digimon)
         {
@@ -3730,6 +3779,16 @@ public partial class MainWindow : Window
         if (_potentialDragHandCard != null)
         {
             var card = _potentialDragHandCard;
+            if (LinkTargetOf(card, info) is { } linkTarget)
+            {
+                bool alsoOther = DescribeOtherHandDrop(card, info) != null;
+                HighlightDropZone(BattleAreaZoneBorder, "#89DCEB");
+                _dragGhostBadgeText.Text = alsoOther
+                    ? $"{LinkLabel(card, linkTarget)} 가능 — 놓으면 링크 / 다른 동작 중 고르기"
+                    : $"{LinkLabel(card, linkTarget)}!";
+                _dragGhostBadgeBorder.Background = BrushFromHex("#89DCEB");
+                return;
+            }
             if (card.Type == CardType.Digimon)
             {
                 var intent = ResolveHandDigimonDropIntent(card, info);
@@ -3896,6 +3955,44 @@ public partial class MainWindow : Window
         }
     }
 
+    // ==================== 🔗 링크 (패의 카드를 내 디지몬 옆에 끼운다 — 조건 · 코스트 · 효과는 엔진이 처리) ====================
+
+    /// <summary>놓은 자리가 card를 링크할 수 있는 내 디지몬이면 그 디지몬</summary>
+    private CardInstance? LinkTargetOf(CardData card, (CardInstance? AllyDigimon, CardInstance? OpponentDigimon, bool OverBattleZone, bool OverBreedingZone, bool OverOpponentSecurityZone, bool OverOpponentBattleZone) info) =>
+        info.AllyDigimon is { } ally && _engine.GetLinkTargets(card).Any(t => ReferenceEquals(t, ally)) ? ally : null;
+
+    private string LinkLabel(CardData card, CardInstance target) =>
+        $"🔗 [{target.TopCard.DisplayName}]에 링크" + (_engine.GetLinkCost(card) is int cost ? $" (코스트 {cost})" : "");
+
+    /// <summary>같은 자리에 놓았을 때 링크 말고 할 수 있는 동작 (없으면 null) — 진화 · 등장 · 옵션 · 테이머</summary>
+    private string? DescribeOtherHandDrop(CardData card, (CardInstance? AllyDigimon, CardInstance? OpponentDigimon, bool OverBattleZone, bool OverBreedingZone, bool OverOpponentSecurityZone, bool OverOpponentBattleZone) info)
+    {
+        switch (card.Type)
+        {
+            case CardType.Digimon:
+                var intent = ResolveHandDigimonDropIntent(card, info);
+                if (intent.IsEvolve && intent.EvoTarget != null && ActionValidator.ValidateEvolution(_gameState, intent.EvoTarget, card).CanExecute)
+                    return $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화 (코스트 {ActionValidator.EvolutionCost(intent.EvoTarget, card)})";
+                if (intent.IsPlay && ActionValidator.ValidatePlay(_gameState, card).CanExecute)
+                    return $"✨ 배틀 에어리어에 등장 (코스트 {card.PlayCost})";
+                return null;
+            case CardType.Option:
+                return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"⚡ [{card.DisplayName}] 사용 (코스트 {card.PlayCost})" : null;
+            case CardType.Tamer:
+                return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"🎖️ 테이머 등장 (코스트 {card.PlayCost})" : null;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>링크와 다른 동작 중 고르기 — 링크를 고르면 true (창을 닫으면 원래 동작)</summary>
+    private bool ChooseLinkOver(string otherAction, CardData card, CardInstance target)
+    {
+        var options = new List<string> { otherAction, LinkLabel(card, target) };
+        int pick = _engine.PlayerChoices?.ChooseOption(_gameState, $"[{card.DisplayName}]을(를) 어떻게 쓸까요?", options, 0) ?? 0;
+        return pick == 1;
+    }
+
     private void CompleteCardDrop(Point dropPos)
     {
         var draggedHand = _potentialDragHandCard;
@@ -3907,6 +4004,17 @@ public partial class MainWindow : Window
 
         if (draggedHand != null)
         {
+            // 링크: 내 배틀 에어리어 디지몬 위에 놓았고 링크할 수 있으면 링크 (진화 · 등장 · 옵션도 가능하면 고르게 한다)
+            if (LinkTargetOf(draggedHand, info) is { } linkTarget)
+            {
+                string? other = DescribeOtherHandDrop(draggedHand, info);
+                if (other == null || ChooseLinkOver(other, draggedHand, linkTarget))
+                {
+                    ApplyActionResult(_engine.LinkFromHand(draggedHand, linkTarget));
+                    return;
+                }
+            }
+
             if (draggedHand.Type == CardType.Digimon)
             {
                 var intent = ResolveHandDigimonDropIntent(draggedHand, info);
