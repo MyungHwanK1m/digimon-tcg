@@ -60,6 +60,9 @@ public sealed class SmartAiPolicy : IAiPolicy
                 }
             }
         }
+        // 엔진은 진화를 DNA 진화보다 먼저 묻는다 — DNA 진화가 더 이득이면 짝이 될 디지몬을 진화로 망가뜨리지 않도록 진화하지 않는다
+        if (best != null && BestDna(engine, memory, beforeAttacks, out double dnaScore) != null && dnaScore >= bestScore)
+            return null;
         return best;
     }
 
@@ -186,12 +189,15 @@ public sealed class SmartAiPolicy : IAiPolicy
     /// 이득 = 진화한 디지몬의 가치 − 두 마리 중 센 쪽의 가치 − 필드 한 자리를 잃는 손해(약한 쪽 가치의 일부) − 코스트.
     /// 어택 전이면 액티브로 바로 어택할 수 있는 이득을 더한다. 이득이 있는 조합 중 가장 좋은 것.
     /// </summary>
-    public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks)
+    public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) =>
+        BestDna(engine, memory, beforeAttacks, out _);
+
+    private AiDnaEvolution? BestDna(GoldfishEngine engine, int memory, bool beforeAttacks, out double bestScore)
     {
         var ai = engine.State.DummyOpponent;
         int limit = beforeAttacks ? memory : memory + MaxMemoryHandOver;
         AiDnaEvolution? best = null;
-        double bestScore = 0.5;
+        bestScore = 0.5;
         foreach (var card in ai.Hand.Where(c => c.Type == CardType.Digimon && GoldfishEngine.HasDna(c)).Distinct())
         {
             if (GoldfishEngine.GetDnaCost(card) is not int cost || cost > limit)

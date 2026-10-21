@@ -58,6 +58,25 @@ public class AiDnaPolicyTests
     }
 
     [Fact]
+    public void Smart_ShouldHoldNormalEvolution_WhenDnaEvolutionIsBetter()
+    {
+        // 엔진은 진화를 DNA 진화보다 먼저 묻는다 — 짝이 될 디지몬을 일반 진화로 망가뜨리지 않아야 한다
+        WithKoreanCards(new[] { new KoreanCard { CardId = "AI-DNA3-HOST", Name = "테스트조그레스몬3", MainText = "〔조그레스〕블루 Lv.4+그린 Lv.4 : 코스트 0" } }, () =>
+        {
+            var state = new GameState { CurrentTurn = 3, CurrentPhase = Phase.TurnEnd, TurnSequence = 6, CurrentStage = PracticeStage.Stage3_AiBattle };
+            var engine = new GoldfishEngine(state);
+            state.DummyOpponent.BattleArea.Add(new CardInstance(Api("AI-DNA3-B", 4, 5000, CardColor.Blue), 1));
+            state.DummyOpponent.BattleArea.Add(new CardInstance(Api("AI-DNA3-G", 4, 4000, CardColor.Green), 1));
+            state.DummyOpponent.Hand.Add(Api("AI-DNA3-HOST", 6, 12000, CardColor.Blue));
+            state.DummyOpponent.Hand.Add(Api("AI-DNA3-B5", 5, 7000, CardColor.Blue));     // 블루 Lv.4 위에 일반 진화할 수 있는 카드
+
+            var smart = new SmartAiPolicy();
+            Assert.Null(smart.ChooseEvolution(engine, memory: 3, beforeAttacks: true));
+            Assert.NotNull(smart.ChooseDnaEvolution(engine, memory: 3, beforeAttacks: true));
+        });
+    }
+
+    [Fact]
     public void Smart_ShouldNotDnaDigivolveIntoSomethingWeaker()
     {
         WithKoreanCards(new[] { new KoreanCard { CardId = "AI-DNA2-HOST", Name = "테스트약한조그레스몬", MainText = "〔조그레스〕블루 Lv.4+그린 Lv.4 : 코스트 0" } }, () =>
