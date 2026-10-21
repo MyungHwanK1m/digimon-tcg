@@ -1170,6 +1170,7 @@ public partial class GoldfishEngine
         {
             if (AiPolicy.ChooseOption(this, ctx.Memory, beforeAttacks: true) is { } option) { AiUseOption(ctx, option); continue; }
             if (AiPolicy.ChooseEvolution(this, ctx.Memory, beforeAttacks: true) is { } evo) { AiEvolve(ctx, evo.Base, evo.Card); continue; }
+            if (AiPolicy.ChooseDnaEvolution(this, ctx.Memory, beforeAttacks: true) is { } dna && AiDnaEvolve(dna)) continue;
             break;
         }
 
@@ -1538,6 +1539,9 @@ public partial class GoldfishEngine
                 AiEvolve(ctx, evo.Base, evo.Card);
                 acted = true;
             }
+            // 2-B) DNA 진화 (정책)
+            if (ctx.Memory >= 0 && AiPolicy.ChooseDnaEvolution(this, ctx.Memory, beforeAttacks: false) is { } dna && AiDnaEvolve(dna))
+                acted = true;
 
             if (ctx.Memory < 0) break;
 

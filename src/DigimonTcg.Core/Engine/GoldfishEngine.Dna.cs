@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using DigimonTcg.Core.Data;
+using DigimonTcg.Core.Engine.Ai;
 using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
@@ -54,6 +55,25 @@ public partial class GoldfishEngine
     /// <summary>패의 card로 DNA 진화할 수 있는 내 디지몬 조합 (메인 페이즈 — 화면이 쓴다)</summary>
     public IReadOnlyList<(CardInstance Left, CardInstance Right)> GetDnaPairs(CardData card) =>
         State.Player.Hand.Contains(card) ? DnaPairs(State.Player, card) : Array.Empty<(CardInstance, CardInstance)>();
+
+    /// <summary>owner(플레이어 · AI)가 card로 DNA 진화할 수 있는 두 마리 조합 — AI 정책(ChooseDnaEvolution)이 쓴다</summary>
+    public IReadOnlyList<(CardInstance Left, CardInstance Right)> GetDnaPairsFor(PlayerZones owner, CardData card) =>
+        owner.Hand.Contains(card) ? DnaPairs(owner, card) : Array.Empty<(CardInstance, CardInstance)>();
+
+    /// <summary>AI: 정책이 고른 DNA 진화를 검사하고 처리한다 (코스트는 AI 메모리에서). 반환: 처리했는지</summary>
+    private bool AiDnaEvolve(AiDnaEvolution dna)
+    {
+        var opp = State.DummyOpponent;
+        if (DnaOf(dna.Card) is not { } req || !opp.Hand.Contains(dna.Card) || !opp.BattleArea.Contains(dna.A) || !opp.BattleArea.Contains(dna.B) || !DnaPairOk(req, dna.A, dna.B))
+            return false;
+        string names = $"{dna.A.TopCard.Name} + {dna.B.TopCard.Name}";
+        int before = _aiTurn?.Memory ?? 0;
+        var logs = CaptureEffectLogs(() => DnaDigivolveCore(opp, dna.Card, dna.A, dna.B, req.Cost, opp.Hand));
+        Log($"🤖 [AI DNA 진화] [{names}] -> [{dna.Card.Name}(Lv.{dna.Card.Level}, 코스트 {req.Cost})] (AI 메모리: +{before} → {_aiTurn?.Memory})");
+        AddOpponentEvent(OpponentActionKind.Evolve, "DNA 진화", $"{names} → {dna.Card.Name} (Lv.{dna.Card.Level}) · 메모리 {before} → {_aiTurn?.Memory}", dna.Card);
+        AddEffectEvent(dna.Card, logs);
+        return true;
+    }
 
     /// <summary>DNA 진화 코스트 (조건을 모르면 null)</summary>
     public static int? GetDnaCost(CardData card) => DnaOf(card)?.Cost;

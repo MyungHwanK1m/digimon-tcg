@@ -468,7 +468,7 @@ AI가 패에서 링크하는 것은 아직 없다 (효과로 링크하는 것은
 | 시점 | 자신의 턴 종료 시 — [자신의 턴 종료 시] 효과(액티브로 되돌리는 효과 등)를 처리한 뒤, 액티브 상태인 그 디지몬이 1번씩 어택할 수 있다 (플레이어 턴 종료 · AI 턴 종료 모두) |
 | ≪볼텍스≫ | 상대의 디지몬(어택할 수 있는 — 레스트)에게만, 등장한 턴에도 |
 | ≪에그제큐트≫ | 시큐리티 · 상대의 디지몬(액티브도). 그 어택이 끝나면(【어택 종료 시】 뒤) 이 디지몬을 소멸 |
-| 고르기 | 플레이어: 어택할지(추천 = 배틀에서 이기는 대상이 있을 때) → 대상(≪에그제큐트≫는 고르지 않으면 시큐리티). AI: 이기는 대상이 있을 때만. AI 어택은 보통 어택과 같은 처리(RunAiTurn — 플레이어의 블록 선택 포함) |
+| 고르기 | 플레이어: 어택할지(추천 = 배틀에서 이기는 대상이 있을 때) → 대상(≪에그제큐트≫는 고르지 않으면 시큐리티). AI: 정책(IAiPolicy.ChooseEndOfTurnAttack — e1)이 고른다 (≪볼텍스≫로 먼저 묻고, 고르지 않으면 ≪에그제큐트≫로). AI 어택은 보통 어택과 같은 처리(RunAiTurn — 플레이어의 블록 선택 포함) |
 | 효과 | 키워드 부여("gains ＜Execute＞ / ＜Vortex＞") · 조건 "If attacking by ＜Execute＞" |
 
 엔진 정리: 플레이어 어택(AttackOpponentDigimon · AttackSecurityOrDirect)을 검사 + 본체(PlayerAttackOnDigimonCore · PlayerSecurityAttackCore)로 나눴고, AI 턴 끝을 EndAiTurn(턴 종료 단계)으로 나눴다.
@@ -483,7 +483,7 @@ AI가 패에서 링크하는 것은 아직 없다 (효과로 링크하는 것은
 | 메인 페이즈 | GetDnaPairs(card) · DnaDigivolve(card, a, b) · GetDnaCost(card) — 화면은 e1 |
 | 효과 | "2 of your Digimon may DNA digivolve into ~ in the hand" · "This Digimon and any of your other (조건) Digimon may DNA digivolve into ~" (조그레스 조건은 그 카드의 것 — Q&A "효과로도 조그레스 조건을 만족해야 한다") · "When this Digimon would DNA digivolve (into ~)" · "If this effect DNA digivolved" |
 
-AI가 메인 페이즈에 스스로 DNA 진화하는 것은 아직 없다 (효과로 하는 DNA 진화는 AI도 한다 — 정책 쪽 e1과 나눌 일).
+AI의 메인 페이즈 DNA 진화는 정책(IAiPolicy.ChooseDnaEvolution — e1)이 고르고 엔진이 처리한다 (AiDnaEvolve — 진화 다음 순서, 후보는 GetDnaPairsFor). 정책의 판단은 e1이 붙인다 (지금은 고르지 않음).
 
 남은 것(DNA 관련 절 측정 114 → 74 — 대부분 같은 절의 다른 부분): ≪블래스트 DNA 진화≫ 【카운터】(7), "1 of your Digimon may attack"(효과 어택), Examon의 "Lv.6으로도 취급", 트래시의 카드를 섞는 DNA 진화.
 

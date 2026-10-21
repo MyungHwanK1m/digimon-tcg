@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using DigimonTcg.Core.Engine.Ai;
 using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
@@ -10,7 +11,7 @@ namespace DigimonTcg.Core.Engine;
 /// - [자신의 턴 종료 시] 효과(액티브로 되돌리는 효과 등)를 처리한 뒤, 액티브 상태인 ≪볼텍스≫ · ≪에그제큐트≫ 디지몬이 1번씩 어택할 수 있다
 /// - ≪볼텍스≫: 상대의 디지몬(레스트 — 보통 어택 대상)에게만, 등장한 턴에도
 /// - ≪에그제큐트≫: 시큐리티 · 상대의 디지몬(액티브도). 그 어택이 끝나면 이 디지몬을 소멸 (어택 종료 시 — EndAttack)
-/// 플레이어는 어택할지 · 대상을 고르고(추천 = 배틀에서 이기는 대상이 있을 때), AI는 이기는 대상이 있을 때만 어택한다.
+/// 플레이어는 어택할지 · 대상을 고르고(추천 = 배틀에서 이기는 대상이 있을 때), AI는 정책(IAiPolicy.ChooseEndOfTurnAttack)이 고른다.
 /// </summary>
 public partial class GoldfishEngine
 {
@@ -69,20 +70,30 @@ public partial class GoldfishEngine
         }
     }
 
-    /// <summary>AI 턴 종료: 다음 턴 종료 시 어택 (이기는 대상이 있는 ≪볼텍스≫ · ≪에그제큐트≫ 디지몬만). 없으면 null</summary>
-    private (CardInstance Attacker, CardInstance Target, bool Execute)? NextAiEndOfTurnAttack()
+    /// <summary>AI 턴 종료: 다음 턴 종료 시 어택 (정책이 고른 것 — Target null = 시큐리티). 없으면 null</summary>
+    private (CardInstance Attacker, CardInstance? Target, bool Execute)? NextAiEndOfTurnAttack()
     {
         var owner = State.DummyOpponent;
         foreach (var attacker in owner.BattleArea.ToList())
         {
             if (!CanEndOfTurnAttack(owner, attacker)) continue;
-            var vortexTarget = CardScripts.HasKeyword(attacker, Keyword.Vortex) ? BestWinningTarget(attacker, EndOfTurnTargets(owner, execute: false)) : null;
-            var executeTarget = vortexTarget == null && CardScripts.HasKeyword(attacker, Keyword.Execute) ? BestWinningTarget(attacker, EndOfTurnTargets(owner, execute: true)) : null;
-            if ((vortexTarget ?? executeTarget) is not { } target) continue;
-            bool execute = vortexTarget == null;
+            // 정책(IAiPolicy.ChooseEndOfTurnAttack)에 묻는다 — ≪볼텍스≫로 먼저, 고르지 않으면 ≪에그제큐트≫로
+            EndOfTurnAttack? choice = null;
+            bool execute = false;
+            if (CardScripts.HasKeyword(attacker, Keyword.Vortex) && EndOfTurnTargets(owner, execute: false) is { Count: > 0 } vortexTargets)
+                choice = AiPolicy.ChooseEndOfTurnAttack(this, attacker, vortexTargets, canAttackSecurity: false);
+            if (choice is { Target: null }) choice = null;   // ≪볼텍스≫는 상대 디지몬에게만
+            if (choice == null && CardScripts.HasKeyword(attacker, Keyword.Execute))
+            {
+                choice = AiPolicy.ChooseEndOfTurnAttack(this, attacker, EndOfTurnTargets(owner, execute: true), canAttackSecurity: true);
+                execute = choice != null;
+            }
+            if (choice is not { } c) continue;
+            var targets = EndOfTurnTargets(owner, execute);
+            if (c.Target != null && !targets.Contains(c.Target)) continue;   // 후보에 없는 대상은 무시
             _endOfTurnAttacked.Add(attacker);
             if (execute) _executingAttacker = attacker;
-            return (attacker, target, execute);
+            return (attacker, c.Target, execute);
         }
         return null;
     }
