@@ -208,6 +208,56 @@ public class Phase7MechanicTests
     }
 
     [Fact]
+    public void ZeroDpDeletion_ShouldActivateDecodeButNotFragment()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var source = Api("P7-DPZ-SRC", 3, 3000);
+        var dec = new CardInstance(source, 1);
+        dec.Evolve(Api("P7-DPZ-FRAG", 4, 4000));
+        dec.Evolve(Api("P7-DPZ", 5, 6000, main: "＜Decode ([P7-DPZ-SRC])＞\n＜Fragment (1)＞"));
+        state.Player.BattleArea.Add(dec);
+        var shrink = Api("P7-DPZ-OPT", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] 1 of your Digimon gets -10000 DP for the turn.");
+        state.Player.Hand.Add(shrink);
+
+        engine.PlayCard(shrink);
+
+        Assert.DoesNotContain(dec, state.Player.BattleArea);                      // DP 0 소멸은 막지 못한다 (≪프래그먼트≫ 발휘 안 함)
+        Assert.True(state.Player.BattleArea.Any(d => d.TopCard == source), string.Join(" | ", state.ActionLogs));   // ≪디코드≫는 발휘 (배틀 이외로 떠남)
+    }
+
+    [Fact]
+    public void TimedDelay_TwoCopies_ShouldBothActivate()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var delay = Api("P7-DELAY2", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Start of Your Turn] ＜Delay＞\n・Gain 1 memory.");
+        state.Player.OptionsInPlay.Add(new PlacedOption { Card = delay, PlacedTurn = 0 });
+        state.Player.OptionsInPlay.Add(new PlacedOption { Card = delay, PlacedTurn = 0 });
+
+        engine.ExecuteActivePhase();
+
+        Assert.Empty(state.Player.OptionsInPlay);
+        Assert.Equal(2, state.Player.Trash.Count(c => c == delay));
+        Assert.Equal(5, state.MemoryGauge);
+    }
+
+    [Fact]
+    public void LastTamerLeaving_ShouldTrashCardsUnderTamers()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var tamer = Api("P7-UT-TAMER", 0, 0, type: CardType.Tamer,
+            main: "[Main] By returning this Tamer to the bottom of the deck, gain 1 memory.");
+        state.Player.Tamers.Add(tamer);
+        var saved = Api("P7-UT-SAVED", 4, 5000);
+        state.Player.UnderTamers.Add(saved);
+
+        Assert.True(engine.ActivateMainAbility(null, tamer).CanExecute);
+
+        Assert.Empty(state.Player.UnderTamers);
+        Assert.Contains(saved, state.Player.Trash);
+    }
+
+    [Fact]
     public void Iceclad_ShouldCompareDigivolutionCardCounts()
     {
         var (state, engine, cards) = NewMainPhase();

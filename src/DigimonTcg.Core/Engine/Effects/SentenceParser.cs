@@ -176,6 +176,13 @@ internal static class SentenceParser
             triggers.AddRange(ev.Value.Triggers);
             eventCondition = ev.Value.Condition;
             body = when.Groups["rest"].Value;
+            // 막기만 하는 "떠나려 할 때" 효과는 막을 수 없는 소멸(DP 0 · 코스트)에서는 발휘하지 않는다 (비용만 내게 되므로)
+            if (triggers.Any(t => t is EffectTrigger.ThisDigimonWouldLeave or EffectTrigger.ThisDigimonWouldBeDeleted or EffectTrigger.AllyDigimonWouldLeave or EffectTrigger.AllyDigimonWouldBeDeleted)
+                && Regex.IsMatch(body, @"\b(?:prevent|doesn't leave|does not leave|don't leave|isn't deleted|is not deleted|aren't deleted)\b", RegexOptions.IgnoreCase))
+            {
+                var baseCond = eventCondition;
+                eventCondition = c => (baseCond == null || baseCond(c)) && c.Engine.CurrentLeave?.CanPrevent != false;
+            }
         }
         else if (when.Success && ParseEventPhrase(when.Groups["ev"].Value) is { } same && same.Triggers.All(triggers.Contains))
         {
@@ -587,7 +594,7 @@ internal static class SentenceParser
                         if (c.Self.TakeSource(y => ReferenceEquals(y, x)) != null) c.Owner.Trash.Add(x);
                     c.PreventLeave = true;
                     c.Log($"[≪프래그먼트 ({n})≫] [{c.Self.TopCard.Name}]: 진화원 {n}장을 파기하고 소멸하지 않습니다.");
-                }, c => c.Engine.CurrentLeave is { } l && ReferenceEquals(l.Digimon, c.Self)));
+                }, c => c.Engine.CurrentLeave is { } l && ReferenceEquals(l.Digimon, c.Self) && l.CanPrevent));
                 break;
             }
             case "decoy":
@@ -604,7 +611,7 @@ internal static class SentenceParser
                     c.Log($"[{(decoy ? "≪디코이≫" : "≪가드≫")}] [{c.Self.TopCard.Name}]을(를) 소멸시켜 [{c.Other.TopCard.Name}]을(를) 지킵니다.");
                     c.DeleteOwn(c.Self);
                     c.PreventLeave = true;
-                }, c => c.Engine.CurrentLeave is { } l && !l.InBattle && !l.ByOwnEffect && ReferenceEquals(l.Digimon, c.Other)
+                }, c => c.Engine.CurrentLeave is { } l && !l.InBattle && !l.ByOwnEffect && l.CanPrevent && ReferenceEquals(l.Digimon, c.Other)
                         && !ReferenceEquals(c.Other, c.Self) && (spec == null || spec(c.Other!.TopCard))));
                 break;
             }
@@ -1520,7 +1527,7 @@ internal static class SentenceParser
         }
         if (Regex.IsMatch(cost, @"^returning this Tamer to the bottom of the deck$", RegexOptions.IgnoreCase) && card.Type == CardType.Tamer)
             return (c => c.Owner.Tamers.Contains(c.Card),
-                    c => { c.Owner.Tamers.Remove(c.Card); c.Owner.SuspendedTamers.Remove(c.Card); c.Owner.MainDeck.Add(c.Card); },
+                    c => { c.Owner.Tamers.Remove(c.Card); c.Owner.SuspendedTamers.Remove(c.Card); c.Owner.MainDeck.Add(c.Card); c.Engine.ClearUnderTamersIfNoTamer(c.Owner); },
                     _ => true, "이 테이머를 덱 아래로 되돌려");
         if ((m = Regex.Match(cost, @"^paying (?<n>\d+) (?:memory|cost)$|^decreasing your memory by (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
         {
@@ -2071,7 +2078,7 @@ internal static class SentenceParser
                 var tamers = c.Enemy.Tamers.Where(t => delete || c.Enemy.HasActiveTamer(t)).OrderByDescending(t => t.PlayCost).Take(n).ToList();
                 foreach (var t in tamers)
                 {
-                    if (delete) { c.Enemy.Tamers.Remove(t); c.Enemy.SuspendedTamers.Remove(t); c.Enemy.Trash.Add(t); }
+                    if (delete) { c.Enemy.Tamers.Remove(t); c.Enemy.SuspendedTamers.Remove(t); c.Enemy.Trash.Add(t); c.Engine.ClearUnderTamersIfNoTamer(c.Enemy); }
                     else c.Engine.SuspendTamer(c.Enemy, t);
                 }
                 Emit(c, label, tamers.Count > 0 ? $"상대 테이머 [{string.Join(", ", tamers.Select(t => t.Name))}] {(delete ? "소멸" : "레스트")}" : "대상이 없습니다");

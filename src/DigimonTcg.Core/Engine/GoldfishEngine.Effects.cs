@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DigimonTcg.Core.Data;
 using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
@@ -163,19 +164,19 @@ public partial class GoldfishEngine
     internal PlayerZones? CurrentEffectOwner { get; private set; }
 
     /// <summary>지금 배틀 에어리어를 떠나려는 디지몬의 사정 ("would leave the battle area / be deleted" 효과의 조건이 본다)</summary>
-    internal sealed record LeaveInfo(CardInstance Digimon, bool Deletion, bool InBattle, bool ByOwnEffect);
+    internal sealed record LeaveInfo(CardInstance Digimon, bool Deletion, bool InBattle, bool ByOwnEffect, bool CanPrevent = true);
     internal LeaveInfo? CurrentLeave { get; private set; }
 
     /// <summary>
     /// "When ~ would leave the battle area / would be deleted" 효과를 발휘하고, 그중 하나라도 떠나는 것을 막았으면 true.
     /// deletion = 소멸로 떠나는지, inBattle = 배틀로 소멸하는지. 자신의 효과로 떠나는지는 지금 처리 중인 효과의 주인으로 판단한다.
     /// </summary>
-    internal bool TryPreventLeave(PlayerZones zones, CardInstance inst, bool deletion, bool inBattle)
+    internal bool TryPreventLeave(PlayerZones zones, CardInstance inst, bool deletion, bool inBattle, bool canPrevent = true)
     {
         if (!zones.BattleArea.Contains(inst))
             return false;
         var outer = CurrentLeave;
-        CurrentLeave = new LeaveInfo(inst, deletion, inBattle, !inBattle && ReferenceEquals(CurrentEffectOwner, zones));
+        CurrentLeave = new LeaveInfo(inst, deletion, inBattle, !inBattle && ReferenceEquals(CurrentEffectOwner, zones), canPrevent);
         bool prevented = false;
         try
         {
@@ -201,6 +202,8 @@ public partial class GoldfishEngine
         {
             CurrentLeave = outer;
         }
+        if (!canPrevent)
+            return false;   // DP 0 소멸 · 코스트 소멸: "떠나려 할 때" 효과는 발휘하지만 막을 수는 없다
         if (prevented)
             EffectLog(zones, $"[{inst.TopCard.Name}]은(는) 효과로 배틀 에어리어를 떠나지 않습니다.");
         return prevented && zones.BattleArea.Contains(inst);
@@ -510,9 +513,10 @@ public partial class GoldfishEngine
             return false;
         if (TryPreventDeletion(zones, instance, cause))
             return false;
-        // "would be deleted" 효과로도 DP 0 소멸 · 코스트 소멸은 막지 않는다 (≪회피≫와 같은 규칙)
-        if (cause is not (DeletionCause.ZeroDp or DeletionCause.Cost)
-            && TryPreventLeave(zones, instance, deletion: true, inBattle: cause == DeletionCause.Battle))
+        // DP 0 소멸 · 코스트 소멸은 "would be deleted / leave" 효과로도 막지 않는다 (≪회피≫와 같은 규칙).
+        // 다만 막지 않고 발휘만 하는 효과(≪디코드≫의 진화원 등장 등 — "배틀 이외로 떠날 때")는 발휘한다
+        bool canPrevent = cause is not (DeletionCause.ZeroDp or DeletionCause.Cost);
+        if (TryPreventLeave(zones, instance, deletion: true, inBattle: cause == DeletionCause.Battle, canPrevent) && canPrevent)
             return false;
         RemoveDeleted(zones, instance, cause);
         return true;
@@ -600,10 +604,13 @@ public partial class GoldfishEngine
         ApplyOverflow(zones, stack.Append(instance.TopCard));
         // ≪머티리얼 세이브 N≫: 진화원 N장(디지몬 카드)을 자신의 테이머 아래에 놓을 수 있다
         int materialSave = CardScripts.For(instance.TopCard)?.MaterialSave ?? 0;
-        if (materialSave > 0 && zones.Tamers.Count > 0 && instance.EvolutionSources.Any(s => s.Type == CardType.Digimon)
+        var xrosNames = DigiXrosRequirementNames(instance.TopCard);
+        bool IsXrosMaterial(CardData s) => s.Type == CardType.Digimon
+            && (xrosNames == null || xrosNames.Any(n => KoreanCardData.DisplayName(s).Contains(n, StringComparison.Ordinal) || s.Name.Contains(n, StringComparison.OrdinalIgnoreCase)));
+        if (materialSave > 0 && zones.Tamers.Count > 0 && instance.EvolutionSources.Any(IsXrosMaterial)
             && AskYesNo(zones, instance, $"≪머티리얼 세이브 {materialSave}≫ [{instance.TopCard.Name}]의 진화원 {materialSave}장을 테이머 아래에 놓을까요?", recommended: true))
         {
-            var saved = ChooseCards(zones, CardChoiceZone.DigivolutionCards, instance.EvolutionSources.Where(s => s.Type == CardType.Digimon).OrderByDescending(s => s.Level).ToList(),
+            var saved = ChooseCards(zones, CardChoiceZone.DigivolutionCards, instance.EvolutionSources.Where(IsXrosMaterial).OrderByDescending(s => s.Level).ToList(),
                 materialSave, upTo: true, $"≪머티리얼 세이브 {materialSave}≫ 테이머 아래에 놓을 진화원을 고르세요.");
             foreach (var s in saved)
                 if (instance.TakeSource(x => ReferenceEquals(x, s)) != null) zones.UnderTamers.Add(s);
@@ -768,10 +775,10 @@ public partial class GoldfishEngine
         RecalculateFieldBuffs();
     }
 
-    /// <summary>배틀 에어리어의 옵션(≪딜레이≫)에도 시점을 알린다 (같은 카드 여러 장은 한 번)</summary>
+    /// <summary>배틀 에어리어의 옵션(≪딜레이≫)에도 시점을 알린다 — 놓인 장마다 (같은 카드 2장이면 2번, 발휘할 때마다 1장씩 파기)</summary>
     private void RunPlacedOptions(EffectTrigger trigger, PlayerZones owner, CardInstance? other = null, CardData? triggerCard = null)
     {
-        foreach (var option in owner.OptionsInPlay.Select(p => p.Card).Distinct().ToList())
+        foreach (var option in owner.OptionsInPlay.Select(p => p.Card).ToList())
             RunEffects(trigger, owner, null, option, other: other, includeInherited: false, triggerCard: triggerCard);
     }
 
@@ -1526,6 +1533,33 @@ public partial class GoldfishEngine
         if (ctx.PlaceInBattleArea && owner.Trash.Remove(option))   // 시큐리티 체크 처리에서 이미 트래시로 갔다
             PlaceOption(owner, option);
         return new($"{head} {ctx.Message}", $"[시큐리티 {option.Name}] {ctx.Summary}", ctx.AttackerRemoved, ctx.ReturnToHand);
+    }
+
+    /// <summary>
+    /// 디지크로스 조건의 카드 이름 (공식 한글 문구 "디지크로스-2:「A」×「B」"에서 — 영어 카드 데이터에는 없다).
+    /// 공식 데이터가 없으면 null (조건을 모름 → 디지몬 카드 전부를 조건 카드로 본다)
+    /// </summary>
+    private static List<string>? DigiXrosRequirementNames(CardData card)
+    {
+        var ko = KoreanCardData.Get(card.CardId);
+        if (ko?.MainText is not { Length: > 0 } text) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(text, @"디지크로스\s*-?\s*\d*\s*[:：]\s*(?<names>(?:「[^」]+」\s*[×xX]?\s*)+)");
+        if (!m.Success) return null;
+        var names = System.Text.RegularExpressions.Regex.Matches(m.Groups["names"].Value, @"「([^」]+)」").Select(x => x.Groups[1].Value).ToList();
+        return names.Count > 0 ? names : null;
+    }
+
+    /// <summary>
+    /// 테이머가 배틀 에어리어를 떠난 뒤: 테이머 아래 카드는 어느 테이머 아래인지 구분하지 않으므로,
+    /// 테이머가 한 장도 남지 않았을 때 전부 트래시로 보낸다 (테이머가 떠나면 그 아래 카드는 트래시)
+    /// </summary>
+    internal void ClearUnderTamersIfNoTamer(PlayerZones zones)
+    {
+        if (zones.Tamers.Count > 0 || zones.UnderTamers.Count == 0)
+            return;
+        zones.Trash.AddRange(zones.UnderTamers);
+        EffectLog(zones, $"테이머가 없어져 테이머 아래 카드 {zones.UnderTamers.Count}장을 트래시로 보냅니다.");
+        zones.UnderTamers.Clear();
     }
 
     /// <summary>옵션 카드를 배틀 에어리어에 놓는다 (≪딜레이≫: 놓은 다음 턴부터 [메인]으로 파기해 효과를 발휘)</summary>
