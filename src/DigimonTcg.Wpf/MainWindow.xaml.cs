@@ -3230,10 +3230,10 @@ public partial class MainWindow : Window
             }
         };
 
-        // 우클릭: 이 디지몬의 [메인] 기동 효과 사용 (≪디지버스트≫ 등)
+        // 우클릭: 이 디지몬의 [메인] 기동 효과 사용 (≪디지버스트≫ 등, 육성 에어리어에서는 ≪트레이닝≫ — 쓸 수 있는지는 엔진이 확인)
         fieldCardBorder.MouseRightButtonUp += (_, e) =>
         {
-            if (isBreedingArea || isPendingAllyTargetMode)
+            if (isPendingAllyTargetMode)
                 return;
             e.Handled = true;
             TryActivateMainAbility(instance, instance.TopCard);
