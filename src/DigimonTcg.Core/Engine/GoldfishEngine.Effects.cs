@@ -1113,6 +1113,10 @@ public partial class GoldfishEngine
         foreach (var d in owner.BattleArea)
             if (HasMainAbility(d.TopCard) && !_usedMainAbilities.ContainsKey(d))
                 list.Add(new MainAbility(d, d.TopCard));
+        // ≪트레이닝≫처럼 육성 에어리어에서도 쓸 수 있는 기동 효과
+        if (owner.BreedingArea is { } breeding && CardScripts.For(breeding.TopCard)?.ActivateInBreeding == true
+            && HasMainAbility(breeding.TopCard) && !_usedMainAbilities.ContainsKey(breeding))
+            list.Add(new MainAbility(breeding, breeding.TopCard));
         foreach (var t in owner.Tamers.Distinct())
             if (HasMainAbility(t) && _usedMainAbilities.GetValueOrDefault(t) < owner.Tamers.Count(x => ReferenceEquals(x, t)))
                 list.Add(new MainAbility(null, t));

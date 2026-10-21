@@ -93,6 +93,9 @@ internal static class SentenceParser
             def?.MaterialSave(int.Parse(materialSave.Groups["n"].Value));
             return null;
         }
+        // 떠나려 할 때 · 소멸하려 할 때 키워드: ≪디코드≫ · ≪파티션≫ · ≪프래그먼트≫ · ≪디코이≫ · ≪가드≫, [메인] ≪트레이닝≫
+        if (Regex.IsMatch(clause, @"^＜(?:Decode|Partition|Fragment|Decoy|Guard|Training)\b[^＞]*＞\.?$", RegexOptions.IgnoreCase) && card.Type == CardType.Digimon)
+            return ParseLeaveKeyword(clause.TrimEnd('.'), inherited, def);
         // [패] [카운터] ≪블래스트 진화≫: 상대 디지몬이 어택했을 때 패의 이 카드로 자신의 디지몬을 코스트 없이 진화 (엔진의 카운터 타이밍)
         if (Regex.IsMatch(clause, @"^\[Hand\]\s*\[Counter\]\s*＜Blast Digivolve＞\.?$", RegexOptions.IgnoreCase) && card.Type == CardType.Digimon)
         {
@@ -537,6 +540,147 @@ internal static class SentenceParser
             return (triggers, cond);
         }
         return null;
+    }
+
+    /// <summary>
+    /// 떠나려 할 때 · 소멸하려 할 때 키워드 (설명문은 Normalize가 지웠다) — 공식 설명문 기준:
+    /// ≪디코드 (조건)≫ 배틀 이외로 떠날 때 진화원의 조건 카드 1장 등장 · ≪파티션 (A &amp; B)≫ 자신의 효과 · 배틀 이외로 떠날 때 A · B 1장씩 등장 ·
+    /// ≪프래그먼트 (N)≫ 소멸할 때 진화원 N장 파기로 소멸하지 않음 · ≪디코이 (조건)≫ 다른 조건 디지몬이 상대 효과로 소멸할 때 이 디지몬을 소멸시켜 막음 ·
+    /// ≪가드≫ 다른 디지몬이 상대 효과로 떠날 때 이 디지몬을 소멸시켜 막음 · ≪트레이닝≫ [메인] 레스트 → 덱 위 1장을 진화원 맨 아래 (육성 에어리어에서도)
+    /// </summary>
+    private static string? ParseLeaveKeyword(string clause, bool inherited, CardScriptDefinition? def)
+    {
+        var m = Regex.Match(clause, @"^＜(?<k>Decode|Partition|Fragment|Decoy|Guard|Training)\s*(?:\((?<arg>.*)\))?\s*＞$", RegexOptions.IgnoreCase);
+        if (!m.Success) return $"미지원 키워드 형식: {clause}";
+        string k = m.Groups["k"].Value.ToLowerInvariant(), arg = m.Groups["arg"].Value.Trim();
+        var regs = new List<(EffectTrigger Trigger, Action<EffectContext> Act, Func<EffectContext, bool>? When)>();
+
+        switch (k)
+        {
+            case "decode":
+            {
+                if (ParseSpecifiedCard(arg) is not { } spec) return $"미지원 ≪디코드≫ 조건: {arg}";
+                regs.Add((EffectTrigger.ThisDigimonWouldLeave, c => PlayFromOwnSources(c, new[] { spec }, "≪디코드≫"),
+                    c => c.Engine.CurrentLeave is { } l && ReferenceEquals(l.Digimon, c.Self) && !l.InBattle));
+                break;
+            }
+            case "partition":
+            {
+                var specs = arg.Split('&').Select(p => ParseSpecifiedCard(p.Trim())).ToList();
+                if (specs.Count < 2 || specs.Any(s => s == null)) return $"미지원 ≪파티션≫ 조건: {arg}";
+                var list = specs.Select(s => s!).ToArray();
+                regs.Add((EffectTrigger.ThisDigimonWouldLeave, c => PlayFromOwnSources(c, list, "≪파티션≫"),
+                    c => c.Engine.CurrentLeave is { } l && ReferenceEquals(l.Digimon, c.Self) && !l.InBattle && !l.ByOwnEffect
+                         && list.All(s => c.Self!.EvolutionSources.Any(s))));
+                break;
+            }
+            case "fragment":
+            {
+                if (!int.TryParse(arg, out int n)) return $"미지원 ≪프래그먼트≫ 수: {arg}";
+                regs.Add((EffectTrigger.ThisDigimonWouldBeDeleted, c =>
+                {
+                    if (c.Self == null || c.Self.EvolutionSources.Count < n
+                        || !c.Engine.AskYesNo(c.Owner, c.Self, $"≪프래그먼트 ({n})≫ 진화원 {n}장을 파기하고 소멸을 막을까요?", recommended: true)) return;
+                    foreach (var x in c.Engine.ChooseCards(c.Owner, CardChoiceZone.DigivolutionCards, c.Self.EvolutionSources.Reverse().ToList(), n, upTo: false, $"≪프래그먼트 ({n})≫ 파기할 진화원 {n}장을 고르세요."))
+                        if (c.Self.TakeSource(y => ReferenceEquals(y, x)) != null) c.Owner.Trash.Add(x);
+                    c.PreventLeave = true;
+                    c.Log($"[≪프래그먼트 ({n})≫] [{c.Self.TopCard.Name}]: 진화원 {n}장을 파기하고 소멸하지 않습니다.");
+                }, c => c.Engine.CurrentLeave is { } l && ReferenceEquals(l.Digimon, c.Self)));
+                break;
+            }
+            case "decoy":
+            case "guard":
+            {
+                bool decoy = k == "decoy";
+                Func<CardData, bool>? spec = null;
+                if (decoy && (spec = ParseSpecifiedCard(arg)) == null) return $"미지원 ≪디코이≫ 조건: {arg}";
+                regs.Add((decoy ? EffectTrigger.AllyDigimonWouldBeDeleted : EffectTrigger.AllyDigimonWouldLeave, c =>
+                {
+                    if (c.Self == null || !c.Owner.BattleArea.Contains(c.Self)
+                        || !c.Engine.AskYesNo(c.Owner, c.Self, $"{(decoy ? "≪디코이≫" : "≪가드≫")} [{c.Self.TopCard.Name}]을(를) 소멸시켜 [{c.Other!.TopCard.Name}]을(를) 지킬까요?",
+                            recommended: c.Other!.TopCard.Level >= c.Self.TopCard.Level)) return;
+                    c.Log($"[{(decoy ? "≪디코이≫" : "≪가드≫")}] [{c.Self.TopCard.Name}]을(를) 소멸시켜 [{c.Other.TopCard.Name}]을(를) 지킵니다.");
+                    c.DeleteOwn(c.Self);
+                    c.PreventLeave = true;
+                }, c => c.Engine.CurrentLeave is { } l && !l.InBattle && !l.ByOwnEffect && ReferenceEquals(l.Digimon, c.Other)
+                        && !ReferenceEquals(c.Other, c.Self) && (spec == null || spec(c.Other!.TopCard))));
+                break;
+            }
+            case "training":
+                def?.AllowBreedingActivation();
+                regs.Add((EffectTrigger.ActivateMain, c =>
+                {
+                    if (c.Self == null || c.Self.IsSuspended || c.Owner.MainDeck.Count == 0) { c.StepsRan = true; return; }
+                    c.Engine.Suspend(c.Self);
+                    c.Self.AddBottomSource(c.Owner.MainDeck[0]);
+                    c.Owner.MainDeck.RemoveAt(0);
+                    c.RecalculateFieldBuffs();
+                    c.Log($"[≪트레이닝≫] [{c.Self.TopCard.Name}]: 레스트 → 덱 위 1장을 진화원 맨 아래에");
+                }, null));
+                break;
+        }
+        if (def != null)
+            foreach (var (t, act, when) in regs)
+            {
+                if (inherited) def.Inherited(t, act, when);
+                else def.On(t, act, when);
+            }
+        return null;
+    }
+
+    /// <summary>키워드의 "지정 카드" 조건: "[Aegiomon]" · "Blue Lv.4" · "Lv.4 or lower w/[Agumon]/[Greymon] in name or w/[ME]/[VB] trait" · "[Bagra Army] trait" · "Black"</summary>
+    private static Func<CardData, bool>? ParseSpecifiedCard(string spec)
+    {
+        spec = spec.Trim();
+        Match m;
+        if (Regex.IsMatch(spec, @"^\[[^\]]+\](?:\s*/\s*\[[^\]]+\])*$"))
+        {
+            var names = Regex.Matches(spec, @"\[([^\]]+)\]").Select(x => x.Groups[1].Value).ToList();
+            return c => names.Any(n => c.Name.Equals(n, StringComparison.OrdinalIgnoreCase) || TargetSpec.NameHas(c, n));
+        }
+        if ((m = Regex.Match(spec, $@"^(?<x>\[[^\]]+\](?:\s*/\s*\[[^\]]+\])*) trait$", RegexOptions.IgnoreCase)).Success)
+        {
+            var xs = Regex.Matches(m.Groups["x"].Value, @"\[([^\]]+)\]").Select(x => x.Groups[1].Value).ToList();
+            return c => xs.Any(x => TargetSpec.HasTrait(c, x));
+        }
+        if ((m = Regex.Match(spec, $@"^(?<colors>(?:{Colors})(?:/(?:{Colors}))*)(?: Lv\.(?<lv>\d+))?$", RegexOptions.IgnoreCase)).Success)
+        {
+            var colors = Regex.Matches(m.Groups["colors"].Value, Colors, RegexOptions.IgnoreCase).Select(x => Enum.Parse<CardColor>(x.Value, ignoreCase: true)).ToList();
+            int lv = m.Groups["lv"].Success ? int.Parse(m.Groups["lv"].Value) : 0;
+            return c => c.Type == CardType.Digimon && c.AllColors.Any(colors.Contains) && (lv == 0 || c.Level == lv);
+        }
+        if ((m = Regex.Match(spec, @"^Lv\.(?<lv>\d+)(?<low> or lower)?\s*(?<rest>.*)$", RegexOptions.IgnoreCase)).Success)
+        {
+            int lv = int.Parse(m.Groups["lv"].Value); bool low = m.Groups["low"].Success;
+            var ors = new List<Func<CardData, bool>>();
+            foreach (Match w in Regex.Matches(m.Groups["rest"].Value, @"w/(?<names>(?:\[[^\]]+\]/?)+)\s*(?<kind>in name|in any trait|in any of its traits|trait)", RegexOptions.IgnoreCase))
+            {
+                var xs = Regex.Matches(w.Groups["names"].Value, @"\[([^\]]+)\]").Select(x => x.Groups[1].Value).ToList();
+                ors.Add(w.Groups["kind"].Value.Equals("in name", StringComparison.OrdinalIgnoreCase)
+                    ? c => xs.Any(x => TargetSpec.NameHas(c, x)) : c => xs.Any(x => TargetSpec.HasTrait(c, x)));
+            }
+            if (m.Groups["rest"].Value.Trim().Length > 0 && ors.Count == 0) return null;
+            return c => c.Type == CardType.Digimon && (low ? c.Level <= lv : c.Level == lv) && (ors.Count == 0 || ors.Any(f => f(c)));
+        }
+        return null;
+    }
+
+    /// <summary>진화원에서 지정 카드를 1장씩 코스트 없이 등장 ("~할 수 있다" — 한 번 묻는다)</summary>
+    private static void PlayFromOwnSources(EffectContext c, IReadOnlyList<Func<CardData, bool>> specs, string label)
+    {
+        if (c.Self == null || !specs.Any(s => c.Self.EvolutionSources.Any(x => x.Type == CardType.Digimon && s(x)))) return;
+        if (!c.Engine.AskYesNo(c.Owner, c.Self, $"{label} [{c.Self.TopCard.Name}]의 진화원에서 지정 카드를 코스트 없이 등장시킬까요?", recommended: true)) return;
+        var played = new List<string>();
+        foreach (var spec in specs)
+        {
+            var pick = c.Engine.ChooseCards(c.Owner, CardChoiceZone.DigivolutionCards,
+                c.Self.EvolutionSources.Where(x => x.Type == CardType.Digimon && spec(x)).OrderByDescending(x => x.Level).ToList(), 1, upTo: false,
+                $"{label} 등장시킬 진화원을 고르세요.").FirstOrDefault();
+            if (pick == null || c.Owner.BattleArea.Count >= 12 || c.Self.TakeSource(y => ReferenceEquals(y, pick)) == null) continue;
+            c.Engine.PlayWithoutCost(c.Owner, pick);
+            played.Add(pick.Name);
+        }
+        if (played.Count > 0) c.Log($"[{label}] 진화원의 [{string.Join(", ", played)}] 코스트 없이 등장");
     }
 
     /// <summary>"would leave the battle area" 뒤의 단서 → 조건 (읽지 못하면 null)</summary>

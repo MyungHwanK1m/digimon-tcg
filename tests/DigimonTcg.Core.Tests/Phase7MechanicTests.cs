@@ -174,6 +174,40 @@ public class Phase7MechanicTests
     }
 
     [Fact]
+    public void Fragment_ShouldTrashSourcesInsteadOfBeingDeleted()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var frag = new CardInstance(Api("P7-FRAG-A", 3, 2000), 1);
+        frag.Evolve(Api("P7-FRAG-B", 4, 4000));
+        frag.Evolve(Api("P7-FRAG", 5, 6000, main: "＜Fragment (2)＞ (When this Digimon would be deleted, by trashing any 2 of its digivolution cards, it isn't deleted.)"));
+        state.DummyOpponent.BattleArea.Add(frag);
+        var killer = Api("P7-FRAG-KILL", 4, 5000, main: "[On Play] Delete 1 of your opponent's Digimon.");
+        state.Player.Hand.Add(killer);
+
+        engine.PlayCard(killer);
+
+        Assert.Contains(frag, state.DummyOpponent.BattleArea);
+        Assert.Empty(frag.EvolutionSources);
+    }
+
+    [Fact]
+    public void Decode_ShouldPlayTheSpecifiedSourceWhenLeavingOutsideBattle()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var source = Api("P7-DEC-SRC", 3, 3000);
+        var dec = new CardInstance(source, 1);
+        dec.Evolve(Api("P7-DEC", 4, 5000, main: "＜Decode ([P7-DEC-SRC])＞ (When this Digimon would leave the battle area other than in battle, you may play 1 [P7-DEC-SRC] from its digivolution cards without paying the cost.)"));
+        state.Player.BattleArea.Add(dec);
+        var killer = Api("P7-DEC-KILL", 0, 0, type: CardType.Option, playCost: 0, main: "[Main] Delete 1 of your Digimon.");
+        state.Player.Hand.Add(killer);
+
+        engine.PlayCard(killer);
+
+        Assert.DoesNotContain(dec, state.Player.BattleArea);
+        Assert.Contains(state.Player.BattleArea, d => d.TopCard == source);
+    }
+
+    [Fact]
     public void Iceclad_ShouldCompareDigivolutionCardCounts()
     {
         var (state, engine, cards) = NewMainPhase();

@@ -179,6 +179,9 @@ public sealed class CardScript
     /// <summary>≪머티리얼 세이브 N≫ — 이 디지몬이 소멸할 때 진화원 N장을 자신의 테이머 아래에 놓을 수 있다 (0이면 없음)</summary>
     public int MaterialSave { get; set; }
 
+    /// <summary>≪트레이닝≫ — 육성 에어리어에서도 [메인] 기동 효과를 쓸 수 있다</summary>
+    public bool ActivateInBreeding { get; set; }
+
     /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
     public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }
 
