@@ -1,0 +1,26 @@
+<Project>
+  <!--
+    디지몬 TCG 앱 버전 — 여기 한 곳에서만 바꾼다 (Core · Wpf · Cli가 이 파일을 Import).
+    규칙 (SemVer 0.x, 정식 출시 전):
+      - 새 기능 · 규칙 변경이 묶여 배포하면 MINOR를 올린다  (0.8.0 → 0.9.0)
+      - 버그 수정만 배포하면 PATCH를 올린다                 (0.8.0 → 0.8.1)
+      - 올린 뒤 CHANGELOG.md에 기록하고, 그 커밋에 git 태그 vX.Y.Z를 붙인다
+    빌드할 때 git 커밋 해시가 자동으로 붙어 앱에는 "v0.8.0 (bf07dad)"처럼 보인다.
+  -->
+  <PropertyGroup>
+    <Version>0.8.1</Version>
+    <Product>DIGIMON TCG : DIGITAL COLOSSEUM</Product>
+    <Company>DigimonTcg</Company>
+  </PropertyGroup>
+
+  <!-- 빌드한 커밋 해시를 InformationalVersion에 붙인다 (git이 없거나 실패하면 생략) -->
+  <Target Name="DigimonTcgStampGitRevision" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo" Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildThisFileDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_DigimonTcgGitHash" />
+      <Output TaskParameter="ExitCode" PropertyName="_DigimonTcgGitExit" />
+    </Exec>
+    <PropertyGroup Condition="'$(_DigimonTcgGitExit)' == '0' And '$(_DigimonTcgGitHash)' != ''">
+      <SourceRevisionId>$(_DigimonTcgGitHash.Trim())</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+</Project>

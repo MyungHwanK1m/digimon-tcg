@@ -64,6 +64,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // 앱 버전 표시 (src/DigimonTcg.Version.props + 빌드한 커밋)
+        TxtAppVersion.Text = DigimonTcg.Core.AppVersion.Display;
+        Title = $"{Title}  {DigimonTcg.Core.AppVersion.Display}";
+
         _catalogService = new CardCatalogService();
         _savedDeckStore = new SavedDeckStore(Path.Combine(Path.GetDirectoryName(_catalogService.ImagesDirectoryPath)!, "saved_decks.json"));
         _gameState = new GameState();

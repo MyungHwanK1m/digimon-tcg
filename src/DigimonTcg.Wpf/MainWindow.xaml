@@ -114,7 +114,7 @@
 
                 <!-- 3) 하단: 출전 덱 / 버전 -->
                 <DockPanel VerticalAlignment="Bottom" Margin="116,0,32,24" IsHitTestVisible="False">
-                    <TextBlock Text="RULE ENGINE v2.0" DockPanel.Dock="Right" Style="{StaticResource Duel.ZoneLabel}"/>
+                    <TextBlock x:Name="TxtAppVersion" Text="v0.0.0" DockPanel.Dock="Right" Style="{StaticResource Duel.ZoneLabel}" ToolTip="앱 버전 (빌드한 커밋)"/>
                     <TextBlock x:Name="TxtLobbyActiveDeckName" Text="" Foreground="{StaticResource Neo.Brush.Text.Muted}" FontSize="12" VerticalAlignment="Center"/>
                 </DockPanel>
             </Grid>

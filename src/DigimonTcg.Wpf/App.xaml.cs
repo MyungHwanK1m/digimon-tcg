@@ -23,7 +23,7 @@ public partial class App : Application
         string logPath = Path.Combine(AppContext.BaseDirectory, "crash_log.txt");
         try
         {
-            File.AppendAllText(logPath, $"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} ====\n{e.Exception}\n\n");
+            File.AppendAllText(logPath, $"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} · {DigimonTcg.Core.AppVersion.Display} ====\n{e.Exception}\n\n");
         }
         catch
         {
@@ -32,7 +32,7 @@ public partial class App : Application
 
         MessageBox.Show(
             $"예상하지 못한 오류가 발생했지만 게임을 계속 진행합니다.\n\n{e.Exception.Message}\n\n자세한 내용: {logPath}",
-            "DIGIMON TCG - 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+            $"DIGIMON TCG {DigimonTcg.Core.AppVersion.Display} - 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
         e.Handled = true;
     }
 
