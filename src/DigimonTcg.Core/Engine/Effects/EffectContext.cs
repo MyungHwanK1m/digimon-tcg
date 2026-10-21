@@ -82,6 +82,9 @@ public sealed class EffectContext
     /// <summary>옵션: "link this card to ~" — 이 카드가 링크 카드가 되었으므로 사용 뒤 트래시로 보내지 않는다</summary>
     public bool LinkedThisCard { get; set; }
 
+    /// <summary>옵션: "place this card face up as the top/bottom security card" — 사용 뒤 트래시 대신 시큐리티에 앞면으로 (true = 맨 위)</summary>
+    public bool? ThisCardToSecurityTop { get; set; }
+
     /// <summary>문장 파서의 문장을 하나라도 처리하려 했는지 · 그중 하나라도 실제로 처리했는지 — [메인] 기동 효과가 아무것도 하지 않았으면 사용으로 치지 않는다</summary>
     public bool StepsRan { get; set; }
     public bool AnyStepResolved { get; set; }

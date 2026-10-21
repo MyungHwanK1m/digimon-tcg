@@ -569,4 +569,93 @@ public class Phase7MechanicTests
         Assert.Same(mover, state.Player.BreedingArea);
         Assert.Empty(state.Player.BattleArea);
     }
+
+    // ---- 앞면 시큐리티 ----
+
+    [Fact]
+    public void PlaceThisCardFaceUp_ShouldPutTheOptionFaceUpAtTheBottomAndFireThePlacedTrigger()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 3;
+        var oldBottom = Api("P7-FU-OLD", 3, 1000);
+        state.Player.SecurityStack.AddRange(new[] { Api("P7-FU-TOP", 3, 1000), oldBottom });
+        state.Player.Tamers.Add(Api("P7-FU-TAMER", 0, 0, type: CardType.Tamer,
+            main: "[All Turns] When cards are placed face up in your security stack, gain 1 memory."));
+        var opt = Api("P7-FU-OPT", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Main] Add your bottom security card to the hand and place this card face up as the bottom security card.");
+        state.Player.Hand.Add(opt);
+
+        engine.PlayCard(opt);
+
+        Assert.Contains(oldBottom, state.Player.Hand);
+        var bottom = state.Player.SecurityStack.Last();
+        Assert.Equal("P7-FU-OPT", bottom.CardId);
+        Assert.True(GoldfishEngine.IsFaceUp(state.Player, bottom));
+        Assert.False(GoldfishEngine.IsFaceUp(state.Player, state.Player.SecurityStack[0]));
+        Assert.DoesNotContain(state.Player.Trash, c => c.CardId == "P7-FU-OPT");
+        Assert.Equal(4, state.MemoryGauge);                                  // 앞면으로 놓였을 때 +1
+    }
+
+    [Fact]
+    public void FlipAndCountFaceUp_ShouldOnlyFlipThatPositionEvenWithSharedCardObjects()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var shared = Api("P7-FU2-SHARED", 3, 1000);
+        state.DummyOpponent.SecurityStack.AddRange(new[] { shared, shared });   // 같은 객체 2장
+        var flipper = Api("P7-FU2", 4, 5000, main: "[On Play] Flip your opponent's top face-down security card face up.");
+        state.Player.Hand.Add(flipper);
+        state.MemoryGauge = 5;
+
+        engine.PlayCard(flipper);
+
+        Assert.Single(GoldfishEngine.FaceUpCards(state.DummyOpponent));
+        Assert.True(GoldfishEngine.IsFaceUp(state.DummyOpponent, state.DummyOpponent.SecurityStack[0]));
+        Assert.False(GoldfishEngine.IsFaceUp(state.DummyOpponent, state.DummyOpponent.SecurityStack[1]));
+    }
+
+    [Fact]
+    public void CheckingAFaceUpSecurityCard_ShouldFireTheCheckTriggerAndWasFaceUpCondition()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 3;
+        var attacker = new CardInstance(Api("P7-FU3-ATK", 5, 9000,
+            main: "[Your Turn] When this Digimon checks a face-up security card, gain 1 memory."), 1);
+        state.Player.BattleArea.Add(attacker);
+        var sec = Api("P7-FU3-SEC", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Security] If this card was face-up, gain 2 memory.");
+        engine.PlaceSecurityFaceUp(state.DummyOpponent, sec, top: true);
+
+        engine.AttackSecurityOrDirect(attacker);
+
+        Assert.Empty(state.DummyOpponent.FaceUpSecurity.Where(c => state.DummyOpponent.SecurityStack.Contains(c)));
+        Assert.Equal(3 + 1 - 2, state.MemoryGauge);                          // 체크 +1 (내 효과), 앞면이었으므로 상대(시큐리티 주인) 메모리 +2 → 플레이어 기준 -2
+    }
+
+    [Fact]
+    public void FaceUpCosts_ShouldPlaceFromHandAndFlipFaceDown()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 3;
+        state.Player.Tamers.Add(Api("P7-FU4-T", 0, 0, type: CardType.Tamer));   // 옵션 색 조건
+        var royal = Api("P7-FU4-ROYAL", 4, 5000);
+        state.Player.Hand.Add(royal);
+        state.Player.SecurityStack.Add(Api("P7-FU4-SEC", 3, 1000));
+        var opt = Api("P7-FU4-OPT", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Main] By placing 1 [P7-FU4-ROYAL] from your hand face up as the bottom security card, gain 2 memory.");
+        state.Player.Hand.Add(opt);
+
+        engine.PlayCard(opt);
+
+        Assert.Equal(5, state.MemoryGauge);
+        Assert.Equal("P7-FU4-ROYAL", state.Player.SecurityStack.Last().CardId);
+        Assert.Single(GoldfishEngine.FaceUpCards(state.Player));
+
+        var opt2 = Api("P7-FU4-OPT2", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Main] If you have a face-up security card, by flipping your top face-up security card face down, gain 1 memory.");
+        state.Player.Hand.Add(opt2);
+        engine.PlayCard(opt2);
+
+        Assert.Equal(6, state.MemoryGauge);
+        Assert.Empty(GoldfishEngine.FaceUpCards(state.Player));
+    }
 }

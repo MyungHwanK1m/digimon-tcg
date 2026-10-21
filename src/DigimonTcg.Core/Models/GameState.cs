@@ -47,6 +47,9 @@ public class PlayerZones
     // 배틀 에어리어에 놓인 옵션 카드 (≪딜레이≫ — 놓은 다음 턴부터 파기해서 효과를 발휘한다)
     public List<PlacedOption> OptionsInPlay { get; set; } = new List<PlacedOption>();
 
+    // 앞면으로 놓인 시큐리티 카드 (참조로 구분 — 앞면으로 놓을 때 엔진이 카드를 복사해 위치마다 구분된다)
+    public HashSet<CardData> FaceUpSecurity { get; set; } = new HashSet<CardData>(ReferenceEqualityComparer.Instance);
+
     // 레스트 상태인 테이머 (같은 카드 객체가 여러 장일 수 있어 장 수로 센다) — 자신의 액티브 페이즈에 비운다
     public List<CardData> SuspendedTamers { get; set; } = new List<CardData>();
 

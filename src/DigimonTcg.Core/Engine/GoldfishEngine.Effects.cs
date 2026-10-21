@@ -276,6 +276,8 @@ public partial class GoldfishEngine
     /// </summary>
     public void RecalculateFieldBuffs()
     {
+        PruneFaceUp(State.Player);
+        PruneFaceUp(State.DummyOpponent);
         ApplyContinuousEffects(State.Player, State.DummyOpponent, State.PlayerAllSecurityAttackUntil);
         ApplyContinuousEffects(State.DummyOpponent, State.Player, State.OpponentAllSecurityAttackUntil);
     }
@@ -1026,6 +1028,15 @@ public partial class GoldfishEngine
             ApplyOnPlayEffects(owner, inst);
     }
 
+    /// <summary>효과로 코스트를 내고 등장 ("play ~ with the play cost reduced by N" · "for a play cost of N") — [등장 시] 효과 발휘</summary>
+    internal void PlayPayingCost(PlayerZones owner, CardData card, int cost)
+    {
+        AddMemory(owner, -cost);
+        if (ReferenceEquals(owner, State.Player)) State.TotalMemorySpent += cost;
+        EffectLog(owner, $"[효과] [{card.Name}] 등장 코스트 {cost} 지불");
+        PlayWithoutCost(owner, card);
+    }
+
     /// <summary>플레이어의 어택이 상대 효과로 바뀐 대상 (플레이어 어택 처리 중에만 쓰인다)</summary>
     private CardInstance? _playerAttackRedirect;
 
@@ -1507,6 +1518,7 @@ public partial class GoldfishEngine
         if (_effectDepth == 0)
             FlushPendingTriggers();
         if (optionCtx.LinkedThisCard) { }   // "link this card to ~" — 링크 카드가 되었다
+        else if (optionCtx.ThisCardToSecurityTop is bool secTop) PlaceSecurityFaceUp(owner, optionCard, secTop);   // "place this card face up as the bottom security card"
         else if (optionCtx.PlaceInBattleArea) PlaceOption(owner, optionCard);
         else owner.Trash.Add(optionCard);
         // "When you use an Option card" / "When a player uses an Option card"

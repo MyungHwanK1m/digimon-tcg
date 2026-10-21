@@ -441,20 +441,32 @@ AI가 패에서 링크하는 것은 아직 없다 (효과로 링크하는 것은
 
 남은 것(35절): [Breeding] 시점(육성 에어리어에서 발휘하는 효과 4장), [Hand] 기동, "A, or B" 고르기, 여러 단계가 섞인 로열 나이츠 · 이터 계열.
 
+### 앞면 시큐리티 — `GoldfishEngine.FaceUpSecurity.cs`
+| 항목 | 처리 |
+| :--- | :--- |
+| 상태 | PlayerZones.FaceUpSecurity (참조로 구분). 같은 카드 객체가 여러 장을 나타낼 수 있어, 앞면으로 놓거나 뒤집을 때 그 카드를 복사해 위치마다 앞/뒷면이 정확하다. 시큐리티를 떠나면 앞면 표시를 지운다 |
+| 시점 | "When cards are placed face up in your security stack (, if any of them have the [X] trait)" · "When face-up [X] trait cards are placed ~" · "When face-up cards are added to your opponent's security stack" · "When this Digimon / any of your Digimon check(s) a face-up security card" |
+| 동작 | "Place this card face up as the top/bottom security card"(옵션 [메인] — 사용 후 트래시 대신 · [소멸 시] — 트래시의 이 카드) · "Add your bottom security card to the hand and place this card face up ~" · "Place 1 ~ from your hand/trash face up as the top (or) bottom security card" · "Flip your opponent's top face-down security card face up" · "Add your top face-down security card to the hand" · "Play 1 face-up ~ from your security stack without paying the cost" · "place the top card of this Digimon face-up at the bottom of the security stack" · "For each of your face-up security cards, ~" |
+| 비용 · 조건 | "placing 1 ~ from your hand face up as the bottom security card" · "flipping your top face-up security card face down" · "you have (no) (색) face-up ([X]) security card(s)" · "[X] is face-up in your security stack" · [시큐리티] "If this card was face-up" · 색 조건 무시 "While you have no face-up security cards" |
+
+함께 한 것: "Play ~ from your hand with the play cost reduced by N / for a play cost of N" (코스트를 내고 등장 — 메모리가 상대 쪽으로 넘어가지 않는 카드만 후보). 화면 표시(앞면 카드)는 e1.
+
+남은 것(22절): "1 of those Digimon doesn't leave"류 떠나기 대체, 앞면 카드의 【등장 시】를 이 디지몬 효과로 발휘, 앞면 카드로 진화, 효과 최대 코스트 더하기.
+
 ### 사용자 확인 대상
 - **≪디코드≫와 DP 0 소멸**: Q&A에 직접 판정이 없다. "효과는 발휘하지만 소멸은 막지 못한다"로 구현 — 근거: 설명문 "배틀 이외", BT19-092 · BT19-002 판정(자신의 효과에도 유발), DP 0 소멸은 효과 처리 뒤 룰 처리.
 - **배틀 에어리어 → 육성 에어리어 이동**(P-143 등): 에어리어를 떠나는 것으로 보지 않아 ≪오버플로우≫ · 떠날 때 효과를 처리하지 않고 링크 카드도 그대로 둔다 — 근거: Q&A "육성 에어리어에 이동할 때 ≪오버플로우≫는 처리되지 않습니다(에어리어에서 벗어나지 않았으므로)". 링크 카드를 남기는 것은 추정.
 - **"If during an attack"**: 어택 선언부터 어택 종료(【어택 종료 시】 처리 전)까지로 판단.
 
 ### 지원률
-| 범위 | 7단계 1차 끝 | 링크 | 육성 · 디지타마 |
-| :--- | ---: | ---: | ---: |
-| API 카드 전체 효과 절 10,279개 | 54.8% (5,634) | 55.7% (5,727) | **56.5% (5,810)** |
-| 미지원 절 | 4,645 | 4,552 | 4,469 |
-| 링크 · 육성 메커닉 미지원 절 | 168 · 111 | 76 · 90 | 76 · 35 |
-| 우선 세트 (ST1 ~ ST6, BT1 ~ BT5) | 90.4% | 90.4% | 90.7% |
+| 범위 | 7단계 1차 끝 | 링크 | 육성 · 디지타마 | 앞면 시큐리티 |
+| :--- | ---: | ---: | ---: | ---: |
+| API 카드 전체 효과 절 10,279개 | 54.8% (5,634) | 55.7% (5,727) | 56.5% (5,810) | **57.3% (5,891)** |
+| 미지원 절 | 4,645 | 4,552 | 4,469 | 4,388 |
+| 그 메커닉의 미지원 절 | — | 168 → 76 | 111(측정 90) → 35 | 85 → 22 |
+| 우선 세트 (ST1 ~ ST6, BT1 ~ BT5) | 90.4% | 90.4% | 90.7% | 90.7% |
 
 ### 검증
-- 테스트 239개 통과 (링크 3개 · 육성 5개 추가).
-- 추천 덱 2,880판(무작위 · 탐욕 정책): 예외 0, 모두 종료, 결과가 1차 끝과 완전히 같다 (추천 덱에는 링크 · 육성 효과 카드가 없다).
-- API 카드 덱 600판: 예외 0, 모두 종료. 자동 스크립트 효과 7,632개 개별 실행: 예외 0.
+- 테스트 243개 통과 (링크 3개 · 육성 5개 · 앞면 시큐리티 4개 추가).
+- 추천 덱 2,880판(무작위 · 탐욕 정책): 메커닉마다 예외 0, 모두 종료, 결과가 1차 끝과 완전히 같다 (추천 덱에는 이 메커닉들의 카드가 없다).
+- API 카드 덱 600판: 메커닉마다 예외 0, 모두 종료. 자동 스크립트 효과 개별 실행(앞면 시큐리티 뒤 7,782개): 예외 0.

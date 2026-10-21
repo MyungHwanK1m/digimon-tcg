@@ -39,6 +39,12 @@ internal static class SentenceParser
         [EffectTrigger.StartOfYourMainPhase] = "자신의 메인 페이즈 개시 시", [EffectTrigger.EndOfYourTurn] = "자신의 턴 종료 시",
         [EffectTrigger.DeletedOpponentInBattle] = "배틀에서 소멸시켰을 때", [EffectTrigger.AttackBlocked] = "블록당했을 때",
         [EffectTrigger.EndOfOpponentsTurn] = "상대의 턴 종료 시",
+        // 7단계 2차 — "시큐리티"라는 말은 넣지 않는다 (Emit이 [시큐리티] 결과 메시지로 보낸다)
+        [EffectTrigger.OnLinked] = "링크 시", [EffectTrigger.ThisDigimonLinked] = "링크되었을 때", [EffectTrigger.AllyDigimonLinked] = "자신의 디지몬이 링크되었을 때",
+        [EffectTrigger.AllyHatched] = "부화했을 때", [EffectTrigger.AllyDigimonMovedFromBreeding] = "육성 에어리어에서 이동했을 때",
+        [EffectTrigger.OpponentDigimonMovedFromBreeding] = "상대 디지몬이 육성 에어리어에서 이동했을 때",
+        [EffectTrigger.AllyFaceUpSecurityPlaced] = "앞면으로 놓였을 때", [EffectTrigger.OpponentFaceUpSecurityPlaced] = "상대 카드가 앞면으로 놓였을 때",
+        [EffectTrigger.AllyCheckedFaceUpSecurity] = "앞면 카드를 체크했을 때",
     };
 
     private static readonly Dictionary<string, Keyword> GrantableKeywords = new(StringComparer.OrdinalIgnoreCase)
@@ -488,6 +494,20 @@ internal static class SentenceParser
             return One(EffectTrigger.OpponentDigimonMovedFromBreeding);
         if (Regex.IsMatch(ev, @"^you hatch (?:a Digi-Egg )?in (?:the|your) breeding area$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.AllyHatched);
+        // 앞면 시큐리티: "When this Digimon checks a face-up security card" · "When any of your Digimon check face-up security cards"
+        if (Regex.IsMatch(ev, @"^this Digimon checks (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyCheckedFaceUpSecurity, c => ReferenceEquals(c.Other, c.Self));
+        if (Regex.IsMatch(ev, @"^(?:any of |one of )?your Digimon checks? (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyCheckedFaceUpSecurity);
+        // "When cards are placed face up in your security stack" · "When face-up [Royal Base] trait cards are placed in your security stack"
+        if ((m = Regex.Match(ev, $@"^(?:face[- ]up (?:(?<x>{TargetSpec.NameList}) (?:trait )?)?cards? (?:are|is) (?:placed|added) (?:in|to)|cards? (?:are|is) placed face[- ]up in) your (?<opp>opponent's )?security stack$", RegexOptions.IgnoreCase)).Success)
+        {
+            var xs = m.Groups["x"].Success ? TargetSpec.Names(m.Groups["x"].Value) : null;
+            return One(m.Groups["opp"].Success ? EffectTrigger.OpponentFaceUpSecurityPlaced : EffectTrigger.AllyFaceUpSecurityPlaced,
+                xs == null ? null : c => c.TriggerCard != null && xs.Any(x => TargetSpec.HasTrait(c.TriggerCard, x) || TargetSpec.NameHas(c.TriggerCard, x)));
+        }
+        if (Regex.IsMatch(ev, @"^face[- ]up cards? (?:are|is) (?:placed|added) (?:in|to) your opponent's security stack$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.OpponentFaceUpSecurityPlaced);
         if (Regex.IsMatch(ev, @"^this card is trashed (?:due to|by) activating this Digimon's ＜Digi-Burst＞$|^activating this Digimon's ＜Digi-Burst＞ trashes this card$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.DigiBurstTrashedThis);
         if (Regex.IsMatch(ev, @"^(?:one of |any of )?your Digimon activates ＜Digi-Burst＞$", RegexOptions.IgnoreCase))
@@ -982,7 +1002,21 @@ internal static class SentenceParser
         cond = cond.Trim();
         Match m;
         if (Regex.IsMatch(cond, @"^you have (?:a|any) Tamers?$", RegexOptions.IgnoreCase)) return z => z.Tamers.Count > 0;
-        if (Regex.IsMatch(cond, @"^you have no face-up security cards$", RegexOptions.IgnoreCase)) return _ => true;   // 앞면 시큐리티는 아직 없다
+        // 앞면 시큐리티: "you have no (blue) face-up ([X]) security cards" · "you have a face-up ([X]) security card" · "[X] is face-up in your security stack"
+        if ((m = Regex.Match(cond, $@"^you have (?<q>no|a|an|any|(?<n>\d+) or more) (?:(?<color>{Colors}) )?face[- ]up (?:(?<x>{TargetSpec.NameList}) )?(?:trait )?security cards?$", RegexOptions.IgnoreCase)).Success)
+        {
+            bool none = m.Groups["q"].Value.Equals("no", StringComparison.OrdinalIgnoreCase);
+            int n = m.Groups["n"].Success ? int.Parse(m.Groups["n"].Value) : 1;
+            CardColor? color = m.Groups["color"].Success ? Enum.Parse<CardColor>(m.Groups["color"].Value, ignoreCase: true) : null;
+            var xs = m.Groups["x"].Success ? TargetSpec.Names(m.Groups["x"].Value) : null;
+            Func<CardData, bool> ok = x => (color == null || x.AllColors.Contains(color.Value)) && (xs == null || xs.Any(v => TargetSpec.NameHas(x, v) || TargetSpec.HasTrait(x, v)));
+            return z => none ? !GoldfishEngine.FaceUpCards(z).Any(ok) : GoldfishEngine.FaceUpCards(z).Count(ok) >= n;
+        }
+        if ((m = Regex.Match(cond, $@"^(?<x>{TargetSpec.NameList}) is face[- ]up in your security stack$", RegexOptions.IgnoreCase)).Success)
+        {
+            var xs = TargetSpec.Names(m.Groups["x"].Value);
+            return z => GoldfishEngine.FaceUpCards(z).Any(x => xs.Any(v => TargetSpec.NameHas(x, v)));
+        }
         // 육성: "your breeding area is empty" · "you have a Digimon in your breeding area" · "you have [Mother Eater] in the breeding area"
         if (Regex.IsMatch(cond, @"^(?:your breeding area is empty|you have no (?:Digimon|cards) in (?:the|your) breeding area|you don't have (?:a Digimon|any cards) in (?:the|your) breeding area)$", RegexOptions.IgnoreCase))
             return z => z.BreedingArea == null;
@@ -1422,6 +1456,8 @@ internal static class SentenceParser
         { int per = Per(m); return (o, _, _) => o.SecurityStack.Count / per; }
         if ((m = Regex.Match(counter, @"^(?:(?<n>\d+) )?(?:security cards? your opponent has|cards? in your opponent's security stack)$", RegexOptions.IgnoreCase)).Success)
         { int per = Per(m); return (_, e, _) => e.SecurityStack.Count / per; }
+        if (Regex.IsMatch(counter, @"^(?:of your face[- ]up security cards|face[- ]up security cards? you have)$", RegexOptions.IgnoreCase))
+            return (o, _, _) => GoldfishEngine.FaceUpCards(o).Count;   // 앞면 시큐리티
         if (Regex.IsMatch(counter, @"^(?:of your opponent's suspended Digimon|suspended Digimon your opponent has)$", RegexOptions.IgnoreCase))
             return (_, e, _) => e.BattleArea.Count(d => d.IsSuspended);
         if (Regex.IsMatch(counter, @"^(?:of your opponent's Digimon|Digimon your opponent has)(?: in play)?$", RegexOptions.IgnoreCase))
@@ -1514,6 +1550,27 @@ internal static class SentenceParser
                         }
                     },
                     c => c.Owner.Hand.Count >= n + 2, $"패에서 조건에 맞는 카드 {n}장을 버려");
+        }
+        // 앞면 시큐리티: "flipping your top face-up security card face down"
+        if (Regex.IsMatch(cost, @"^flipping your top face[- ]up security card face[- ]down$", RegexOptions.IgnoreCase))
+            return (c => GoldfishEngine.FaceUpCards(c.Owner).Count > 0, c => GoldfishEngine.FlipTopFaceUpDown(c.Owner), _ => true, "앞면 시큐리티 1장을 뒷면으로 뒤집어");
+        // "placing 1 Digimon card with the [Royal Base] trait from your hand face up as the bottom security card" · "~ in your hand ~" · "~ from your hand or trash ~"
+        if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) (?:from|in) (?<from>your hand or (?:your )?trash|your trash|your hand) face[- ]up as (?:the|your) (?<pos>top|bottom) security card$", RegexOptions.IgnoreCase)).Success
+            && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } fuCost)
+        {
+            var (n, match) = fuCost;
+            bool top = m.Groups["pos"].Value.Equals("top", StringComparison.OrdinalIgnoreCase);
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash");
+            IEnumerable<PoolCard> Pool(EffectContext c) => (fromHand ? PoolFrom(c.Owner.Hand, match) : Enumerable.Empty<PoolCard>()).Concat(fromTrash ? PoolFrom(c.Owner.Trash, match) : Enumerable.Empty<PoolCard>());
+            return (c => Pool(c).Count() >= n,
+                    c =>
+                    {
+                        foreach (var p in ChooseFromPool(c, fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash, Pool(c).OrderBy(x => x.Card.PlayCost).ToList(), n,
+                                     $"[{c.Card.Name}] 비용으로 시큐리티에 앞면으로 놓을 카드 {n}장을 고르세요."))
+                            if (TakeFromPool(c, p)) c.Engine.PlaceSecurityFaceUp(c.Owner, p.Card, top);
+                    },
+                    _ => true, $"카드 {n}장을 시큐리티에 앞면으로 놓아");
         }
         // "playing 1 [Lucemon: Larva] from your trash to your empty breeding area without paying the cost" — 육성 에어리어에 등장 (【등장 시】 없음)
         if ((m = Regex.Match(cost, @"^playing (?<pick>.+?) from (?<from>your hand or (?:your )?trash|your trash|your hand) to (?:your empty|an empty space in your|the empty space in your) breeding area without paying (?:the|its) cost$", RegexOptions.IgnoreCase)).Success
@@ -1662,6 +1719,9 @@ internal static class SentenceParser
         if (ParseDigimonCondition(cond) is { } dc) return c => dc(c.Self);
         if (ParseSideCondition(cond) is { } sc) return c => sc(c.Owner, c.Enemy);
         if (Regex.IsMatch(cond, @"^(?:it is )?during an attack$", RegexOptions.IgnoreCase)) return c => c.Engine.CurrentAttacker != null;   // 어택 선언 ~ 어택 종료
+        if (Regex.IsMatch(cond, @"^this card was face[- ]up$", RegexOptions.IgnoreCase)) return c => c.Engine.LastCheckedWasFaceUp;   // [시큐리티] 체크한 이 카드가 앞면이었는지
+        if (Regex.Match(cond, $@"^any of them (?:have|has) the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase) is { Success: true } anyOf)
+        { var xs = TargetSpec.Names(anyOf.Groups["x"].Value); return c => c.TriggerCard != null && xs.Any(x => TargetSpec.HasTrait(c.TriggerCard, x)); }   // "When cards are placed face up ~, if any of them have the [X] trait"
         Match m;
         if ((m = Regex.Match(cond, @"^your hand has (?<n>\d+) or (?<dir>fewer|less|more) cards$", RegexOptions.IgnoreCase)).Success)
         { int n = int.Parse(m.Groups["n"].Value); bool more = m.Groups["dir"].Value == "more"; return c => more ? c.Owner.Hand.Count >= n : c.Owner.Hand.Count <= n; }
@@ -1870,6 +1930,132 @@ internal static class SentenceParser
                           && c.Engine.MoveBattleToBreeding(c.Owner, c.Self);
                 if (!ok) c.LastStepResolved = false;
                 Emit(c, label, ok ? $"[{c.Self!.TopCard.Name}] 배틀 에어리어 → 육성 에어리어" : "육성 에어리어로 옮기지 않았습니다");
+            }, null);
+        }
+        // ---- 앞면 시큐리티 ----
+        // "Add your bottom security card to the hand and place this card face up as the bottom security card" — 두 동작
+        if ((m = Regex.Match(s, @"^(?<l>Add your (?:top |bottom )?(?:face[- ]down )?security card to (?:the|your) hand) and (?<r>place this card face[- ]up .+)$", RegexOptions.IgnoreCase)).Success)
+        {
+            var a = ParseAction(m.Groups["l"].Value, card, triggers);
+            var b = ParseAction("P" + m.Groups["r"].Value[1..], card, triggers);
+            if (a.Error == null && b.Error == null) { var (actA, actB) = (a.Act!, b.Act!); return (c => { actA(c); actB(c); }, null); }
+        }
+        // "Place this card face up as the bottom security card" (옵션 [메인] · [소멸 시]) · "place this Digimon face up as the bottom security card"
+        if ((m = Regex.Match(s, @"^Place this (?:card|Digimon) face[- ]up as (?:the|your) (?<pos>top|bottom) security card$", RegexOptions.IgnoreCase)).Success)
+        {
+            bool top = m.Groups["pos"].Value.Equals("top", StringComparison.OrdinalIgnoreCase);
+            bool optionMain = card.Type == CardType.Option && triggers.Contains(EffectTrigger.Main);
+            return (c =>
+            {
+                if (optionMain) { c.ThisCardToSecurityTop = top; Emit(c, label, $"이 카드를 시큐리티 맨 {(top ? "위" : "아래")}에 앞면으로"); return; }
+                // [소멸 시] 등: 트래시(또는 패)에 있는 이 카드
+                if (!(c.Owner.Trash.Remove(c.Card) || c.Owner.Hand.Remove(c.Card))) { c.LastStepResolved = false; Emit(c, label, "이 카드를 놓을 수 없습니다"); return; }
+                c.Engine.PlaceSecurityFaceUp(c.Owner, c.Card, top);
+                Emit(c, label, $"이 카드를 시큐리티 맨 {(top ? "위" : "아래")}에 앞면으로");
+            }, null);
+        }
+        // "Place 1 [Royal Base] trait Digimon card from your hand face up as the bottom security card" · "~ as the top or bottom security card"
+        if ((m = Regex.Match(s, @"^Place (?<pick>.+?) from (?<from>your hand or (?:from )?(?:your )?trash|your trash|your hand) face[- ]up as (?:the|your) (?<pos>top or bottom|top|bottom) security cards?$", RegexOptions.IgnoreCase)).Success
+            && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } fuPick)
+        {
+            var (count, match) = fuPick;
+            string pos = m.Groups["pos"].Value.ToLowerInvariant();
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash");
+            return (c =>
+            {
+                var pool = new List<PoolCard>();
+                if (fromHand) pool.AddRange(PoolFrom(c.Owner.Hand, match));
+                if (fromTrash) pool.AddRange(PoolFrom(c.Owner.Trash, match));
+                var zoneKind = fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var placed = new List<string>();
+                foreach (var p in ChooseFromPool(c, zoneKind, pool.OrderBy(x => x.Card.PlayCost).ToList(), count, $"[{c.Card.Name}] 시큐리티에 앞면으로 놓을 카드 {count}장을 고르세요."))
+                {
+                    if (!TakeFromPool(c, p)) continue;
+                    // "top or bottom": 위에 두면 다음 체크로 바로 열린다 — 추천은 아래
+                    bool top = pos == "top" || (pos == "top or bottom" && c.Engine.AskYesNo(c.Owner, null, $"[{p.Card.Name}]을(를) 시큐리티 맨 위에 놓을까요? (아니요 = 맨 아래)", recommended: false));
+                    c.Engine.PlaceSecurityFaceUp(c.Owner, p.Card, top);
+                    placed.Add(p.Card.Name);
+                }
+                if (placed.Count == 0) c.LastStepResolved = false;
+                Emit(c, label, placed.Count > 0 ? $"[{string.Join(", ", placed)}] 시큐리티에 앞면으로" : "놓을 카드가 없습니다");
+            }, null);
+        }
+        // "Flip your opponent's top face-down security card face up"
+        if (Regex.IsMatch(s, @"^Flip your opponent's top face[- ]down security card face[- ]up$", RegexOptions.IgnoreCase))
+            return (c =>
+            {
+                var flipped = c.Engine.FlipTopFaceDownUp(c.Enemy);
+                if (flipped == null) c.LastStepResolved = false;
+                Emit(c, label, flipped != null ? $"상대 시큐리티 [{flipped.Name}]을(를) 앞면으로" : "뒤집을 시큐리티가 없습니다");
+            }, null);
+        // "Add your top face-down security card to the hand"
+        if (Regex.IsMatch(s, @"^Add your top face[- ]down security card to (?:the|your) hand$", RegexOptions.IgnoreCase))
+            return (c =>
+            {
+                var x = c.Owner.SecurityStack.FirstOrDefault(sc => !GoldfishEngine.IsFaceUp(c.Owner, sc));
+                if (x == null) { c.LastStepResolved = false; Emit(c, label, "뒷면 시큐리티가 없습니다"); return; }
+                c.Owner.SecurityStack.Remove(x);
+                c.Owner.Hand.Add(x);
+                Emit(c, label, "뒷면 시큐리티 맨 위 1장을 패에 넣는다");
+            }, null);
+        // "Play 1 blue or yellow [TS] trait Digimon card from your hand with the play cost reduced by 3" · "~ for a play cost of 3" — 코스트를 낸다
+        // (메모리가 상대 쪽으로 넘어가지 않는 카드만 후보 — 넘기면서까지 내는 선택은 하지 않는다)
+        if ((m = Regex.Match(s, @"^Play (?<pick>.+?) from (?<from>your hand or (?:from )?(?:your )?trash|your trash|your hand) (?:with the (?:play |memory )?cost reduced by (?<red>\d+)|for a (?:play |memory )?cost of (?<fix>\d+))$", RegexOptions.IgnoreCase)).Success
+            && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } paidPick)
+        {
+            var (count, match) = paidPick;
+            int? red = m.Groups["red"].Success ? int.Parse(m.Groups["red"].Value) : null, fix = m.Groups["fix"].Success ? int.Parse(m.Groups["fix"].Value) : null;
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash");
+            int CostOf(CardData x) => fix ?? Math.Max(0, x.PlayCost - red!.Value);
+            return (c =>
+            {
+                Func<CardData, bool> ok = x => x.Type is CardType.Digimon or CardType.Tamer && match(x) && CostOf(x) <= Math.Max(0, c.OwnerMemory);
+                var pool = new List<PoolCard>();
+                if (fromHand) pool.AddRange(PoolFrom(c.Owner.Hand, ok));
+                if (fromTrash) pool.AddRange(PoolFrom(c.Owner.Trash, ok));
+                var zoneKind = fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var played = new List<string>();
+                foreach (var p in ChooseFromPool(c, zoneKind, pool.OrderByDescending(x => x.Card.Level).ThenByDescending(x => x.Card.PlayCost).ToList(), count, $"[{c.Card.Name}] 등장시킬 카드 {count}장을 고르세요 (코스트 {(fix != null ? $"{fix}" : $"-{red}")})."))
+                {
+                    if (c.Owner.BattleArea.Count >= 12 || !TakeFromPool(c, p)) continue;
+                    c.Engine.PlayPayingCost(c.Owner, p.Card, CostOf(p.Card));
+                    played.Add($"{p.Card.Name}(코스트 {CostOf(p.Card)})");
+                }
+                if (played.Count == 0) c.LastStepResolved = false;
+                Emit(c, label, played.Count > 0 ? $"[{string.Join(", ", played)}] 등장" : "등장시킬 카드가 없습니다");
+            }, null);
+        }
+        // "you may place the top card of this Digimon face-up at the bottom of the security stack" · "place this Digimon's top stacked card face up as the bottom security card"
+        if (Regex.IsMatch(s, @"^Place (?:the top card of this Digimon|this Digimon's top stacked card) face[- ]up (?:at the bottom of (?:the|your) security stack|as (?:the|your) bottom security card)$", RegexOptions.IgnoreCase))
+            return (c =>
+            {
+                var top = c.Self != null && c.Owner.BattleArea.Contains(c.Self) ? c.Self.TrashTopCard() : null;   // 진화원이 없으면 놓을 수 없다
+                if (top == null) { c.LastStepResolved = false; Emit(c, label, "놓을 카드가 없습니다"); return; }
+                c.RecalculateFieldBuffs();
+                c.Engine.PlaceSecurityFaceUp(c.Owner, top, top: false);
+                Emit(c, label, $"맨 위 카드 [{top.Name}]을(를) 시큐리티 맨 아래에 앞면으로");
+            }, null);
+        // "Play 1 face-up [Dark Masters] trait Digimon card from your security stack without paying the cost" · "~ from your face-up security cards ~"
+        if ((m = Regex.Match(s, @"^Play (?<pick>.+?) from your (?<fu>face[- ]up )?security (?:stack|cards) without paying (?:the|its) cost$", RegexOptions.IgnoreCase)).Success
+            && (m.Groups["fu"].Success || Regex.IsMatch(m.Groups["pick"].Value, @"\bface[- ]up\b", RegexOptions.IgnoreCase))
+            && (ParseCardPick(Regex.Replace(m.Groups["pick"].Value, @"\bface[- ]up\s+", "", RegexOptions.IgnoreCase)) is { } secPick))
+        {
+            var (count, match) = secPick;
+            return (c =>
+            {
+                var pool = GoldfishEngine.FaceUpCards(c.Owner).Where(x => x.Type is CardType.Digimon or CardType.Tamer && match(x)).Select(x => new PoolCard(x, c.Owner.SecurityStack)).ToList();
+                var played = new List<string>();
+                foreach (var p in ChooseFromPool(c, CardChoiceZone.Other, pool.OrderByDescending(x => x.Card.Level).ToList(), count, $"[{c.Card.Name}] 앞면 시큐리티에서 등장시킬 카드 {count}장을 고르세요."))
+                {
+                    if (c.Owner.BattleArea.Count >= 12 || !TakeFromPool(c, p)) continue;
+                    c.Owner.FaceUpSecurity.Remove(p.Card);
+                    c.Engine.PlayWithoutCost(c.Owner, p.Card);
+                    played.Add(p.Card.Name);
+                }
+                if (played.Count == 0) c.LastStepResolved = false;
+                Emit(c, label, played.Count > 0 ? $"앞면 시큐리티에서 [{string.Join(", ", played)}] 코스트 없이 등장" : "등장시킬 카드가 없습니다");
             }, null);
         }
         // "Return 1 Digi-Egg card from your trash to the bottom of your Digi-Egg deck"
