@@ -583,11 +583,11 @@ internal static class BuiltInCardScripts
 
         DrawThenDiscardWhenAttacking(b.Card("ST6-03"));   // 파피몬(퍼플)
 
-        // 드라큐몬: [등장 시] 트래시의 퍼플 옵션(코스트 1 또는 7) 1장 패로
+        // 드라큐몬: [등장 시] 트래시의 퍼플 옵션(코스트 1 또는 7) 1장 패로 ("~되돌릴 수 있다" — 고르지 않아도 된다)
         b.Card("ST6-04").OnPlay(c =>
         {
             var opt = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(x => x.Type == CardType.Option && x.Color == CardColor.Purple && x.PlayCost is 1 or 7).Reverse().ToList(),
-                1, upTo: false, "드라큐몬: 트래시에서 패로 되돌릴 옵션 카드를 고르세요.").FirstOrDefault();
+                1, upTo: true, "드라큐몬: 트래시에서 패로 되돌릴 옵션 카드를 고르세요.").FirstOrDefault();
             if (opt == null) return;
             c.Owner.Trash.Remove(opt);
             c.Owner.Hand.Add(opt);
@@ -608,11 +608,11 @@ internal static class BuiltInCardScripts
             c.Log($"[테이머] 매튜: 레스트 → 메모리 +1 (현재 {c.OwnerMemory})");
         }, when: c => c.Engine.IsTurnOf(c.Owner));
 
-        // 스컬사탄몬: [진화 시] 트래시의 퍼플 디지몬 1장 패로
+        // 스컬사탄몬: [진화 시] 트래시의 퍼플 디지몬 1장 패로 ("~되돌릴 수 있다" — 고르지 않아도 된다)
         b.Card("ST6-10").WhenDigivolving(c =>
         {
             var card = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(x => IsDigimon(x) && x.Color == CardColor.Purple).OrderByDescending(x => x.Level).ToList(),
-                1, upTo: false, "스컬사탄몬: 트래시에서 패로 되돌릴 퍼플 디지몬을 고르세요.").FirstOrDefault();
+                1, upTo: true, "스컬사탄몬: 트래시에서 패로 되돌릴 퍼플 디지몬을 고르세요.").FirstOrDefault();
             if (card == null) return;
             c.Owner.Trash.Remove(card);
             c.Owner.Hand.Add(card);

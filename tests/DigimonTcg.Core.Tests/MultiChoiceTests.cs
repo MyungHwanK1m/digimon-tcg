@@ -131,6 +131,43 @@ public class MultiChoiceTests
     }
 
     [Fact]
+    public void ReturnUpToFromTrash_ShouldLetThePlayerPickNothing()
+    {
+        // "up to 1" = 0장도 된다 → 창에 "고르지 않음"(min 0)이 있고, 빈 답이면 트래시에 그대로 남는다
+        var (state, engine, choices, cards) = Setup();
+        var digimon = cards["ST1-03"];
+        state.Player.Trash.Add(digimon);
+        choices.CardAnswer = new int[0];
+        var option = new CardData { CardId = "MC-UPTO", Name = "MC-UPTO", Type = CardType.Option, Color = CardColor.Red,
+                                    EffectText = "[Main] Return up to 1 Digimon card from your trash to the hand." };
+
+        engine.RunEffects(EffectTrigger.Main, state.Player, null, option, includeInherited: false);
+
+        Assert.Equal(1, choices.Calls);
+        Assert.Equal(0, choices.LastCardArgs!.Value.Min);
+        Assert.Contains(digimon, state.Player.Trash);
+        Assert.DoesNotContain(digimon, state.Player.Hand);
+    }
+
+    [Fact]
+    public void Dracmon_ReturnFromTrashIsOptional()
+    {
+        // 드라큐몬 [등장 시] "~패로 되돌릴 수 있다" — 고르지 않아도 된다
+        var (state, engine, choices, cards) = Setup();
+        var option = cards.Values.First(c => c.Type == CardType.Option && c.Color == CardColor.Purple && c.PlayCost is 1 or 7);
+        state.Player.Trash.Add(option);
+        choices.CardAnswer = new int[0];
+        var dracmon = new CardInstance(cards["ST6-04"], 2);
+        state.Player.BattleArea.Add(dracmon);
+
+        engine.RunEffects(EffectTrigger.OnPlay, state.Player, dracmon, dracmon.TopCard, includeInherited: false);
+
+        Assert.Equal(1, choices.Calls);
+        Assert.Equal(0, choices.LastCardArgs!.Value.Min);
+        Assert.Contains(option, state.Player.Trash);
+    }
+
+    [Fact]
     public void ChooseCards_InvalidIndexes_ShouldFallBackToRecommendation()
     {
         var (state, engine, choices, cards) = Setup();

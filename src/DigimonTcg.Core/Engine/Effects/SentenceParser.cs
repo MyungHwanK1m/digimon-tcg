@@ -2369,10 +2369,11 @@ internal static class SentenceParser
             var pick = ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value);
             if (pick == null) return (null, $"미지원 회수 조건: {m.Groups["pick"].Value}");
             var (count, match) = pick.Value;
+            bool upTo = IsUpTo(m.Groups["pick"].Value);
             return (c =>
             {
                 var ranked = c.Owner.Trash.Where(match).OrderByDescending(x => x.Level).ThenByDescending(x => x.PlayCost).ToList();
-                var cards = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, ranked, count, upTo: false, $"[{c.Card.Name}] 트래시에서 패로 되돌릴 카드 {count}장을 고르세요.");
+                var cards = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, ranked, count, upTo, $"[{c.Card.Name}] 트래시에서 패로 되돌릴 카드를 {(upTo ? $"{count}장까지" : $"{count}장")} 고르세요.");
                 foreach (var card in cards) { c.Owner.Trash.Remove(card); c.Owner.Hand.Add(card); }
                 Emit(c, label, cards.Count > 0 ? $"트래시의 [{string.Join(", ", cards.Select(x => x.Name))}] 패로 회수" : "회수할 카드가 없습니다");
             }, null);
@@ -2658,9 +2659,10 @@ internal static class SentenceParser
             var pick = ParseCardPick(m.Groups["pick"].Value + (Regex.IsMatch(m.Groups["pick"].Value, @"\bcards?$") ? "" : " card")) ?? ParseNamePick(m.Groups["pick"].Value);
             if (pick == null) return (null, $"미지원 회수 조건: {m.Groups["pick"].Value}");
             var (count, match) = pick.Value;
+            bool upTo = IsUpTo(m.Groups["pick"].Value);
             return (c =>
             {
-                var cards = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(match).OrderByDescending(x => x.DP).ToList(), count, upTo: false, $"[{c.Card.Name}] 시큐리티 위에 놓을 카드 {count}장을 고르세요.");
+                var cards = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Trash, c.Owner.Trash.Where(match).OrderByDescending(x => x.DP).ToList(), count, upTo, $"[{c.Card.Name}] 시큐리티 위에 놓을 카드를 {(upTo ? $"{count}장까지" : $"{count}장")} 고르세요.");
                 foreach (var x in cards) { c.Owner.Trash.Remove(x); c.Owner.SecurityStack.Insert(0, x); }
                 Emit(c, label, cards.Count > 0 ? $"트래시의 [{string.Join(", ", cards.Select(x => x.Name))}] 시큐리티 맨 위에" : "놓을 카드가 없습니다");
             }, null);
@@ -2975,7 +2977,9 @@ internal static class SentenceParser
         if (m.Groups["counter"].Success && (perCount = ParseCounter(m.Groups["counter"].Value)) == null)
             return (null, $"미지원 공개 매수: for each {m.Groups["counter"].Value}");
         bool play = m.Groups["play"].Success;
-        var picks = new List<(int Count, Func<CardData, bool> Match)>();
+        // "You may play ~ among them" — 등장시키지 않아도 된다
+        bool mayPlay = play && Regex.IsMatch(m.Value, @"\bYou may play\b", RegexOptions.IgnoreCase);
+        var picks = new List<(int Count, Func<CardData, bool> Match, bool UpTo)>();
         var parts = Regex.Split(m.Groups[play ? "play" : "adds"].Value, @"\s+and\s+(?=(?:up to )?\d+ )", RegexOptions.IgnoreCase);
         // "1 blue and 1 green Digimon card" — 앞 조건에 뒤의 종류를 붙인다
         string kindTail = Regex.Match(parts[^1], @"(?:Digimon|Tamer|Option) cards?$", RegexOptions.IgnoreCase).Value;
@@ -2984,7 +2988,7 @@ internal static class SentenceParser
             string part = kindTail.Length > 0 && !Regex.IsMatch(raw, @"\b(?:cards?|Digimon|Tamers?|Options?)\b|\[", RegexOptions.IgnoreCase) ? $"{raw} {kindTail}" : raw;
             var pick = ParseCardPick(part) ?? ParseNamePick(part);
             if (pick == null) return (null, $"미지원 공개 조건 ({part})");
-            picks.Add(pick.Value);
+            picks.Add((pick.Value.Count, pick.Value.Match, mayPlay || IsUpTo(part)));
         }
         string rest = m.Groups["rest"].Value.TrimEnd('.');
         bool trashRest;
@@ -3000,10 +3004,10 @@ internal static class SentenceParser
             var revealed = deck.Take(total).ToList();
             deck.RemoveRange(0, revealed.Count);
             var taken = new List<CardData>();
-            foreach (var (count, match) in picks)
+            foreach (var (count, match, upTo) in picks)
             {
                 var pool = revealed.Where(x => !taken.Contains(x) && match(x) && (!play || x.Type is CardType.Digimon or CardType.Tamer));
-                foreach (var pick in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Other, pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.DP).ToList(), count, upTo: false,
+                foreach (var pick in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Other, pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.DP).ToList(), count, upTo,
                              play ? $"[{c.Card.Name}] 공개한 카드 중 등장시킬 카드를 고르세요." : $"[{c.Card.Name}] 공개한 카드 중 패에 넣을 카드를 고르세요."))
                     taken.Add(pick);
             }
@@ -3026,6 +3030,9 @@ internal static class SentenceParser
             Emit(c, label, taken.Count > 0 ? $"덱 위 {total}장 공개 → [{string.Join(", ", taken.Select(t => t.Name))}] 패에 추가" : $"덱 위 {total}장 공개 → 조건에 맞는 카드 없음");
         }, null);
     }
+
+    /// <summary>"up to 2 ~" — 0장도 고를 수 있다 (ParseCardPick · ParseNamePick은 장수만 돌려준다)</summary>
+    private static bool IsUpTo(string part) => Regex.IsMatch(part.Trim(), @"^up to\b", RegexOptions.IgnoreCase);
 
     /// <summary>"1 [Agumon]" · "1 [Agumon] or [Gabumon]" · "up to 2 [Greymon]" — 카드 이름</summary>
     private static (int Count, Func<CardData, bool> Match)? ParseNamePick(string part)
