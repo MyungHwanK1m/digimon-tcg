@@ -61,6 +61,23 @@ public sealed class LegacyAiPolicy : IAiPolicy
             .FirstOrDefault();
     }
 
+    /// <summary>정책을 분리하기 전 AI는 메인 페이즈에 스스로 DNA 진화하지 않았다</summary>
+    public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
+
+    /// <summary>
+    /// 정책을 분리하기 전 엔진 동작: 배틀에서 이기는(상대만 소멸하는) 대상 중 Lv → DP가 가장 높은 디지몬, 없으면 어택하지 않는다
+    /// (시큐리티는 어택하지 않는다).
+    /// </summary>
+    public EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity)
+    {
+        var best = targets
+            .Where(t => attacker.GetCurrentDP() > t.GetCurrentDP())
+            .OrderByDescending(t => t.TopCard.Level)
+            .ThenByDescending(t => t.GetCurrentDP())
+            .FirstOrDefault();
+        return best == null ? null : new EndOfTurnAttack(best);
+    }
+
     /// <summary>AI가 진화시킬 수 있는 디지몬: 배틀 에어리어 + 육성 에어리어 (육성 중인 Lv.2 → Lv.3 진화 포함)</summary>
     internal static List<CardInstance> EvolutionBases(PlayerZones ai)
     {

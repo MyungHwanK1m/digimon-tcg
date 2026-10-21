@@ -180,6 +180,39 @@ public sealed class SmartAiPolicy : IAiPolicy
         }
         return best;
     }
+
+    /// <summary>AI의 DNA 진화 후보를 엔진이 열어 주면(GetDnaPairsFor) 판단을 붙인다 — 그 전까지는 하지 않는다</summary>
+    public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
+
+    /// <summary>
+    /// ≪볼텍스≫ · ≪에그제큐트≫: 대상(과 시큐리티)마다 어택 점수를 어림해 가장 좋은 것. ≪에그제큐트≫(canAttackSecurity)는
+    /// 어택이 끝나면 이 디지몬이 소멸하므로 그 가치만큼 깎는다 — 사실상 다이렉트 어택 승리나 큰 이득일 때만 쓴다.
+    /// </summary>
+    public EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity)
+    {
+        var state = engine.State;
+        double selfCost = canAttackSecurity ? AiBoard.Value(attacker) : 0;   // ≪에그제큐트≫ = 어택 뒤 소멸
+        EndOfTurnAttack? best = null;
+        double bestScore = Tuning.AttackThreshold;
+
+        var options = targets.Select(t => (CardInstance?)t).ToList();
+        if (canAttackSecurity)
+            options.Add(null);
+        foreach (var target in options)
+        {
+            double score = AiBoard.AttackScore(state, attacker, target, Tuning);
+            // 배틀에서 이겨 살아남아도 ≪에그제큐트≫는 소멸한다 (배틀에서 지는 경우는 AttackScore가 이미 깎았다)
+            bool survivesBattle = target == null || attacker.GetCurrentDP() > target.GetCurrentDP();
+            if (survivesBattle && score < 1000)
+                score -= selfCost;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = new EndOfTurnAttack(target);
+            }
+        }
+        return best;
+    }
 }
 
 /// <summary>

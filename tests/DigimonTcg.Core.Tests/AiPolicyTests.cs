@@ -149,6 +149,54 @@ public class AiPolicyTests
         Assert.NotEqual(restedWeak, attack?.Target);
     }
 
+    [Fact]
+    public void Legacy_EndOfTurnAttack_ShouldPickTheBestWinnableTarget_AndNeverSecurity()
+    {
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-07"]);    // 그레이몬 DP 4000
+        var weakLv3 = Field(state.Player, cards["ST1-03"]);             // Lv.3 DP 2000
+        var weakLv4 = Field(state.Player, cards["ST2-06"]);             // Lv.4 DP 4000 — 같은 DP는 이기지 못함
+        var lv3b = Field(state.Player, cards["ST1-02"]);                // Lv.3 DP 3000
+
+        var legacy = new LegacyAiPolicy();
+        var pick = legacy.ChooseEndOfTurnAttack(engine, attacker, new[] { weakLv3, weakLv4, lv3b }, canAttackSecurity: true);
+
+        Assert.Equal(new EndOfTurnAttack(lv3b), pick);                  // 이기는 대상 중 Lv → DP 순
+        Assert.Null(legacy.ChooseEndOfTurnAttack(engine, attacker, new[] { weakLv4 }, canAttackSecurity: true));   // 이기는 대상 없음 → 시큐리티도 안 감
+    }
+
+    [Fact]
+    public void Smart_Execute_ShouldGoForSecurityOnlyWhenItIsLethal()
+    {
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-07"]);    // DP 4000, ≪에그제큐트≫라고 가정 (canAttackSecurity)
+        var smart = new SmartAiPolicy();
+
+        // 시큐리티 5장: 어택 뒤 소멸하는 손해가 커서 시큐리티로는 가지 않는다
+        Assert.Null(smart.ChooseEndOfTurnAttack(engine, attacker, new List<CardInstance>(), canAttackSecurity: true));
+
+        // 시큐리티 0장 · 블로커 없음: 다이렉트 어택 승리
+        state.Player.SecurityStack.Clear();
+        Assert.Equal(new EndOfTurnAttack(null), smart.ChooseEndOfTurnAttack(engine, attacker, new List<CardInstance>(), canAttackSecurity: true));
+    }
+
+    [Fact]
+    public void Smart_Vortex_ShouldAttackAWinnableTarget_AndSkipLosingOnes()
+    {
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-07"]);    // DP 4000, ≪볼텍스≫ (시큐리티는 어택할 수 없음)
+        var weak = Field(state.Player, cards["ST1-03"]);                // DP 2000
+        var strong = Field(state.Player, cards["ST1-05"]);              // 버드라몬 DP 5000 (블로커 아님)
+        var smart = new SmartAiPolicy();
+
+        Assert.Equal(new EndOfTurnAttack(weak), smart.ChooseEndOfTurnAttack(engine, attacker, new[] { weak, strong }, canAttackSecurity: false));
+        Assert.Null(smart.ChooseEndOfTurnAttack(engine, attacker, new[] { strong }, canAttackSecurity: false));
+
+        // 플레이어에게 이 어택을 막아 이길 액티브 ≪블로커≫가 있으면 약한 대상도 어택하지 않는다
+        Field(state.Player, cards["ST1-06"]);                           // 코어드라몬 ≪블로커≫ DP 6000
+        Assert.Null(smart.ChooseEndOfTurnAttack(engine, attacker, new[] { weak }, canAttackSecurity: false));
+    }
+
     /// <summary>어택만 정해 둔 답을 내는 정책 (나머지는 기존 AI) — 엔진의 AI 어택 처리를 확인한다</summary>
     private sealed class ScriptedAttackPolicy : IAiPolicy
     {
@@ -161,6 +209,8 @@ public class AiPolicyTests
         public bool ShouldUseMainAbility(GoldfishEngine engine, GoldfishEngine.MainAbility ability, int memory) => false;
         public CardData? ChooseTamerToPlay(GoldfishEngine engine, int memory) => null;
         public CardData? ChooseDigimonToPlay(GoldfishEngine engine, int memory) => null;
+        public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
+        public EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity) => null;
 
         public AiAttack? ChooseNextAttack(GoldfishEngine engine, int memory)
         {

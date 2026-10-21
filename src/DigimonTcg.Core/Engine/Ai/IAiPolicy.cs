@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DigimonTcg.Core.Models;
 
 namespace DigimonTcg.Core.Engine.Ai;
@@ -10,6 +11,12 @@ public readonly record struct AiAttack(CardInstance Attacker, CardInstance? Targ
 
 /// <summary>AI 옵션 사용 한 번: Target이 null이면 엔진이 대상을 고른다 (AI 평가 순서)</summary>
 public readonly record struct AiOptionUse(CardData Card, CardInstance? Target);
+
+/// <summary>AI DNA 진화 한 번: 패의 Card로 필드의 A · B를 DNA 진화</summary>
+public readonly record struct AiDnaEvolution(CardData Card, CardInstance A, CardInstance B);
+
+/// <summary>≪볼텍스≫ · ≪에그제큐트≫ 턴 종료 시 어택 한 번: Target이 null이면 시큐리티(≪에그제큐트≫만), 아니면 그 상대 디지몬</summary>
+public readonly record struct EndOfTurnAttack(CardInstance? Target);
 
 /// <summary>
 /// AI(State.DummyOpponent)의 턴 중 결정 — 엔진의 AI 턴은 각 결정 지점에서 이 정책에 묻는다.
@@ -41,4 +48,14 @@ public interface IAiPolicy
 
     /// <summary>패에서 낼 디지몬. null = 내지 않음</summary>
     CardData? ChooseDigimonToPlay(GoldfishEngine engine, int memory);
+
+    /// <summary>메인 페이즈의 DNA 진화 (패의 DNA 카드 + 필드의 두 디지몬). null = 하지 않음</summary>
+    AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks);
+
+    /// <summary>
+    /// ≪볼텍스≫ · ≪에그제큐트≫ 디지몬 attacker의 턴 종료 시 어택. targets = 어택할 수 있는 상대 디지몬,
+    /// canAttackSecurity = 시큐리티도 어택할 수 있는지 (≪에그제큐트≫). null = 어택하지 않음,
+    /// EndOfTurnAttack(null) = 시큐리티, EndOfTurnAttack(디지몬) = 그 디지몬.
+    /// </summary>
+    EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity);
 }
