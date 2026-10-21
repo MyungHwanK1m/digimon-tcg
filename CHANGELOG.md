@@ -10,6 +10,14 @@
 
 ---
 
+## v0.8.3 — 2026-10-21
+- 효과 문장 표기 점검: 같은 뜻인데 표기만 달라 못 읽던 문장 84개를 읽게 함 (도감 효과 문장 5,982 → 6,066 / 10,279, 기존에 되던 문장 중 깨진 것 0)
+  - 손패 · 트래시 · 테이머 · 디지몬 장수, "상대에게 액티브 디지몬이 없음", 양쪽 시큐리티 합계 같은 조건을 "If ~"와 "While ~" 양쪽에서 같이 읽음
+  - "this Digimon has N DP or more", "N or more colors", "it's your opponent's turn", 관사 없는 "If you have [X] in play"
+  - 어순: 앞에 붙는 "Until your opponent's turn ends, ~" · "To 1 of your opponent's Digimon, give -N DP ~"
+  - 원문 오타 "batttle", 줄임말 "there're"
+- 시나리오 테스트 WordingVariantTests 11개
+
 ## v0.8.2 — 2026-10-21
 - ≪리커버리≫ 확인 · 보강: 내장 카드(엔젤우몬 · 홀리엔젤몬 · 홀리드라몬)와 실제 도감 카드 문장으로 시나리오 테스트(RecoveryTests 15개)
 - 문장 파서: "N or fewer cards in your security stack" · "N security cards or fewer" 조건 표기, 원문 오타 "3 of fewer", "≪리커버리≫ until there are N cards in your security stack"(N장이 될 때까지 반복) 인식 → 리커버리 문장 지원 48 → 52 / 112

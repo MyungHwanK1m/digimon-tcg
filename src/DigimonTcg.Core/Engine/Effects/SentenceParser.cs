@@ -457,6 +457,10 @@ internal static class SentenceParser
         // 시큐리티 장수 조건의 다른 표기 → "you have N or fewer security cards"
         //   "3 of fewer"(원문 오타) · "N or fewer cards in your security stack" · "N security cards or fewer"
         s = Regex.Replace(s, @"\b(\d+) of (fewer|less|more)\b", "$1 or $2", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\bthere're\b", "there are", RegexOptions.IgnoreCase);
+        // "To 1 of your opponent's Digimon, give -3000 DP until their turn ends" → "1 of your opponent's Digimon gets -3000 DP until their turn ends"
+        s = Regex.Replace(s, @"\bTo (?<t>(?:\d+|all) of (?:your|your opponent's|their) [^,]*?Digimon), give (?<dp>[+-]\d+ DP)\b", "${t} gets ${dp}", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\bbatttle\b", "battle", RegexOptions.IgnoreCase);   // 원문 오타
         s = Regex.Replace(s, @"\byou have (\d+) or (fewer|less|more) cards in your security stack\b", "you have $1 or $2 security cards", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"\byou have (\d+) security cards or (fewer|less|more)\b", "you have $1 or $2 security cards", RegexOptions.IgnoreCase);
         // ＜Recovery +1 (Deck)＞ 같은 키워드 안 괄호를 잠시 바꿔 두고, 설명문 괄호를 지운다
@@ -1141,7 +1145,7 @@ internal static class SentenceParser
             return (_, e) => (what == "tamers" ? e.Tamers.Count : e.BattleArea.Count(d => what != "suspended digimon" || d.IsSuspended)) >= n;
         }
         // "you have a [Diaboromon] in play" · "you don't have an [Arata Sanada] card in play" — 이름이 같은 카드 (디지몬 · 테이머)
-        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:a|an|any) \[(?<x>[^\]]+)\](?: card)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:(?:a|an|any) )?\[(?<x>[^\]]+)\](?: card)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
         {
             string x = m.Groups["x"].Value; bool neg = m.Groups["neg"].Success; bool opp = m.Groups["who"].Value.Contains("opponent", StringComparison.OrdinalIgnoreCase);
             return (o, e) => { var z = opp ? e : o; return (z.BattleArea.Any(d => TargetSpec.NameHas(d.TopCard, x)) || z.Tamers.Any(t => TargetSpec.NameHas(t, x))) != neg; };
@@ -1166,6 +1170,31 @@ internal static class SentenceParser
             return (o, _) => o.Trash.Any(c => (kind.Length == 0 || c.Type.ToString().Equals(kind, StringComparison.OrdinalIgnoreCase))
                                               && xs.Any(x => trait ? TargetSpec.HasTrait(c, x) : TargetSpec.NameHas(c, x)));
         }
+
+        // ---- 장수 · 유무 조건 (상황 정보가 필요 없어 "If ~"와 "While ~" 양쪽에서 같이 쓴다) ----
+        static bool Cmp(int value, int n, string dir) => dir.ToLowerInvariant() is "more" or "higher" ? value >= n : value <= n;
+        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:have|has) (?<n>\d+) or (?<dir>fewer|less|more) cards in (?:your|their|your opponent's) hand$", RegexOptions.IgnoreCase)).Success)
+        { bool me = m.Groups["who"].Value.Equals("you", StringComparison.OrdinalIgnoreCase); int n = int.Parse(m.Groups["n"].Value); string dir = m.Groups["dir"].Value; return (o, e) => Cmp((me ? o : e).Hand.Count, n, dir); }
+        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:have|has) (?<n>\d+) or (?<dir>fewer|less|more) cards in (?:your|their|your opponent's|the) trash$|^there are (?<n>\d+) or (?<dir>fewer|less) cards in (?<whose>your|your opponent's) trash$", RegexOptions.IgnoreCase)).Success)
+        {
+            bool me = m.Groups["who"].Success ? m.Groups["who"].Value.Equals("you", StringComparison.OrdinalIgnoreCase) : m.Groups["whose"].Value.Equals("your", StringComparison.OrdinalIgnoreCase);
+            int n = int.Parse(m.Groups["n"].Value); string dir = m.Groups["dir"].Value; return (o, e) => Cmp((me ? o : e).Trash.Count, n, dir);
+        }
+        if ((m = Regex.Match(cond, @"^you have (?<n>\d+) or (?<dir>fewer|less|more) Tamers(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        { int n = int.Parse(m.Groups["n"].Value); string dir = m.Groups["dir"].Value; return (o, _) => Cmp(o.Tamers.Count, n, dir); }
+        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:have|has) (?<n>\d+) or (?<dir>fewer|less) Digimon(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        { bool me = m.Groups["who"].Value.Equals("you", StringComparison.OrdinalIgnoreCase); int n = int.Parse(m.Groups["n"].Value); return (o, e) => (me ? o : e).BattleArea.Count <= n; }
+        if ((m = Regex.Match(cond, @"^you have (?<n>\d+) security cards?$", RegexOptions.IgnoreCase)).Success)
+        { int n = int.Parse(m.Groups["n"].Value); return (o, _) => o.SecurityStack.Count == n; }
+        if (Regex.IsMatch(cond, @"^(?<who>you|your opponent) (?:don't|doesn't|do not|does not) have (?:a|any) Digimon(?: in play)?$|^(?:you|your opponent) (?:have|has) no Digimon(?: in play)?$", RegexOptions.IgnoreCase))
+        { bool me = cond.StartsWith("you ", StringComparison.OrdinalIgnoreCase); return (o, e) => (me ? o : e).BattleArea.Count == 0; }
+        if (Regex.IsMatch(cond, @"^your opponent has no (?:unsuspended|active) Digimon(?: in play)?$|^they have no (?:unsuspended|active) Digimon(?: in play)?$", RegexOptions.IgnoreCase))
+            return (_, e) => e.BattleArea.All(d => d.IsSuspended);
+        if (Regex.IsMatch(cond, @"^your opponent has no Digimon with digivolution cards(?: in play)?$", RegexOptions.IgnoreCase))
+            return (_, e) => e.BattleArea.All(d => d.EvolutionSources.Count == 0);
+        // 양쪽 시큐리티 합계: "If there are 4 or fewer total cards in both players' security stacks" · "If the total cards in both players' security stacks is 4 or less"
+        if ((m = Regex.Match(cond, @"^there are (?<n>\d+) or (?<dir>fewer|less|more) total cards in both players' security stacks$|^the total (?:number of )?cards in both players' security stacks (?:is|are) (?<n>\d+) or (?<dir>fewer|less|more)$", RegexOptions.IgnoreCase)).Success)
+        { int n = int.Parse(m.Groups["n"].Value); string dir = m.Groups["dir"].Value; return (o, e) => Cmp(o.SecurityStack.Count + e.SecurityStack.Count, n, dir); }
         return null;
     }
 
@@ -1217,6 +1246,12 @@ internal static class SentenceParser
         if (Regex.IsMatch(cond, @"^(?:this Digimon|it) has no digivolution cards$", RegexOptions.IgnoreCase)) return d => d != null && d.EvolutionSources.Count == 0;
         if (Regex.IsMatch(cond, @"^(?:this Digimon|it) is suspended$", RegexOptions.IgnoreCase)) return d => d?.IsSuspended == true;
         if (Regex.IsMatch(cond, @"^(?:this Digimon|it) is unsuspended$", RegexOptions.IgnoreCase)) return d => d?.IsSuspended == false;
+        // "this Digimon has 10000 DP or more" — "it"은 사건의 다른 디지몬일 수 있어 "this Digimon"만
+        if ((m = Regex.Match(cond, @"^this Digimon has (?<n>\d+) DP or (?<dir>more|less|higher|lower)$|^this Digimon's DP is (?<n>\d+) or (?<dir>more|less|higher|lower)$", RegexOptions.IgnoreCase)).Success)
+        { int n = int.Parse(m.Groups["n"].Value); bool more = m.Groups["dir"].Value.ToLowerInvariant() is "more" or "higher"; return d => d != null && (more ? d.GetCurrentDP() >= n : d.GetCurrentDP() <= n); }
+        // "this Digimon has 2 or more colors" — 맨 위 카드의 색 수
+        if ((m = Regex.Match(cond, @"^(?:this Digimon|it) has (?<n>\d+) or more colors$", RegexOptions.IgnoreCase)).Success)
+        { int n = int.Parse(m.Groups["n"].Value); return d => d != null && d.TopCard.AllColors.Count >= n; }
         return null;
     }
 
@@ -1807,6 +1842,7 @@ internal static class SentenceParser
         if ((m = Regex.Match(cond, @"^(?:there are|you have) (?<n>\d+) or more cards in your trash$", RegexOptions.IgnoreCase)).Success)
         { int n = int.Parse(m.Groups["n"].Value); return c => c.Owner.Trash.Count >= n; }
         if (Regex.IsMatch(cond, @"^it's your turn$", RegexOptions.IgnoreCase)) return c => c.Engine.IsTurnOf(c.Owner);
+        if (Regex.IsMatch(cond, @"^it's (?:your opponent's|their) turn$", RegexOptions.IgnoreCase)) return c => !c.Engine.IsTurnOf(c.Owner);
         if (Regex.IsMatch(cond, @"^this (?:card|Digimon) was deleted by (?:an|your opponent's) effects?$", RegexOptions.IgnoreCase))
             return c => c.Engine.CurrentDeletionCause is GoldfishEngine.DeletionCause.Effect or GoldfishEngine.DeletionCause.Cost;
         if (Regex.IsMatch(cond, @"^this (?:card|Digimon) was deleted in battle$", RegexOptions.IgnoreCase))
@@ -1881,11 +1917,13 @@ internal static class SentenceParser
             if (m.Success) { rest = text[..m.Index]; return d; }
         }
         // "For the turn, ~" / "Until the end of your opponent's turn, ~" 앞에 붙는 형태
-        var lead = Regex.Match(text, @"^(?<d>for the turn|until the end of (?:your opponent's|their) (?:next )?turn|until the end of your turn), (?<rest>.+)$", RegexOptions.IgnoreCase);
+        //   "Until your opponent's turn ends, ~" · "Until their turn ends, ~" · "Until your turn ends, ~" 도 같은 뜻
+        var lead = Regex.Match(text, @"^(?<d>for the turn|until the end of (?:your opponent's|their) (?:next )?turn|until the end of your turn|until (?:your opponent's|their) turn ends|until your turn ends), (?<rest>.+)$", RegexOptions.IgnoreCase);
         if (lead.Success)
         {
             rest = lead.Groups["rest"].Value;
             string d = lead.Groups["d"].Value.ToLowerInvariant();
+            if (d.EndsWith("turn ends")) d = d.Contains("opponent") || d.Contains("their") ? "until the end of your opponent's turn" : "until the end of your turn";
             return d == "for the turn" ? Duration.ThisTurn : d.Contains("next") ? Duration.OpponentsNextTurnEnd : d.EndsWith("your turn") && !d.Contains("opponent") && !d.Contains("their") ? Duration.YourTurnEnd : Duration.OpponentsTurnEnd;
         }
         return Duration.None;
