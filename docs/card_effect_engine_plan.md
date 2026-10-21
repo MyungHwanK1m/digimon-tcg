@@ -413,3 +413,48 @@ API로 받은 카드(영어 문장)에서 두 가지 절을 인식해 카드 스
 - 링크(168절): 디지몬 옆에 붙는 링크 카드 — 새 존 · 링크 비용 · 링크 카드 효과가 필요.
 - DNA 진화(115절 · ≪파티션≫ 일부): 영어 카드 데이터에 DNA 진화 조건이 없다 (공식 한글 문구의 〔조그레스〕에만 있음) — 조건 데이터를 먼저 확보해야 한다.
 - 육성 에어리어 · 디지타마 관련(111절), 앞면 시큐리티(85절), 디지크로스(52절), ≪볼텍스≫ · ≪에그제큐트≫(턴 종료 시 어택, 35절), ≪디태치≫(링크).
+
+## 16. 7단계 결과 — 2차 (남은 메커닉)
+
+사용자 승인 순서(미지원 절이 많은 순): 링크 → 육성 · 디지타마 → 앞면 시큐리티 → 디지크로스 → ≪볼텍스≫ · ≪에그제큐트≫ → DNA 진화. 메커닉마다 테스트 · 회귀(추천 덱 2,880판 · API 덱 600판 · 효과 개별 실행)를 했다.
+영어 데이터에 없는 조건(링크 조건 · 〈링크 중〉 DP · 디지크로스 · DNA 진화)은 공식 한글 문구(data/kr/cards_ko.json)를 **실행 중에만** 읽는다 — 엔진 데이터로 저장하지 않으며, 공식 한글 데이터가 없는 PC에서는 그 메커닉을 쓸 수 없다.
+
+### 링크 — `GoldfishEngine.Links.cs`
+| 항목 | 처리 |
+| :--- | :--- |
+| 링크 카드 | CardInstance.LinkedCards. 1장까지(≪링크 +1≫마다 +1), 넘치면 먼저 링크한 카드를 트래시. 디지몬이 배틀 에어리어를 떠나면(소멸 · 패 · 덱 · 시큐리티) 링크 카드는 트래시 |
+| 시점 | 링크 카드의 링크 시 효과(진화원 칸의 라벨 없는 효과 = OnLinked) → "When this Digimon gets linked" → "When your ~ Digimon get linked" |
+| 효과로 링크 | "Link (up to) 1 ~ from hand/trash/진화원 to this Digimon / 1 of your Digimon (without paying the cost / with the cost reduced by N)" · "Link this card to ~"(옵션 — 사용 후 트래시 대신 링크) · ＜Mind Link＞ · 비용 "trashing N of its link cards" |
+| 패에서 링크 | GetLinkTargets(card) · LinkFromHand(card, target) · GetLinkCost(card) — 메인 페이즈, 링크 코스트 지불. 화면은 e1 (드래그해 디지몬 위에 놓을 때 [원래 동작 / 🔗 링크] 선택) |
+| 조건 · DP | 영어 "Link Requirements [Link] X: Cost N"이 있으면 그것, 없으면 공식 한글 "〈링크〉특징 「X」 / 명칭에 「X」 / Lv.N 이상 : 코스트 N", "〈링크 중〉… DP +N" |
+
+AI가 패에서 링크하는 것은 아직 없다 (효과로 링크하는 것은 AI도 한다).
+
+### 육성 · 디지타마 — `GoldfishEngine.Breeding.cs`
+| 항목 | 처리 |
+| :--- | :--- |
+| 부화 · 이동 공용 처리 | Hatch / MoveBreedingToBattle — 육성 페이즈(플레이어 · AI)와 효과가 같은 처리를 쓴다 |
+| 시점 | "When you hatch in the breeding area" · "When one of your (조건) Digimon moves from the breeding area to the battle area" · "When an opponent's (조건) Digimon moves ~" · "When your opponent moves a Digimon from their breeding area" — 육성 페이즈 · 효과 이동 모두 (공식 Q&A: BT1-089 같은 효과로 옮겨도 발휘) |
+| 동작 | "Hatch (1 Digi-Egg card) in your breeding area" · "Move 1 of your (조건) Digimon in your breeding area to your battle area" · "Play ~ to your empty breeding area without paying the cost" · "~ in the breeding area may digivolve into ~ (in the hand / from your trash / in the hand or trash)" · "Place ~ under / as the bottom digivolution card of your [X] in the breeding area" · "Play ~ from the digivolution cards of your [X] in the breeding area" · "This Digimon may move to the empty space in your breeding area" · "Return N Digi-Egg cards from your trash to the bottom of your Digi-Egg deck" |
+| 비용 · 조건 | "returning N non-Digi-Egg cards from your trash to the top/bottom of the deck" · "playing 1 [X] from your trash to your empty breeding area" · "If your breeding area is empty" · "If you have [X] in the breeding area" · "If during an attack"(어택 선언 ~ 어택 종료). 카드 고르기의 "non-Digi-Egg" |
+| 룰 | 효과로 육성 에어리어에 등장한 디지몬은 【등장 시】가 유발되지 않고 부화도 아니다 (공식 Q&A BT23-084 Q1 · BT15-068 Q1). 육성 에어리어에서 진화하면 진화 보너스 드로우는 하지만 [진화 시]는 발휘하지 않는다 (Q&A "육성 에어리어에서의 진화로는 발휘되지 않습니다") |
+
+남은 것(35절): [Breeding] 시점(육성 에어리어에서 발휘하는 효과 4장), [Hand] 기동, "A, or B" 고르기, 여러 단계가 섞인 로열 나이츠 · 이터 계열.
+
+### 사용자 확인 대상
+- **≪디코드≫와 DP 0 소멸**: Q&A에 직접 판정이 없다. "효과는 발휘하지만 소멸은 막지 못한다"로 구현 — 근거: 설명문 "배틀 이외", BT19-092 · BT19-002 판정(자신의 효과에도 유발), DP 0 소멸은 효과 처리 뒤 룰 처리.
+- **배틀 에어리어 → 육성 에어리어 이동**(P-143 등): 에어리어를 떠나는 것으로 보지 않아 ≪오버플로우≫ · 떠날 때 효과를 처리하지 않고 링크 카드도 그대로 둔다 — 근거: Q&A "육성 에어리어에 이동할 때 ≪오버플로우≫는 처리되지 않습니다(에어리어에서 벗어나지 않았으므로)". 링크 카드를 남기는 것은 추정.
+- **"If during an attack"**: 어택 선언부터 어택 종료(【어택 종료 시】 처리 전)까지로 판단.
+
+### 지원률
+| 범위 | 7단계 1차 끝 | 링크 | 육성 · 디지타마 |
+| :--- | ---: | ---: | ---: |
+| API 카드 전체 효과 절 10,279개 | 54.8% (5,634) | 55.7% (5,727) | **56.5% (5,810)** |
+| 미지원 절 | 4,645 | 4,552 | 4,469 |
+| 링크 · 육성 메커닉 미지원 절 | 168 · 111 | 76 · 90 | 76 · 35 |
+| 우선 세트 (ST1 ~ ST6, BT1 ~ BT5) | 90.4% | 90.4% | 90.7% |
+
+### 검증
+- 테스트 239개 통과 (링크 3개 · 육성 5개 추가).
+- 추천 덱 2,880판(무작위 · 탐욕 정책): 예외 0, 모두 종료, 결과가 1차 끝과 완전히 같다 (추천 덱에는 링크 · 육성 효과 카드가 없다).
+- API 카드 덱 600판: 예외 0, 모두 종료. 자동 스크립트 효과 7,632개 개별 실행: 예외 0.

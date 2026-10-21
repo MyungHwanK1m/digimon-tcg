@@ -461,4 +461,112 @@ public class Phase7MechanicTests
         Assert.DoesNotContain(copy, state.Player.Trash);
         Assert.Contains(copy, target.EvolutionSources);
     }
+
+    // ---- 육성 · 디지타마 ----
+
+    [Fact]
+    public void HatchAndMoveFromBreeding_ShouldFireHatchAndMoveTriggers()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.CurrentPhase = Phase.Breeding;
+        state.MemoryGauge = 0;
+        var tamer = Api("P7-BRD-TAMER", 0, 0, type: CardType.Tamer, playCost: 2,
+            main: "[All Turns] When you hatch in the breeding area, gain 1 memory.\n[Your Turn] When one of your Digimon moves from the breeding area to the battle area, gain 1 memory.");
+        state.Player.Tamers.Add(tamer);
+        state.Player.DigitamaDeck.Push(Api("P7-BRD-EGG", 2, 0, type: CardType.Digitama));
+
+        Assert.True(engine.HatchDigitama().CanExecute);
+        Assert.NotNull(state.Player.BreedingArea);
+        Assert.Equal(1, state.MemoryGauge);                                  // 부화 → +1
+
+        // 다음 턴: Lv.3으로 자란 디지몬을 배틀 에어리어로
+        state.Player.BreedingArea!.Evolve(Api("P7-BRD-LV3", 3, 3000));
+        state.CurrentPhase = Phase.Breeding;
+        state.BreedingActionTaken = false;
+        Assert.True(engine.MoveFromBreedingArea().CanExecute);
+        Assert.Null(state.Player.BreedingArea);
+        Assert.Single(state.Player.BattleArea);
+        Assert.Equal(2, state.MemoryGauge);                                  // 이동 → +1
+    }
+
+    [Fact]
+    public void OpponentMovedFromBreeding_ShouldTriggerOnTheOtherSide()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 0;
+        var watcher = new CardInstance(Api("P7-BRDO-W", 4, 5000,
+            main: "When one of your opponent's level 3 Digimon is moved from their breeding area to their battle area, gain 2 memory."), 1);
+        state.DummyOpponent.BattleArea.Add(watcher);
+        state.Player.BreedingArea = new CardInstance(Api("P7-BRDO-LV3", 3, 3000), 1);
+
+        engine.MoveBreedingToBattle(state.Player);
+
+        Assert.Equal(-2, state.MemoryGauge);                                 // AI(상대 쪽)가 메모리 +2 = 플레이어 기준 -2
+    }
+
+    [Fact]
+    public void PlayToBreedingArea_ShouldNotTriggerOnPlayAndNeedsAnEmptyArea()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 5;
+        var baby = Api("P7-BRDP-BABY", 3, 2000, main: "[On Play] Gain 3 memory.");
+        state.Player.Hand.Add(baby);
+        var player = Api("P7-BRDP", 4, 5000,
+            main: "[On Play] You may play 1 [P7-BRDP-BABY] from your hand to your empty breeding area without paying the cost.");
+        state.Player.Hand.Add(player);
+
+        engine.PlayCard(player);
+
+        Assert.Same(baby, state.Player.BreedingArea?.TopCard);
+        Assert.DoesNotContain(baby, state.Player.Hand);
+        Assert.Equal(5 - 3, state.MemoryGauge);                               // 육성 에어리어 등장 — 【등장 시】 없음 (Q&A BT23-084)
+    }
+
+    [Fact]
+    public void BreedingDigivolveFromTrash_AndDigiEggReturn_ShouldUseTheBreedingAreaAndEggDeck()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 3;
+        state.Player.BreedingArea = new CardInstance(Api("P7-BRDE-LV3", 3, 3000), 1);
+        var lv4 = Api("P7-BRDE-LV4", 4, 5000, main: "[When Digivolving] Gain 5 memory.");
+        var egg = Api("P7-BRDE-EGG", 2, 0, type: CardType.Digitama);
+        state.Player.Trash.AddRange(new[] { lv4, egg });
+        state.Player.DigitamaDeck.Push(Api("P7-BRDE-TOP", 2, 0, type: CardType.Digitama));
+        var opt = Api("P7-BRDE-OPT", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Main] 1 of your Digimon in the breeding area may digivolve into a level 4 Digimon card from your trash without paying the cost. Then, return 1 Digi-Egg card from your trash to the bottom of your Digi-Egg deck.");
+        state.Player.Hand.Add(opt);
+
+        engine.PlayCard(opt);
+
+        Assert.Same(lv4, state.Player.BreedingArea!.TopCard);
+        Assert.DoesNotContain(lv4, state.Player.Trash);
+        Assert.Equal(3, state.MemoryGauge);                                  // 육성 에어리어 진화 — [진화 시] 없음
+        Assert.Equal(2, state.Player.DigitamaDeck.Count);
+        Assert.Same(egg, state.Player.DigitamaDeck.Last());                  // 디지타마 덱 맨 아래
+    }
+
+    [Fact]
+    public void ReturningNonDigiEggCost_AndMoveToBreeding_ShouldWork()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 3;
+        state.Player.Trash.AddRange(new[] { Api("P7-BRDC-A", 3, 1000), Api("P7-BRDC-B", 3, 1000), Api("P7-BRDC-EGG", 2, 0, type: CardType.Digitama) });
+        state.Player.Trash.AddRange(new[] { Api("P7-BRDC-C", 3, 1000), Api("P7-BRDC-D", 3, 1000), Api("P7-BRDC-E", 3, 1000) });
+        var opt = Api("P7-BRDC-OPT", 0, 0, type: CardType.Option, playCost: 0,
+            main: "[Main] By returning 2 non-Digi-Egg cards from your trash to the bottom of the deck, gain 2 memory.");
+        state.Player.Hand.Add(opt);
+        state.Player.Tamers.Add(Api("P7-BRDC-T", 0, 0, type: CardType.Tamer));   // 옵션 색 조건
+
+        engine.PlayCard(opt);
+
+        Assert.Equal(5, state.MemoryGauge);
+        Assert.Equal(2, state.Player.MainDeck.Count);
+        Assert.DoesNotContain(state.Player.MainDeck, c => c.Type == CardType.Digitama);
+
+        var mover = new CardInstance(Api("P7-BRDC-MOVER", 4, 5000, main: "[End of Your Turn] This Digimon may move to the empty space in your breeding area."), 1);
+        state.Player.BattleArea.Add(mover);
+        Assert.True(engine.MoveBattleToBreeding(state.Player, mover));
+        Assert.Same(mover, state.Player.BreedingArea);
+        Assert.Empty(state.Player.BattleArea);
+    }
 }

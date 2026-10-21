@@ -52,6 +52,9 @@ public enum EffectTrigger
     ThisDigimonWouldBeDeleted,      // 이 디지몬이 소멸하려 할 때
     AllyDigimonWouldLeave,          // 자신의 다른 디지몬이 배틀 에어리어를 떠나려 할 때 (Other = 그 디지몬)
     AllyDigimonWouldBeDeleted,      // 자신의 다른 디지몬이 소멸하려 할 때 (Other = 그 디지몬)
+    AllyDigimonMovedFromBreeding,   // 자신의 디지몬이 육성 에어리어에서 배틀 에어리어로 이동했을 때 (Other = 그 디지몬 — 육성 페이즈 · 효과 모두)
+    OpponentDigimonMovedFromBreeding, // 상대의 디지몬이 육성 에어리어에서 배틀 에어리어로 이동했을 때 (Other = 그 디지몬)
+    AllyHatched,                    // 자신이 육성 에어리어에 부화했을 때 (효과로 육성 에어리어에 등장한 것은 부화가 아니다)
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>

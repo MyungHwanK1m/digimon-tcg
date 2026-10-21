@@ -437,10 +437,10 @@ public partial class GoldfishEngine
             return validation;
 
         State.CanMulligan = false;
-        var digitama = State.Player.DigitamaDeck.Pop();
-        State.Player.BreedingArea = new CardInstance(digitama, State.CurrentTurn);
+        var digitama = State.Player.DigitamaDeck.Peek();
         State.BreedingActionTaken = true;
         Log($"육성 에어리어 부화: [{digitama.Name}(Lv.{digitama.Level})]");
+        Hatch(State.Player);
 
         State.CurrentPhase = Phase.Main;
         TriggerStartOfMainPhase(State.Player);
@@ -459,14 +459,9 @@ public partial class GoldfishEngine
 
         State.CanMulligan = false;
         var moving = State.Player.BreedingArea!;
-        State.Player.BreedingArea = null;
-        moving.TurnPlayed = Math.Min(moving.TurnPlayed, State.CurrentTurn - 1);
-        State.Player.BattleArea.Add(moving);
         State.BreedingActionTaken = true;
-        RecalculateFieldBuffs();
-
         Log($"육성 에어리어 이동: [{moving.TopCard.Name}(Lv.{moving.TopCard.Level})] -> 배틀 에어리어");
-        RunEffects(EffectTrigger.WhenMoving, State.Player, moving, moving.TopCard);
+        MoveBreedingToBattle(State.Player);
 
         State.CurrentPhase = Phase.Main;
         TriggerStartOfMainPhase(State.Player);
@@ -1132,21 +1127,18 @@ public partial class GoldfishEngine
         {
             if (State.DummyOpponent.DigitamaDeck.Count > 0)
             {
-                var egg = State.DummyOpponent.DigitamaDeck.Pop();
-                State.DummyOpponent.BreedingArea = new CardInstance(egg, State.CurrentTurn);
+                var egg = State.DummyOpponent.DigitamaDeck.Peek();
                 Log($"🤖 [AI 육성] 디지타마 부화: [{egg.Name}(Lv.{egg.Level})]");
                 AddOpponentEvent(OpponentActionKind.Breeding, "디지타마 부화", $"{egg.Name} (Lv.{egg.Level}) → 상대 육성 에어리어", egg);
+                AddEffectEvent(egg, CaptureEffectLogs(() => Hatch(State.DummyOpponent)));
             }
         }
         else if (aiBreeding.TopCard.Type == CardType.Digimon && aiBreeding.TopCard.Level >= 3)
         {
-            State.DummyOpponent.BreedingArea = null;
-            // 육성 에어리어에서 이동한 디지몬은 등장한 것이 아니므로 이번 턴에 바로 공격 가능 (플레이어와 동일)
-            aiBreeding.TurnPlayed = Math.Min(aiBreeding.TurnPlayed, State.CurrentTurn - 1);
-            State.DummyOpponent.BattleArea.Add(aiBreeding);
+            // 육성 에어리어에서 이동한 디지몬은 등장한 것이 아니므로 이번 턴에 바로 공격 가능 (플레이어와 동일 — MoveBreedingToBattle)
             Log($"🤖 [AI 육성] 육성 에어리어 이동: [{aiBreeding.TopCard.Name}(Lv.{aiBreeding.TopCard.Level})] -> 배틀 에어리어");
             AddOpponentEvent(OpponentActionKind.Breeding, "배틀 에어리어로 이동", $"육성 에어리어의 {aiBreeding.TopCard.Name} (Lv.{aiBreeding.TopCard.Level}) 출격", aiBreeding.TopCard);
-            AddEffectEvent(aiBreeding.TopCard, CaptureEffectLogs(() => RunEffects(EffectTrigger.WhenMoving, State.DummyOpponent, aiBreeding, aiBreeding.TopCard)));
+            AddEffectEvent(aiBreeding.TopCard, CaptureEffectLogs(() => MoveBreedingToBattle(State.DummyOpponent)));
         }
 
         AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },

@@ -1051,12 +1051,12 @@ public partial class GoldfishEngine
     }
 
     /// <summary>
-    /// 효과로 진화: 패의 evoCard로 target을 진화시킨다 (cost만큼 메모리 지불) → 진화 보너스 드로우 → [진화 시] 효과.
+    /// 효과로 진화: 패(from이 있으면 그곳 — 트래시 등)의 evoCard로 target을 진화시킨다 (cost만큼 메모리 지불) → 진화 보너스 드로우 → [진화 시] 효과.
     /// 효과 처리 도중에는 메모리가 0 미만이 되어도 턴이 바로 끝나지 않는다 (효과가 끝난 뒤 엔진이 판단).
     /// </summary>
-    internal void EvolveByEffect(PlayerZones owner, CardInstance target, CardData evoCard, int cost)
+    internal void EvolveByEffect(PlayerZones owner, CardInstance target, CardData evoCard, int cost, List<CardData>? from = null)
     {
-        if (!owner.Hand.Remove(evoCard))
+        if (!(from ?? owner.Hand).Remove(evoCard))
             return;
         target.Evolve(evoCard);
         AddMemory(owner, -cost);
