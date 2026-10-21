@@ -213,6 +213,7 @@ public sealed class TargetSpec
         ["Barrier"] = Keyword.Barrier, ["Evade"] = Keyword.Evade,
         ["Armor Purge"] = Keyword.ArmorPurge, ["Fortitude"] = Keyword.Fortitude, ["Collision"] = Keyword.Collision, ["Scapegoat"] = Keyword.Scapegoat,
         ["Iceclad"] = Keyword.Iceclad, ["Progress"] = Keyword.Progress,
+        ["Link +1"] = Keyword.LinkPlusOne,
     };
 
     /// <summary>"[A]" · "[A] or [B]" · "[A], [B] or [C]" · "[A] and/or [B]" — 이름 / 특징 목록</summary>

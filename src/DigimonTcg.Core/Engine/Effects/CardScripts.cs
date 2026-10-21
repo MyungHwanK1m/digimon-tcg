@@ -153,6 +153,13 @@ public sealed class CardScriptDefinition
         return this;
     }
 
+    public CardScriptDefinition Link(Func<CardInstance, bool> requirement, int cost)
+    {
+        _script.LinkRequirement = requirement;
+        _script.LinkCost = cost;
+        return this;
+    }
+
     public CardScriptDefinition AllowBreedingActivation()
     {
         _script.ActivateInBreeding = true;

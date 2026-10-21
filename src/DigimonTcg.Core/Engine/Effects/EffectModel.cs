@@ -45,6 +45,9 @@ public enum EffectTrigger
     AllyDigiBurst,                  // 자신의 디지몬이 ≪디지버스트≫를 발휘했을 때 (Other = 그 디지몬)
     OpponentTamerPlayed,            // 상대가 테이머를 등장시켰을 때 (TriggerCard = 그 테이머)
     OpponentTamerSuspended,         // 상대의 테이머가 레스트 상태가 되었을 때 (TriggerCard = 그 테이머)
+    ThisDigimonLinked,              // 이 디지몬에 카드가 링크되었을 때 ("When this Digimon gets linked")
+    OnLinked,                       // 이 카드가 링크되었을 때 (링크 카드의 【링크 시】 효과 — Self = 링크된 디지몬)
+    AllyDigimonLinked,              // 자신의 디지몬에 카드가 링크되었을 때 (Other = 그 디지몬)
     ThisDigimonWouldLeave,          // 이 디지몬이 배틀 에어리어를 떠나려 할 때 (소멸 · 패 · 덱 · 시큐리티 — PreventLeave로 막을 수 있다)
     ThisDigimonWouldBeDeleted,      // 이 디지몬이 소멸하려 할 때
     AllyDigimonWouldLeave,          // 자신의 다른 디지몬이 배틀 에어리어를 떠나려 할 때 (Other = 그 디지몬)
@@ -63,6 +66,7 @@ public enum Keyword
     Retaliation,             // ≪길동무≫: 배틀에서 소멸하면 상대 디지몬도 소멸
     Reboot,                  // ≪재기동≫: 상대의 액티브 페이즈에도 액티브
     UnblockableBySourceless, // 진화원을 갖지 않은 상대 디지몬에게는 블록당하지 않는다 (원뿔몬 BT1-034)
+    LinkPlusOne,             // ≪링크 +1≫: 이 디지몬의 최대 링크 수 +1 (여러 번 얻으면 더한다 — 엔진은 키워드 1개 = +1)
     CannotAttack,            // 이 디지몬은 어택할 수 없다 (지속 효과 "[Your Turn] This Digimon can't attack")
     Unblockable,             // 이 디지몬은 블록당하지 않는다
     BlockOpponentEvoCostReduction, // 상대는 진화 코스트를 줄일 수 없다 ("Your opponent can't reduce digivolution costs")
@@ -181,6 +185,10 @@ public sealed class CardScript
 
     /// <summary>≪트레이닝≫ — 육성 에어리어에서도 [메인] 기동 효과를 쓸 수 있다</summary>
     public bool ActivateInBreeding { get; set; }
+
+    /// <summary>링크 조건 ("Link Requirements [Link] [Appmon] trait: Cost 2") — 이 카드를 링크할 수 있는 디지몬. null = 영어 데이터에 없음</summary>
+    public Func<CardInstance, bool>? LinkRequirement { get; set; }
+    public int LinkCost { get; set; }
 
     /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
     public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }

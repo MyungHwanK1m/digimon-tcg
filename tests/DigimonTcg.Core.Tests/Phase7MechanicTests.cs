@@ -258,6 +258,63 @@ public class Phase7MechanicTests
     }
 
     [Fact]
+    public void LinkByEffect_ShouldAttachTheCardAndFireGetsLinked()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var linkable = Api("P7-LNK-CARD", 4, 4000);
+        state.Player.Hand.Add(linkable);
+        var host = Api("P7-LNK-HOST", 5, 7000,
+            main: "[On Play] You may link 1 level 4 or lower Digimon card from your hand to this Digimon without paying the cost.\n[Your Turn] When this Digimon gets linked, gain 1 memory.");
+        state.Player.Hand.Add(host);
+        state.MemoryGauge = 5;
+
+        engine.PlayCard(host);
+
+        var inst = Assert.Single(state.Player.BattleArea);
+        Assert.Contains(linkable, inst.LinkedCards);
+        Assert.DoesNotContain(linkable, state.Player.Hand);
+        Assert.Equal(5 - 3 + 1, state.MemoryGauge);
+    }
+
+    [Fact]
+    public void LinkFromHand_ShouldCheckTheRequirementPayTheCostAndRunTheLinkEffect()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        state.MemoryGauge = 4;
+        var low = new CardInstance(Api("P7-LFH-LV2", 2, 1000), 1);
+        var host = new CardInstance(Api("P7-LFH-HOST", 4, 5000), 1);
+        state.Player.BattleArea.AddRange(new[] { low, host });
+        var link = Api("P7-LFH-LINK", 3, 3000, inherited: "Link Requirements [Link] Lv.3 or higher: Cost 2 (Plug this card from the hand or battle area sideways into the specified Digimon in the battle area.)\nGain 1 memory.");
+        state.Player.Hand.Add(link);
+
+        Assert.DoesNotContain(low, engine.GetLinkTargets(link));
+        Assert.False(engine.LinkFromHand(link, low).CanExecute);           // Lv.2 — 링크 조건 불충족
+        Assert.True(engine.LinkFromHand(link, host).CanExecute);
+
+        Assert.Contains(link, host.LinkedCards);
+        Assert.Equal(4 - 2 + 1, state.MemoryGauge);                          // 코스트 2 → 【링크 시】 메모리 +1
+    }
+
+    [Fact]
+    public void Link_ShouldTrashTheOldestWhenFullAndTrashLinksWhenTheDigimonLeaves()
+    {
+        var (state, engine, cards) = NewMainPhase();
+        var host = new CardInstance(Api("P7-LNK2-HOST", 5, 7000), 1);
+        state.Player.BattleArea.Add(host);
+        var first = Api("P7-LNK2-A", 3, 1000);
+        var second = Api("P7-LNK2-B", 3, 1000);
+
+        engine.LinkCard(state.Player, host, first);
+        engine.LinkCard(state.Player, host, second);
+        Assert.Equal(new[] { second }, host.LinkedCards);                    // 최대 1장 — 먼저 것은 트래시
+        Assert.Contains(first, state.Player.Trash);
+
+        engine.DeleteFrom(state.Player, host);
+        Assert.Contains(second, state.Player.Trash);
+        Assert.Empty(host.LinkedCards);
+    }
+
+    [Fact]
     public void Iceclad_ShouldCompareDigivolutionCardCounts()
     {
         var (state, engine, cards) = NewMainPhase();

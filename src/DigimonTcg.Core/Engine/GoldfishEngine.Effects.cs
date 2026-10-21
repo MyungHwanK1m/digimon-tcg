@@ -316,6 +316,8 @@ public partial class GoldfishEngine
             // 다른 디지몬이 주는 효과 ("All of your black Digimon get +1000 DP") — 효과를 가진 디지몬 기준으로 조건 판단
             foreach (var (aura, auraCtx) in DigimonAuras(owner, enemy, StaticStat.AllyDigimonDp))
                 if (aura.Subject == null || aura.Subject(inst)) dp += aura.Value(auraCtx);
+            foreach (var link in inst.LinkedCards)   // 〈링크 중〉 이 디지몬의 DP +N
+                dp += LinkDp(link);
             foreach (var (aura, auraCtx) in DigimonAuras(owner, enemy, StaticStat.AllySecurityAttack).Concat(TamerAuras(owner, enemy, StaticStat.AllySecurityAttack)))
                 if (aura.Subject == null || aura.Subject(inst)) sec += aura.Value(auraCtx);
             // 상대 카드가 주는 효과 ("All of your opponent's Digimon with no digivolution cards gain ＜Security A. -1＞")
@@ -617,6 +619,7 @@ public partial class GoldfishEngine
             if (saved.Count > 0) EffectLog(zones, $"[≪머티리얼 세이브≫] [{string.Join(", ", saved.Select(s => s.Name))}]을(를) 테이머 아래에 놓았습니다.");
         }
         zones.Trash.Add(instance.TopCard);
+        TrashLinks(zones, instance);
         while (instance.EvolutionSources.Count > 0)
             zones.Trash.Add(instance.EvolutionSources.Pop());
         PurgeTokens(zones);
@@ -885,6 +888,7 @@ public partial class GoldfishEngine
         if (!zones.BattleArea.Remove(inst))
             return;
         ApplyOverflow(zones, inst.GetEvolutionStackBottomUp().Append(inst.TopCard));
+        TrashLinks(zones, inst);
         while (inst.EvolutionSources.Count > 0)
             zones.Trash.Add(inst.EvolutionSources.Pop());
         zones.Hand.Add(inst.TopCard);
@@ -965,6 +969,7 @@ public partial class GoldfishEngine
         if (!zones.BattleArea.Remove(inst))
             return;
         ApplyOverflow(zones, inst.GetEvolutionStackBottomUp().Append(inst.TopCard));
+        TrashLinks(zones, inst);
         zones.MainDeck.Add(inst.TopCard);
         foreach (var s in inst.GetEvolutionStackBottomUp().Reverse())
             zones.MainDeck.Add(s);
@@ -980,6 +985,7 @@ public partial class GoldfishEngine
         if (!zones.BattleArea.Remove(inst))
             return;
         ApplyOverflow(zones, inst.GetEvolutionStackBottomUp().Append(inst.TopCard));
+        TrashLinks(zones, inst);
         while (inst.EvolutionSources.Count > 0)
             zones.Trash.Add(inst.EvolutionSources.Pop());
         if (!IsToken(inst.TopCard))
@@ -1500,7 +1506,8 @@ public partial class GoldfishEngine
             Log("[효과] " + msg);
         if (_effectDepth == 0)
             FlushPendingTriggers();
-        if (optionCtx.PlaceInBattleArea) PlaceOption(owner, optionCard);
+        if (optionCtx.LinkedThisCard) { }   // "link this card to ~" — 링크 카드가 되었다
+        else if (optionCtx.PlaceInBattleArea) PlaceOption(owner, optionCard);
         else owner.Trash.Add(optionCard);
         // "When you use an Option card" / "When a player uses an Option card"
         FireForSide(EffectTrigger.AllyOptionUsed, owner, null, triggerCard: optionCard);

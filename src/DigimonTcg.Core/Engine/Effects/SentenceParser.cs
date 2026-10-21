@@ -48,6 +48,7 @@ internal static class SentenceParser
         ["Barrier"] = Keyword.Barrier, ["Evade"] = Keyword.Evade,
         ["Armor Purge"] = Keyword.ArmorPurge, ["Fortitude"] = Keyword.Fortitude, ["Collision"] = Keyword.Collision, ["Scapegoat"] = Keyword.Scapegoat,
         ["Iceclad"] = Keyword.Iceclad, ["Progress"] = Keyword.Progress,
+        ["Link +1"] = Keyword.LinkPlusOne,
     };
 
     /// <summary>파싱한 절을 스크립트에 등록하는 일 (전부 읽은 뒤에만 등록한다)</summary>
@@ -91,6 +92,31 @@ internal static class SentenceParser
         if (materialSave.Success && card.Type == CardType.Digimon)
         {
             def?.MaterialSave(int.Parse(materialSave.Groups["n"].Value));
+            return null;
+        }
+        // 링크 조건: "Link Requirements [Link] [Appmon] trait: Cost 2" · "Link Requirements [Link] Lv.3 or higher: Cost 2"
+        var linkReq = Regex.Match(clause, $@"^Link Requirements \[Link\]\s*(?<req>.+?)\s*:\s*Cost (?<n>\d+)\.?$", RegexOptions.IgnoreCase);
+        if (linkReq.Success)
+        {
+            Func<CardInstance, bool>? req = null;
+            Match rm;
+            if ((rm = Regex.Match(linkReq.Groups["req"].Value, $@"^(?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
+            { var xs = TargetSpec.Names(rm.Groups["x"].Value); req = d => xs.Any(x => TargetSpec.HasTrait(d.TopCard, x)); }
+            else if ((rm = Regex.Match(linkReq.Groups["req"].Value, @"^Lv\.\s*(?<lv>\d+)(?: or (?<dir>higher|lower))?$", RegexOptions.IgnoreCase)).Success)
+            {
+                int lv = int.Parse(rm.Groups["lv"].Value); string dir = rm.Groups["dir"].Value.ToLowerInvariant();
+                req = d => dir == "higher" ? d.TopCard.Level >= lv : dir == "lower" ? d.TopCard.Level <= lv : d.TopCard.Level == lv;
+            }
+            else if ((rm = Regex.Match(linkReq.Groups["req"].Value, $@"^(?<x>{TargetSpec.NameList})(?: in (?:its|their) names?)?$", RegexOptions.IgnoreCase)).Success)
+            { var xs = TargetSpec.Names(rm.Groups["x"].Value); req = d => xs.Any(x => TargetSpec.NameHas(d.TopCard, x)); }
+            if (req == null) return $"미지원 링크 조건: {linkReq.Groups["req"].Value}";
+            def?.Link(req, int.Parse(linkReq.Groups["n"].Value));
+            return null;
+        }
+        // ≪링크 +1≫: 최대 링크 수 +1
+        if (Regex.IsMatch(clause, @"^＜Link \+\d+＞\.?$", RegexOptions.IgnoreCase))
+        {
+            if (inherited) def?.InheritedKeyword(Keyword.LinkPlusOne); else def?.Keyword(Keyword.LinkPlusOne);
             return null;
         }
         // 떠나려 할 때 · 소멸하려 할 때 키워드: ≪디코드≫ · ≪파티션≫ · ≪프래그먼트≫ · ≪디코이≫ · ≪가드≫, [메인] ≪트레이닝≫
@@ -189,6 +215,13 @@ internal static class SentenceParser
             // "[When Attacking] When this Digimon attacks a player, ~" — 같은 시점에 조건만 더한다
             eventCondition = same.Condition;
             body = when.Groups["rest"].Value;
+        }
+
+        // 링크 카드: 진화원 칸의 라벨 없는 문장 = 【링크 시】 효과 (링크된 디지몬 기준으로 이 카드의 효과로 처리)
+        if (inherited && triggers.Count == 0 && labels.Count == 0 && card.InheritedEffectText.Contains("Link Requirements", StringComparison.OrdinalIgnoreCase))
+        {
+            triggers.Add(EffectTrigger.OnLinked);
+            inherited = false;
         }
 
         var pending = new Pending();
@@ -438,6 +471,11 @@ internal static class SentenceParser
                     c => c.Engine.CurrentLeave is { } l && leaveOk(l)
                          && (ReferenceEquals(l.Digimon, c.Other) || ReferenceEquals(l.Digimon, c.Self)) && who(c, l.Digimon));
         }
+        if (Regex.IsMatch(ev, @"^this Digimon (?:gets|is|becomes) linked$|^a card (?:is linked|links) to this Digimon$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.ThisDigimonLinked);
+        if ((m = Regex.Match(ev, @"^(?:one of |any of )?your (?<subj>(?:other )?[^,]*?Digimon(?: with [^,]+?)?) (?:get|gets|are|is|become|becomes) linked$", RegexOptions.IgnoreCase)).Success
+            && ParseAllySubject(m.Groups["subj"].Value) is { } linkedWho)
+            return One(EffectTrigger.AllyDigimonLinked, c => c.Other != null && linkedWho(c, c.Other));
         if (Regex.IsMatch(ev, @"^this card is trashed (?:due to|by) activating this Digimon's ＜Digi-Burst＞$|^activating this Digimon's ＜Digi-Burst＞ trashes this card$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.DigiBurstTrashedThis);
         if (Regex.IsMatch(ev, @"^(?:one of |any of )?your Digimon activates ＜Digi-Burst＞$", RegexOptions.IgnoreCase))
@@ -917,6 +955,7 @@ internal static class SentenceParser
             if (!m.Success) return null;
             string name = m.Groups["name"].Value.Trim();
             if (GrantableKeywords.TryGetValue(name, out var k)) result.Add((k, 0));
+            else if (name.Equals("Link", StringComparison.OrdinalIgnoreCase) && m.Groups["num"].Value.Trim().StartsWith("+")) result.Add((Keyword.LinkPlusOne, 0));
             else if (name.StartsWith("Security A", StringComparison.OrdinalIgnoreCase))
                 result.Add((null, int.Parse(m.Groups["num"].Value.Replace(" ", "").Replace("−", "-"))));
             else return null;
@@ -1488,6 +1527,24 @@ internal static class SentenceParser
                     },
                     c => Pool(c).First().TopCard.Level <= 3 || !delete, delete ? "자신의 디지몬 1마리를 소멸시켜" : "자신의 디지몬 1마리를 패로 되돌려");
         }
+        // 링크 카드 비용: "trashing 1 of this Digimon's link cards" · "placing 1 of its link cards as its bottom digivolution card"
+        if ((m = Regex.Match(cost, @"^(?<v>trashing|placing) (?<n>\d+) of (?:this Digimon's|its) link cards(?<bottom> as (?:its|this Digimon's) bottom digivolution cards?)?$", RegexOptions.IgnoreCase)).Success
+            && (m.Groups["v"].Value.Equals("trashing", StringComparison.OrdinalIgnoreCase) || m.Groups["bottom"].Success))
+        {
+            int n = int.Parse(m.Groups["n"].Value);
+            bool trash = m.Groups["v"].Value.Equals("trashing", StringComparison.OrdinalIgnoreCase);
+            return (c => c.Self != null && c.Self.LinkedCards.Count >= n,
+                    c =>
+                    {
+                        foreach (var x in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Other, c.Self!.LinkedCards.OrderBy(x => GoldfishEngine.LinkDp(x)).ToList(), n, upTo: false, $"[{c.Card.Name}] 비용으로 쓸 링크 카드 {n}장을 고르세요."))
+                        {
+                            if (!c.Self.LinkedCards.Remove(x)) continue;
+                            if (trash) c.Owner.Trash.Add(x); else c.Self.AddBottomSource(x);
+                        }
+                        c.RecalculateFieldBuffs();
+                    },
+                    _ => true, trash ? $"링크 카드 {n}장을 파기하여" : $"링크 카드 {n}장을 진화원 맨 아래에 놓아");
+        }
         // "placing 1 Digimon card with ＜Save＞ in its text from your hand (face down) under this Tamer"
         if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) from your hand (?:face down )?under (?:this Tamer|(?:1|one) of your Tamers|your Tamers)$", RegexOptions.IgnoreCase)).Success
             && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } underPick)
@@ -1727,6 +1784,67 @@ internal static class SentenceParser
                 if (!c.Owner.Trash.Remove(c.Card)) return;
                 c.Owner.Hand.Add(c.Card);
                 Emit(c, label, "트래시의 이 카드를 패에 넣는다");
+            }, null);
+        // 링크: "link 1 level 4 or lower Digimon card from your hand or this Digimon's digivolution cards to this Digimon without paying the cost"
+        if ((m = Regex.Match(s, @"^Link (?:up to )?(?<pick>.+?) from (?<from>your hand or (?:from )?(?:your )?trash|your hand or this Digimon's digivolution cards|your trash or this Digimon's digivolution cards|your hand|your trash|this Digimon's digivolution cards) to (?<t>this Digimon|(?:1|one) of your Digimon(?: with [^,]+?)?) (?:without paying the cost|with the cost reduced by (?<r>\d+))$", RegexOptions.IgnoreCase)).Success)
+        {
+            var pick = ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value);
+            var target = TargetSpec.Parse(m.Groups["t"].Value);
+            if (pick == null || target == null) return (null, $"미지원 링크: {s}");
+            var (count, match) = pick.Value;
+            int reduce = m.Groups["r"].Success ? int.Parse(m.Groups["r"].Value) : -1;   // -1 = 코스트 없이
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash"), fromSources = from.Contains("digivolution");
+            return (c =>
+            {
+                var d = Pick(target, c, security).FirstOrDefault();
+                if (d == null) { c.LastStepResolved = false; Emit(c, label, "링크할 디지몬이 없습니다"); return; }
+                var pool = new List<CardData>();
+                if (fromHand) pool.AddRange(c.Owner.Hand.Where(match));
+                if (fromTrash) pool.AddRange(c.Owner.Trash.Where(match));
+                if (fromSources && c.Self != null) pool.AddRange(c.Self.EvolutionSources.Where(match));
+                // 링크 조건을 아는 카드는 조건에 맞아야 하고, 코스트를 줄여 링크하면 그 코스트를 낸다 (모르는 카드는 조건 없음 · 코스트 0)
+                pool = pool.Where(x => GoldfishEngine.MeetsLinkRequirement(x, d) != false).ToList();
+                var zone = fromSources ? CardChoiceZone.DigivolutionCards : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var picks = c.Engine.ChooseCards(c.Owner, zone, pool.OrderByDescending(x => GoldfishEngine.LinkDp(x)).ThenByDescending(x => x.Level).ToList(), count, upTo: true, $"[{c.Card.Name}] [{d.TopCard.Name}]에 링크할 카드를 고르세요.");
+                if (picks.Count == 0) { c.LastStepResolved = false; Emit(c, label, "링크할 카드가 없습니다"); return; }
+                foreach (var x in picks)
+                {
+                    bool taken = (fromHand && c.Owner.Hand.Remove(x)) || (fromTrash && c.Owner.Trash.Remove(x))
+                                 || (fromSources && c.Self?.TakeSource(y => ReferenceEquals(y, x)) != null);
+                    if (!taken) continue;
+                    if (reduce >= 0) c.AddMemory(-Math.Max(0, (GoldfishEngine.LinkCostOf(x) ?? 0) - reduce));
+                    c.Engine.LinkCard(c.Owner, d, x);
+                }
+                Emit(c, label, $"[{string.Join(", ", picks.Select(x => x.Name))}]을(를) [{d.TopCard.Name}]에 링크");
+            }, null);
+        }
+        // ≪마인드 링크≫ (테이머): 이 테이머를 진화원에 테이머 카드가 없는 디지몬의 진화원 맨 아래에 놓는다
+        if ((m = Regex.Match(s, @"^＜Mind Link＞ (?:to|with) (?<t>(?:1|one) of your Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success && card.Type == CardType.Tamer
+            && TargetSpec.Parse(m.Groups["t"].Value) is { } mindTarget)
+            return (c =>
+            {
+                if (!c.Owner.Tamers.Contains(c.Card)) { c.LastStepResolved = false; return; }
+                var d = Pick(mindTarget, c, security).FirstOrDefault(x => !x.EvolutionSources.Any(s => s.Type == CardType.Tamer));
+                if (d == null) { c.LastStepResolved = false; Emit(c, label, "≪마인드 링크≫할 디지몬이 없습니다"); return; }
+                c.Owner.Tamers.Remove(c.Card);
+                c.Owner.SuspendedTamers.Remove(c.Card);
+                d.AddBottomSource(c.Card);
+                c.Engine.ClearUnderTamersIfNoTamer(c.Owner);
+                c.RecalculateFieldBuffs();
+                Emit(c, label, $"≪마인드 링크≫ 이 테이머를 [{d.TopCard.Name}]의 진화원 맨 아래에");
+            }, null);
+        // 옵션 · 이 카드: "link this card to 1 of your Digimon (on the field) without paying the cost"
+        if ((m = Regex.Match(s, @"^Link this card to (?<t>this Digimon|(?:1|one) of your Digimon(?: on the field)?(?: with [^,]+?)?) without paying the cost$", RegexOptions.IgnoreCase)).Success
+            && TargetSpec.Parse(Regex.Replace(m.Groups["t"].Value, @" on the field", "", RegexOptions.IgnoreCase)) is { } linkTarget)
+            return (c =>
+            {
+                var d = Pick(linkTarget, c, security).Where(x => GoldfishEngine.MeetsLinkRequirement(c.Card, x) != false).FirstOrDefault();
+                if (d == null) { c.LastStepResolved = false; return; }
+                c.Owner.Hand.Remove(c.Card);   // 패에서 쓴 옵션이면 이미 패에 없다 · 트래시 처리는 엔진이 건너뛴다
+                c.LinkedThisCard = true;
+                c.Engine.LinkCard(c.Owner, d, c.Card);
+                Emit(c, label, $"이 카드를 [{d.TopCard.Name}]에 링크");
             }, null);
         // "Return 1 yellow Digimon card from this Digimon's digivolution cards to the hand"
         if ((m = Regex.Match(s, @"^(?:Return|Add) (?<pick>.+?) from (?:this Digimon's|its) digivolution cards to (?:the|your|its owner's) hand$", RegexOptions.IgnoreCase)).Success)
