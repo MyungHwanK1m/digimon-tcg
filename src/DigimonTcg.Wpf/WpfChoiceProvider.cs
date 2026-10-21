@@ -128,7 +128,9 @@ public sealed class WpfChoiceProvider : IChoiceProvider
         var items = options.Select((card, i) => new MultiCardPicker.Item(keys[i], card,
             $"{card.DisplayName}\n{(card.Level > 0 ? $"Lv.{card.Level} " : "")}{CardTypeKo(card.Type)}{(card.Type == CardType.Digimon ? $"\nDP {card.DP:N0}" : "")}")).ToList();
         var recommendedKeys = recommended.Where(i => i >= 0 && i < keys.Count).Select(i => keys[i]).ToList();
-        var picked = MultiCardPicker.Show(_owner, $"{where}에서 카드 고르기", question, items, min, max, recommendedKeys, _cardVisual);
+        // 여러 곳(패 · 필드 등)에서 모은 후보(Other)는 장소를 붙이지 않는다
+        string title = zone == CardChoiceZone.Other ? "카드 고르기" : $"{where}에서 카드 고르기";
+        var picked = MultiCardPicker.Show(_owner, title, question, items, min, max, recommendedKeys, _cardVisual);
         return picked?.Cast<IndexKey>().Select(k => k.Index).ToList() ?? recommended;
     }
 
