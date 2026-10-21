@@ -1067,9 +1067,9 @@ public static class KoreanEffectRenderer
         return list.Count == 0 ? names : string.Join("/", list);
     }
 
-    private static string NameKo(string en) => Glossary.Value.Names.TryGetValue(en.Trim(), out var ko) ? ko : en.Trim();
+    internal static string NameKo(string en) => Glossary.Value.Names.TryGetValue(en.Trim(), out var ko) ? ko : en.Trim();
 
-    private static string TraitKo(string en) => Glossary.Value.Traits.TryGetValue(en.Trim(), out var ko) ? ko : en.Trim();
+    internal static string TraitKo(string en) => Glossary.Value.Traits.TryGetValue(en.Trim(), out var ko) ? ko : en.Trim();
 
     /// <summary>
     /// 카드 이름 · 특징 용어집: 영어 카드 캐시와 공식 한글 데이터(data/kr/cards_ko.json)를 카드 번호로 맞춰 만든다.

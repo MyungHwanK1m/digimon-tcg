@@ -499,7 +499,8 @@ public partial class GoldfishEngine
 
         State.CanMulligan = false;
         State.Player.Hand.Remove(card);
-        int cost = CardScripts.EffectivePlayCost(State.Player, card);   // 카드의 코스트 감소 효과 반영
+        var xros = card.Type == CardType.Digimon ? TakeXrosMaterials(State.Player, card) : new List<CardData>();   // 디지크로스 재료 (1장마다 코스트 -N)
+        int cost = Math.Max(0, CardScripts.EffectivePlayCost(State.Player, card) - XrosReduction(card, xros.Count));   // 카드의 코스트 감소 효과 반영
         State.MemoryGauge -= cost;
         State.TotalMemorySpent += cost;
 
@@ -508,6 +509,7 @@ public partial class GoldfishEngine
         if (card.Type == CardType.Digimon)
         {
             var instance = new CardInstance(card, State.CurrentTurn);
+            PlaceXrosMaterials(instance, xros);
             State.Player.BattleArea.Add(instance);
             RecalculateFieldBuffs();
             if (card.Level == 3)
@@ -516,7 +518,7 @@ public partial class GoldfishEngine
             }
             Log($"디지몬 등장: [{card.Name}(Lv.{card.Level})] (코스트 {cost} 지불)");
 
-            string onPlay = ApplyOnPlayEffects(State.Player, instance);
+            string onPlay = WithXros(instance, xros.Count, () => ApplyOnPlayEffects(State.Player, instance));
             if (onPlay.Length > 0)
                 effectSummary = $" [{onPlay}]";
         }
@@ -1628,15 +1630,17 @@ public partial class GoldfishEngine
         var opp = State.DummyOpponent;
         opp.Hand.Remove(card);
         int beforeMem = ctx.Memory;
+        var xros = TakeXrosMaterials(opp, card);   // 디지크로스: AI는 패의 카드만
         var summoned = new CardInstance(card, State.CurrentTurn) { IsOwnersTurn = true };
+        PlaceXrosMaterials(summoned, xros);
         opp.BattleArea.Add(summoned);
-        int cost = CardScripts.EffectivePlayCost(opp, card);
+        int cost = Math.Max(0, CardScripts.EffectivePlayCost(opp, card) - XrosReduction(card, xros.Count));
         ctx.Memory -= cost;
         RecalculateFieldBuffs();
         Log($"🤖 [AI 등장] [{card.Name}(Lv.{card.Level}, 코스트 {cost})] 소환! (AI 메모리: +{beforeMem} → {ctx.Memory})");
         AddOpponentEvent(OpponentActionKind.Play, "등장", $"{card.Name} (Lv.{card.Level}) · 메모리 {beforeMem} → {ctx.Memory}", card);
 
-        AddEffectEvent(card, CaptureEffectLogs(() => ApplyOnPlayEffects(opp, summoned)));
+        AddEffectEvent(card, CaptureEffectLogs(() => WithXros(summoned, xros.Count, () => ApplyOnPlayEffects(opp, summoned))));
     }
 
     /// <summary>run이 남긴 로그 (줄 머리 "[T.. | .. | M:..] " 제외)</summary>

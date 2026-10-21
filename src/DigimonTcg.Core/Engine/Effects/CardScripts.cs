@@ -160,6 +160,27 @@ public sealed class CardScriptDefinition
         return this;
     }
 
+    /// <summary>디지크로스에서만 이 이름으로도 취급 (영어 이름)</summary>
+    public CardScriptDefinition XrosAlias(string englishName)
+    {
+        _script.XrosAliases.Add(englishName);
+        return this;
+    }
+
+    /// <summary>이 조건이면 트래시의 카드도 이 카드의 디지크로스 재료</summary>
+    public CardScriptDefinition XrosFromTrash(Func<PlayerZones, bool> condition)
+    {
+        _script.XrosFromTrash = condition;
+        return this;
+    }
+
+    /// <summary>테이머: 이 조건의 디지몬을 디지크로스할 때 이 테이머를 레스트시켜 테이머 아래 카드도 재료로</summary>
+    public CardScriptDefinition XrosUnderTamers(Func<CardData, bool> forDigimon)
+    {
+        _script.XrosUnderTamersFor = forDigimon;
+        return this;
+    }
+
     public CardScriptDefinition AllowBreedingActivation()
     {
         _script.ActivateInBreeding = true;

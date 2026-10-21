@@ -196,6 +196,15 @@ public sealed class CardScript
     public Func<CardInstance, bool>? LinkRequirement { get; set; }
     public int LinkCost { get; set; }
 
+    /// <summary>디지크로스에서만 이 이름으로도 취급 ("This card is also treated as [Shoutmon] for a DigiXros") — 영어 이름</summary>
+    public List<string> XrosAliases { get; } = new();
+
+    /// <summary>"(While ~,) cards from your trash may also be placed for this card's DigiXros" — 이 조건(자신의 필드)이면 트래시도 디지크로스 재료</summary>
+    public Func<PlayerZones, bool>? XrosFromTrash { get; set; }
+
+    /// <summary>테이머: "When you would play 1 Digimon (조건) with DigiXros requirements, by suspending this Tamer, you may place cards from under your Tamers ~" — 그 디지몬 조건</summary>
+    public Func<CardData, bool>? XrosUnderTamersFor { get; set; }
+
     /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
     public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }
 

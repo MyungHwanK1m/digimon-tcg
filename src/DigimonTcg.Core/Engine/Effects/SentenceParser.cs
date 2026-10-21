@@ -93,6 +93,43 @@ internal static class SentenceParser
             def?.SpecialEvolution(d => names.Any(n => exact ? d.TopCard.Name.Equals(n, StringComparison.OrdinalIgnoreCase) : TargetSpec.NameHas(d.TopCard, n)), cost);
             return null;
         }
+        // 디지크로스 (엔진의 등장 처리 — GoldfishEngine.DigiXros.cs)
+        // "This card is also treated as [Shoutmon] (or [ZeigGreymon]) for (a) DigiXros" · "When you would DigiXros, this card/Digimon is also treated as [Shoutmon]"
+        var xrosAlias = Regex.Match(clause, $@"^(?:This card is also treated as (?<x>{TargetSpec.NameList}) for (?:a )?DigiXros|When you would DigiXros, this card/Digimon is also treated as (?<x>{TargetSpec.NameList}))\.?$", RegexOptions.IgnoreCase);
+        if (xrosAlias.Success)
+        {
+            foreach (var x in TargetSpec.Names(xrosAlias.Groups["x"].Value)) def?.XrosAlias(x);
+            return null;
+        }
+        // "(While you have a black Tamer,) cards from your trash may also be placed for this card's DigiXros" · "When you would play this card, you can also place cards from your trash in digivolution cards for a DigiXros"
+        var xrosTrash = Regex.Match(clause, @"^(?:While (?<cond>[^,]+), )?cards from your trash may also be placed for this card's DigiXros\.?$|^When you would play this card, you may also place cards from your trash (?:in|as) digivolution cards for a DigiXros\.?$", RegexOptions.IgnoreCase);
+        if (xrosTrash.Success && card.Type == CardType.Digimon)
+        {
+            Func<PlayerZones, bool> cond = _ => true;
+            if (xrosTrash.Groups["cond"].Success)
+            {
+                if (ParseZoneCondition(xrosTrash.Groups["cond"].Value) is { } zc) cond = zc;
+                else if (ParseSideCondition(xrosTrash.Groups["cond"].Value) is { } sc) cond = z => sc(z, z);   // 자신의 필드만 보는 조건
+                else return $"미지원 조건 (디지크로스 트래시: {xrosTrash.Groups["cond"].Value})";
+            }
+            def?.XrosFromTrash(cond);
+            return null;
+        }
+        // 테이머: "[Your Turn] When you would play 1 Digimon with DigiXros requirements, by suspending this Tamer, you may place cards from under your Tamers as digivolution cards for a DigiXros"
+        // · "[All Turns] When any of your [Xros Heart] trait Digimon cards with DigiXros requirements would be played, by suspending this Tamer, ~"
+        var xrosTamer = Regex.Match(clause, $@"^(?:\[(?:Your Turn|All Turns)\]\s*)?When (?:you would play (?:1|a) (?:Digimon(?: card)?|(?<spec1>[^,]*?) Digimon card) with (?:a )?DigiXros requirements?|any of your (?<spec2>[^,]*?) Digimon cards with DigiXros requirements would be played), by suspending this Tamer, you may place cards from under your Tamers as digivolution cards for (?:a|their) DigiXros\.?$", RegexOptions.IgnoreCase);
+        if (xrosTamer.Success && card.Type == CardType.Tamer)
+        {
+            string spec = xrosTamer.Groups["spec1"].Success ? xrosTamer.Groups["spec1"].Value : xrosTamer.Groups["spec2"].Value;
+            Func<CardData, bool> who = _ => true;
+            if (spec.Length > 0)
+            {
+                if (ParseCardPick($"1 {spec} Digimon card") is not { } sp) return $"미지원 디지크로스 조건: {spec}";
+                who = sp.Match;
+            }
+            def?.XrosUnderTamers(who);   // [Your Turn]은 자신이 패에서 등장시킬 때만 일어나므로 그대로
+            return null;
+        }
         // ≪머티리얼 세이브 N≫: 이 디지몬이 소멸할 때 진화원 N장을 자신의 테이머 아래에 놓을 수 있다 (엔진의 소멸 처리)
         var materialSave = Regex.Match(clause, @"^＜Material Save (?<n>\d+)＞\.?$", RegexOptions.IgnoreCase);
         if (materialSave.Success && card.Type == CardType.Digimon)
@@ -1720,6 +1757,8 @@ internal static class SentenceParser
         if (ParseSideCondition(cond) is { } sc) return c => sc(c.Owner, c.Enemy);
         if (Regex.IsMatch(cond, @"^(?:it is )?during an attack$", RegexOptions.IgnoreCase)) return c => c.Engine.CurrentAttacker != null;   // 어택 선언 ~ 어택 종료
         if (Regex.IsMatch(cond, @"^this card was face[- ]up$", RegexOptions.IgnoreCase)) return c => c.Engine.LastCheckedWasFaceUp;   // [시큐리티] 체크한 이 카드가 앞면이었는지
+        if (Regex.Match(cond, @"^DigiXrosing(?: with (?<n>\d+) (?:or more )?cards)?$", RegexOptions.IgnoreCase) is { Success: true } xr)
+        { int need = xr.Groups["n"].Success ? int.Parse(xr.Groups["n"].Value) : 1; return c => c.Engine.XrosCountOf(c.Self) >= need; }   // 디지크로스로 등장하는 중 (놓은 장수)
         if (Regex.Match(cond, $@"^any of them (?:have|has) the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase) is { Success: true } anyOf)
         { var xs = TargetSpec.Names(anyOf.Groups["x"].Value); return c => c.TriggerCard != null && xs.Any(x => TargetSpec.HasTrait(c.TriggerCard, x)); }   // "When cards are placed face up ~, if any of them have the [X] trait"
         Match m;
@@ -3029,6 +3068,8 @@ internal static class SentenceParser
             { var xs = TargetSpec.Names(f.Groups["x"].Value); filters.Add(c => xs.Any(x => TargetSpec.NameHas(c, x))); }
             else if ((f = Regex.Match(rest, $@"^(?:with |and |or |,\s*)?(?:the )?(?<x>{TargetSpec.NameList}) traits?|^(?:with |,\s*)?(?<x>{TargetSpec.NameList}) in any of its traits", RegexOptions.IgnoreCase)).Success)
             { var xs = TargetSpec.Names(f.Groups["x"].Value); filters.Add(c => xs.Any(x => TargetSpec.HasTrait(c, x))); }
+            else if ((f = Regex.Match(rest, @"^(?:with |and )?(?:a )?DigiXros requirements?", RegexOptions.IgnoreCase)).Success)
+                filters.Add(GoldfishEngine.HasDigiXros);   // 디지크로스 조건 (공식 한글 문구)
             else if ((f = Regex.Match(rest, $@"^(?:with |and |or |,\s*)?(?<x>{TargetSpec.NameList}) in (?:its|their) texts?", RegexOptions.IgnoreCase)).Success)
             { var xs = TargetSpec.Names(f.Groups["x"].Value); filters.Add(c => xs.Any(x => TargetSpec.TextHas(c, x))); }
             else if ((f = Regex.Match(rest, @"^(?:with |and |,\s*)?(?:a )?play costs? of (?<n>\d+) or (?<dir>less|more)", RegexOptions.IgnoreCase)).Success)
