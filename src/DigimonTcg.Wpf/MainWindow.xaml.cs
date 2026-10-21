@@ -1888,8 +1888,10 @@ public partial class MainWindow : Window
         if (remainingCards.Count > 0)
         {
             var nextCard = remainingCards[0];
-            TxtNextSecurityTarget.Text = peek
-                ? $"🎯 다음 타격 (#{clearedCount + 1}): [{nextCard.DisplayName}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : nextCard.Type.ToString())}"
+            // 앞면으로 놓인 시큐리티는 공개 정보 — 실전에서도 보여 준다
+            bool nextFaceUp = GoldfishEngine.IsFaceUp(_gameState.DummyOpponent, nextCard);
+            TxtNextSecurityTarget.Text = peek || nextFaceUp
+                ? $"🎯 다음 타격 (#{clearedCount + 1}{(nextFaceUp ? " · 앞면" : "")}): [{nextCard.DisplayName}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : nextCard.Type.ToString())}"
                 : $"🎯 다음 타격: 시큐리티 #{clearedCount + 1} (뒷면 비공개)";
             TxtNextSecurityTarget.Foreground = BrushFromHex("#89DCEB");
         }
@@ -1928,7 +1930,8 @@ public partial class MainWindow : Window
             var card = remainingCards[i];
             int slotNum = clearedCount + i + 1;
             bool isNext = i == 0;
-            var widget = (FrameworkElement)CreateSecuritySlotWidget(card, slotNum, isCleared: false, isBattleWon: true, isNextTarget: isNext, showFace: peek);
+            var widget = (FrameworkElement)CreateSecuritySlotWidget(card, slotNum, isCleared: false, isBattleWon: true, isNextTarget: isNext,
+                showFace: peek || GoldfishEngine.IsFaceUp(_gameState.DummyOpponent, card));
             OpponentSecurityPanel.Children.Add(widget);
             if (isNext)
                 nextTargetSlot = widget;
@@ -2754,7 +2757,40 @@ public partial class MainWindow : Window
 
         for (int i = 0; i < 5; i++)
         {
-            if (i < myRemainingCount)
+            if (i < myRemainingCount && _gameState.Player.SecurityStack[i] is var mySec && GoldfishEngine.IsFaceUp(_gameState.Player, mySec))
+            {
+                // 앞면으로 놓인 시큐리티 (공개 정보) — 카드 그림으로 보여 준다
+                var faceUpGrid = new Grid();
+                if (GetCardBitmap(mySec) is { } secBmp)
+                {
+                    var secImg = new Image { Source = secBmp, Stretch = Stretch.UniformToFill };
+                    RenderOptions.SetBitmapScalingMode(secImg, BitmapScalingMode.HighQuality);
+                    faceUpGrid.Children.Add(secImg);
+                }
+                faceUpGrid.Children.Add(new Border
+                {
+                    Background = BrushFromHex("#CC050A18"),
+                    CornerRadius = new CornerRadius(0, 0, 3, 0),
+                    Padding = new Thickness(3, 0, 3, 0),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Child = new TextBlock { Text = $"{i + 1} 앞면", Foreground = BrushFromHex("#F9E2AF"), FontWeight = FontWeights.ExtraBold, FontSize = 9 }
+                });
+                var faceUpBox = new Border
+                {
+                    BorderBrush = BrushFromHex("#F9E2AF"),
+                    BorderThickness = new Thickness(1.5),
+                    CornerRadius = new CornerRadius(3),
+                    Margin = new Thickness(1, 0, 1, 0),
+                    ClipToBounds = true,
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    ToolTip = $"내 시큐리티 #{i + 1} (앞면 공개): {mySec.DisplayName}",
+                    Child = faceUpGrid
+                };
+                faceUpBox.MouseEnter += (_, _) => UpdateCardInspector(mySec);
+                MySecurityVisualStack.Children.Add(faceUpBox);
+            }
+            else if (i < myRemainingCount)
             {
                 // 실제 플레이매트처럼 시큐리티는 가로로 눕힌 카드 뒷면
                 var activeSecBox = new Border
