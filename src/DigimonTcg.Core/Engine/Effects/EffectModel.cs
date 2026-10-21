@@ -58,6 +58,7 @@ public enum EffectTrigger
     AllyFaceUpSecurityPlaced,       // 자신의 시큐리티에 카드가 앞면으로 놓였을 때 (TriggerCard = 그 카드)
     OpponentFaceUpSecurityPlaced,   // 상대의 시큐리티에 카드가 앞면으로 놓였을 때 (TriggerCard)
     AllyCheckedFaceUpSecurity,      // 자신의 디지몬이 앞면 시큐리티 카드를 체크했을 때 (Other = 체크한 디지몬, TriggerCard = 그 카드)
+    ThisDigimonWouldDnaDigivolve,   // 이 디지몬이 DNA 진화하려 할 때 (TriggerCard = DNA 진화할 카드)
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>

@@ -106,4 +106,62 @@ public class Phase7KoreanDataTests
             Assert.Equal(3 - 3, state.MemoryGauge);
         });
     }
+
+    // ---- DNA 진화 (조그레스 조건은 공식 한글 문구에서) ----
+
+    [Fact]
+    public void DnaDigivolve_ShouldStackBothDigimonUnsuspendDrawAndRunWhenDigivolving()
+    {
+        WithKoreanCards(new[] { Ko("P7-DNA-HOST", "테스트조그레스몬", "〔조그레스〕블루 Lv.4+그린 Lv.4 : 코스트 0　지정된 디지몬 2마리를 겹쳐 액티브로 진화시킨다") }, () =>
+        {
+            var (state, engine, cards) = NewMainPhase();
+            state.MemoryGauge = 3;
+            var blue = new CardInstance(Api("P7-DNA-BU", 3, 3000, color: CardColor.Blue), 1) { IsSuspended = true };
+            blue.Evolve(Api("P7-DNA-B", 4, 5000, color: CardColor.Blue));
+            var green = new CardInstance(Api("P7-DNA-G", 4, 4000, color: CardColor.Green), 2);
+            var red = new CardInstance(Api("P7-DNA-R", 4, 4000), 1);
+            state.Player.BattleArea.AddRange(new[] { blue, green, red });
+            state.Player.MainDeck.AddRange(Enumerable.Range(0, 3).Select(i => cards["ST1-03"]));
+            var host = Api("P7-DNA-HOST", 5, 9000, color: CardColor.Blue, main: "[When Digivolving] If DNA digivolving, gain 2 memory.");
+            state.Player.Hand.Add(host);
+
+            var pairs = engine.GetDnaPairs(host);
+            Assert.Single(pairs);                                            // 블루 Lv.4 + 그린 Lv.4 (레드는 아님)
+            Assert.False(engine.DnaDigivolve(host, blue, red).CanExecute);
+            Assert.True(engine.DnaDigivolve(host, green, blue).CanExecute);  // 순서가 바뀌어도 된다
+
+            Assert.Equal(2, state.Player.BattleArea.Count);                  // 블루 · 그린 → 1마리 + 레드
+            Assert.Same(host, blue.TopCard);                                 // 왼쪽(블루) 위에 겹친다
+            Assert.Equal(new[] { "P7-DNA-B", "P7-DNA-BU", "P7-DNA-G" }, blue.EvolutionSources.Select(c => c.CardId).ToArray());
+            Assert.False(blue.IsSuspended);                                  // 액티브로 진화
+            Assert.Single(state.Player.Hand);                                // 진화 보너스 1장
+            Assert.Equal(3 - 0 + 2, state.MemoryGauge);                      // 코스트 0, DNA 진화 [진화 시] +2
+        });
+    }
+
+    [Fact]
+    public void DnaDigivolveByEffect_ShouldUseTheRequirementAndCost()
+    {
+        WithKoreanCards(new[] { Ko("P7-DNA2-HOST", "테스트조그레스몬2", "〔조그레스〕「테스트몬A」+「테스트몬B」 : 코스트 1"), Ko("P7-DNA2-A", "테스트몬A"), Ko("P7-DNA2-B", "테스트몬B") }, () =>
+        {
+            var (state, engine, cards) = NewMainPhase();
+            state.MemoryGauge = 3;
+            var a = new CardInstance(Api("P7-DNA2-A", 5, 6000), 1);
+            var b = new CardInstance(Api("P7-DNA2-B", 5, 6000), 1);
+            state.Player.BattleArea.AddRange(new[] { a, b });
+            state.Player.MainDeck.AddRange(Enumerable.Range(0, 3).Select(i => cards["ST1-03"]));
+            var host = Api("P7-DNA2-HOST", 6, 11000);
+            state.Player.Hand.Add(host);
+            var opt = Api("P7-DNA2-OPT", 0, 0, type: CardType.Option, playCost: 0,
+                main: "[Main] 2 of your Digimon may DNA digivolve into a Digimon card in the hand.");
+            state.Player.Hand.Add(opt);
+
+            engine.PlayCard(opt);
+
+            var inst = Assert.Single(state.Player.BattleArea);
+            Assert.Same(host, inst.TopCard);
+            Assert.Equal(3 - 1, state.MemoryGauge);                          // 조그레스 코스트 1
+        });
+    }
+
 }

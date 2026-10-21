@@ -44,7 +44,7 @@ internal static class SentenceParser
         [EffectTrigger.AllyHatched] = "부화했을 때", [EffectTrigger.AllyDigimonMovedFromBreeding] = "육성 에어리어에서 이동했을 때",
         [EffectTrigger.OpponentDigimonMovedFromBreeding] = "상대 디지몬이 육성 에어리어에서 이동했을 때",
         [EffectTrigger.AllyFaceUpSecurityPlaced] = "앞면으로 놓였을 때", [EffectTrigger.OpponentFaceUpSecurityPlaced] = "상대 카드가 앞면으로 놓였을 때",
-        [EffectTrigger.AllyCheckedFaceUpSecurity] = "앞면 카드를 체크했을 때",
+        [EffectTrigger.AllyCheckedFaceUpSecurity] = "앞면 카드를 체크했을 때", [EffectTrigger.ThisDigimonWouldDnaDigivolve] = "DNA 진화하려 할 때",
     };
 
     private static readonly Dictionary<string, Keyword> GrantableKeywords = new(StringComparer.OrdinalIgnoreCase)
@@ -448,6 +448,7 @@ internal static class SentenceParser
         s = Regex.Replace(s, @"\bopponents Digimon\b", "opponent's Digimon", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"\bwithout paying (the|their|its) costs\b", "without paying $1 cost", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"(?<=[.＞]\s*)When you do, ", "Then, ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"(?<=\]\s*)When DNA digivolving, ", "If DNA digivolving, ", RegexOptions.IgnoreCase);   // "[When Digivolving] When DNA digivolving, ~"
         s = Regex.Replace(s, @"\bAny \[On Play\] effects on the Digimon played\b", "Any [On Play] effects on Digimon played", RegexOptions.IgnoreCase);
         s = Regex.Replace(s, @"(?<=\.\s*)\[On Play\] effects of (?:Tamers|Digimon|cards) played by this effect don't activate", "Any [On Play] effects on cards played by this effect don't activate", RegexOptions.IgnoreCase);
         // "During your opponent's next unsuspend phase, none of your opponent's Digimon can unsuspend" → "~ don't unsuspend during ~"
@@ -531,6 +532,13 @@ internal static class SentenceParser
             return One(EffectTrigger.OpponentDigimonMovedFromBreeding);
         if (Regex.IsMatch(ev, @"^you hatch (?:a Digi-Egg )?in (?:the|your) breeding area$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.AllyHatched);
+        // DNA 진화: "When this Digimon would DNA digivolve (into a green Digimon card)"
+        if ((m = Regex.Match(ev, @"^this Digimon would DNA digivolve(?: into (?<pick>.+))?$", RegexOptions.IgnoreCase)).Success)
+        {
+            if (!m.Groups["pick"].Success) return One(EffectTrigger.ThisDigimonWouldDnaDigivolve);
+            if ((ParseCardPick(Regex.Replace(m.Groups["pick"].Value, @"^an? ", "1 ")) ?? ParseNamePick("1 " + m.Groups["pick"].Value)) is not { } dnaPick) return null;
+            return One(EffectTrigger.ThisDigimonWouldDnaDigivolve, c => c.TriggerCard != null && dnaPick.Match(c.TriggerCard));
+        }
         // 앞면 시큐리티: "When this Digimon checks a face-up security card" · "When any of your Digimon check face-up security cards"
         if (Regex.IsMatch(ev, @"^this Digimon checks (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.AllyCheckedFaceUpSecurity, c => ReferenceEquals(c.Other, c.Self));
@@ -1760,6 +1768,8 @@ internal static class SentenceParser
         if (Regex.Match(cond, @"^DigiXrosing(?: with (?<n>\d+) (?:or more )?cards)?$", RegexOptions.IgnoreCase) is { Success: true } xr)
         { int need = xr.Groups["n"].Success ? int.Parse(xr.Groups["n"].Value) : 1; return c => c.Engine.XrosCountOf(c.Self) >= need; }   // 디지크로스로 등장하는 중 (놓은 장수)
         if (Regex.IsMatch(cond, @"^attacking by ＜Execute＞$", RegexOptions.IgnoreCase)) return c => c.Engine.IsExecuteAttack(c.Other ?? c.Self);   // ≪에그제큐트≫ 어택 중 (어택 사건이면 Other = 어택한 디지몬)
+        if (Regex.IsMatch(cond, @"^DNA digivolving$", RegexOptions.IgnoreCase)) return c => c.Engine.IsDnaDigivolving(c.Self);   // DNA 진화로 [진화 시] 중
+        if (Regex.IsMatch(cond, @"^this effect DNA digivolved$", RegexOptions.IgnoreCase)) return c => c.LastStepResolved;   // 앞 문장의 DNA 진화가 일어났는지
         if (Regex.Match(cond, $@"^any of them (?:have|has) the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase) is { Success: true } anyOf)
         { var xs = TargetSpec.Names(anyOf.Groups["x"].Value); return c => c.TriggerCard != null && xs.Any(x => TargetSpec.HasTrait(c.TriggerCard, x)); }   // "When cards are placed face up ~, if any of them have the [X] trait"
         Match m;
@@ -2830,6 +2840,47 @@ internal static class SentenceParser
             return (c => { actA(c); actB(c); }, null);
         }
 
+        // DNA 진화: "2 of your Digimon may DNA digivolve into [Silphymon] in the hand" · "This Digimon and any of your other Digimon may DNA digivolve into a Digimon card in the hand"
+        // (조그레스 조건 · 코스트는 그 카드의 것 — 공식 한글 문구, GoldfishEngine.Dna.cs)
+        if ((m = Regex.Match(s, @"^(?<who>2 of your Digimon|this Digimon and (?:any of )?(?:your other|another of your) (?<spec>[^,]*?)Digimon(?<with> with [^,]+?)?) (?:may )?DNA digivolve into (?<pick>.+?) in (?:the|your) hand(?<free> without paying (?:the|its) cost)?$", RegexOptions.IgnoreCase)).Success)
+        {
+            bool withSelf = m.Groups["who"].Value.StartsWith("this", StringComparison.OrdinalIgnoreCase);
+            var other = withSelf ? TargetSpec.Parse("all of your " + m.Groups["spec"].Value + "Digimon" + m.Groups["with"].Value) : null;
+            var pick = ParseCardPick("1 " + m.Groups["pick"].Value) ?? ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick("1 " + m.Groups["pick"].Value);
+            if (pick == null || (withSelf && other == null)) return (null, $"미지원 DNA 진화 대상: {s}");
+            var match = pick.Value.Match;
+            bool free = m.Groups["free"].Success;
+            return (c =>
+            {
+                Func<CardInstance, CardInstance, bool> pairOk = (l, r) => !withSelf || ReferenceEquals(l, c.Self) && other!.Filters.All(f => f(r)) || ReferenceEquals(r, c.Self) && other!.Filters.All(f => f(l));
+                var options = c.Owner.Hand.Where(x => x.Type == CardType.Digimon && match(x))
+                    .Select(x => (Card: x, Pairs: c.Engine.DnaPairs(c.Owner, x).Where(p => pairOk(p.Left, p.Right)).ToList()))
+                    .Where(o => o.Pairs.Count > 0 && (free || (GoldfishEngine.GetDnaCost(o.Card) ?? 99) <= Math.Max(0, c.OwnerMemory) || !c.OwnerIsPlayer))
+                    .OrderByDescending(o => o.Card.Level).ThenByDescending(o => o.Card.DP).ToList();
+                if (options.Count == 0 || !c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] DNA 진화할까요? (후보: {string.Join(", ", options.Select(o => o.Card.Name).Distinct())})", recommended: true))
+                {
+                    c.LastStepResolved = false;
+                    Emit(c, label, options.Count == 0 ? "DNA 진화할 수 있는 카드 · 디지몬이 없습니다" : "DNA 진화하지 않았습니다");
+                    return;
+                }
+                var cardsList = options.Select(o => o.Card).ToList();
+                int ci = c.Engine.ChooseCardIndexes(c.Owner, CardChoiceZone.Hand, cardsList, 1, upTo: false, $"[{c.Card.Name}] DNA 진화할 카드를 고르세요.").FirstOrDefault();
+                var chosen = options[Math.Clamp(ci, 0, options.Count - 1)];
+                // 두 마리: 첫 번째 → 그와 짝이 되는 두 번째 (추천 = 진화원이 많은 쪽부터)
+                var firsts = chosen.Pairs.SelectMany(p => new[] { p.Left, p.Right }).Distinct().OrderByDescending(d => d.EvolutionSources.Count).ToList();
+                var a = c.Engine.ChooseTargets(c.Owner, firsts, 1, $"[{chosen.Card.Name}]으로 DNA 진화할 디지몬 1마리를 고르세요.", optional: false, preselected: firsts[0]).FirstOrDefault() ?? firsts[0];
+                var partners = chosen.Pairs.Where(p => ReferenceEquals(p.Left, a) || ReferenceEquals(p.Right, a)).Select(p => ReferenceEquals(p.Left, a) ? p.Right : p.Left).Distinct().ToList();
+                if (partners.Count == 0) { c.LastStepResolved = false; Emit(c, label, "짝이 되는 디지몬이 없습니다"); return; }
+                var b = partners.Count == 1 ? partners[0]
+                    : c.Engine.ChooseTargets(c.Owner, partners, 1, $"[{a.TopCard.Name}]과(와) 함께 DNA 진화할 디지몬을 고르세요.", optional: false, preselected: partners[0]).FirstOrDefault() ?? partners[0];
+                int cost = free ? 0 : GoldfishEngine.GetDnaCost(chosen.Card) ?? 0;
+                var dnaMsg = c.Engine.DnaDigivolveCore(c.Owner, chosen.Card, a, b, cost, c.Owner.Hand);
+                var dnaDigimon = c.Owner.BattleArea.FirstOrDefault(d => ReferenceEquals(d.TopCard, chosen.Card));
+                c.LastTargets = dnaDigimon != null ? new List<CardInstance> { dnaDigimon } : new List<CardInstance>();
+                c.LastStepResolved = dnaDigimon != null;
+                Emit(c, label, dnaMsg);
+            }, null);
+        }
         // "1 of your Digimon may digivolve into [Greymon] in the hand without paying the cost" · "~ in the hand or trash" · "~ from your trash"
         // 육성: "1 of your Digimon in the breeding area may digivolve into ~" (육성 에어리어에서의 진화 — [진화 시]는 발휘하지 않는다)
         if ((m = Regex.Match(s, @"^(?<t>(?<breed>(?:\d+ of )?your (?<bspec>[^,]*?)Digimon(?<bwith> with [^,]+?)? in (?:the|your) breeding area)|this Digimon|\d+ of your Digimon(?: with [^,]+?)?) (?:may )?digivolves? into (?<pick>.+?) (?:in|from) (?:the |your )?(?<from>hand or (?:the |your |from your )?trash|hand|trash)(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success)
