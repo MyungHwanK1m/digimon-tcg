@@ -59,6 +59,7 @@ public static class KeywordDictionary
         ["Armor Purge"] = Keyword.ArmorPurge, ["아머 퍼지"] = Keyword.ArmorPurge,
         ["Fortitude"] = Keyword.Fortitude, ["불굴"] = Keyword.Fortitude,
         ["Collision"] = Keyword.Collision, ["충돌"] = Keyword.Collision,
+        ["Vortex"] = Keyword.Vortex, ["볼텍스"] = Keyword.Vortex, ["Execute"] = Keyword.Execute, ["에그제큐트"] = Keyword.Execute,
         ["Scapegoat"] = Keyword.Scapegoat, ["스케이프고트"] = Keyword.Scapegoat,
         ["Iceclad"] = Keyword.Iceclad, ["빙장"] = Keyword.Iceclad,
         ["Progress"] = Keyword.Progress, ["프로그레스"] = Keyword.Progress,

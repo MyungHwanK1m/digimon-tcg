@@ -32,6 +32,7 @@ public partial class GoldfishEngine
         public CardInstance? AttackTarget;    // 지금 어택의 대상 (≪돌진≫으로 바꾼 내 디지몬, 없으면 시큐리티)
         public CardInstance? BlitzAttacker;   // ≪진격≫으로 메모리가 상대 쪽이어도 어택할 수 있는 AI 디지몬
         public int AttacksDeclared;           // 이번 턴에 정책에서 받은 어택 수 (무한 반복 방지)
+        public bool EndPhase;                 // 턴 종료 단계 ([자신의 턴 종료 시] 효과 뒤 ≪볼텍스≫ · ≪에그제큐트≫ 어택)
     }
 
     private AiTurnContext? _aiTurn;
@@ -599,6 +600,14 @@ public partial class GoldfishEngine
             return validation;
 
         State.CanMulligan = false;
+        string resultMsg = PlayerAttackOnDigimonCore(attacker, defender);
+        EndTurnIfMemoryNegative();
+        return ActionResult.Success(resultMsg);
+    }
+
+    /// <summary>내 디지몬이 상대 디지몬을 어택한다 (검사 없이 — ≪볼텍스≫ · ≪에그제큐트≫도 쓴다). 반환: 결과 메시지</summary>
+    private string PlayerAttackOnDigimonCore(CardInstance attacker, CardInstance defender)
+    {
         Suspend(attacker);
         State.BlitzAttacker = null;
         _playerAttackRedirect = null;
@@ -612,8 +621,7 @@ public partial class GoldfishEngine
         string resultMsg = ResolvePlayerAttackOnDigimon(attacker, defender);
         Log(resultMsg);
         EndAttack(attacker);
-        EndTurnIfMemoryNegative();
-        return ActionResult.Success(resultMsg);
+        return resultMsg;
     }
 
     /// <summary>내 디지몬이 상대 디지몬을 어택한 뒤의 처리: 상대 ≪블로커≫의 블록 → 배틀 → ≪관통≫. 반환: 결과 메시지</summary>
@@ -663,6 +671,14 @@ public partial class GoldfishEngine
             return validation;
 
         State.CanMulligan = false;
+        var result = PlayerSecurityAttackCore(attacker);
+        EndTurnIfMemoryNegative();
+        return result;
+    }
+
+    /// <summary>내 디지몬이 시큐리티(플레이어)를 어택한다 (검사 없이 — ≪에그제큐트≫도 쓴다)</summary>
+    private ActionResult PlayerSecurityAttackCore(CardInstance attacker)
+    {
         Suspend(attacker);
         State.BlitzAttacker = null;
         _playerAttackRedirect = null;
@@ -684,7 +700,6 @@ public partial class GoldfishEngine
             result = ResolveSecurityAttack(attacker);
         }
         EndAttack(attacker);
-        EndTurnIfMemoryNegative();
         return result;
     }
 
@@ -958,6 +973,9 @@ public partial class GoldfishEngine
         State.CurrentPhase = Phase.TurnEnd;
         Log($"메모리가 {State.MemoryGauge}(0 미만)이 되어 플레이어 턴이 종료됩니다.");
         TriggerEndOfTurn(State.Player);
+        RunPlayerEndOfTurnAttacks();   // ≪볼텍스≫ · ≪에그제큐트≫ (턴 종료 시 어택)
+        if (State.IsGameOver)
+            return true;
         TriggerEndOfOpponentTurn(State.DummyOpponent);
 
         // [이 턴 종료 시] 메모리 -N 효과 (메탈그레이몬 BT1-021 등): 상대에게 그만큼 더 넘어간다
@@ -1175,6 +1193,8 @@ public partial class GoldfishEngine
             // 다음 어택은 정책에 묻는다 — 받은 대상(내 레스트 디지몬)이 어택 대상의 처음 값 (≪돌진≫ 등 키워드가 바꿀 수 있다)
             if (ctx.Attackers.Count == 0)
             {
+                if (ctx.EndPhase)
+                    break;   // 턴 종료 시 어택(≪볼텍스≫ · ≪에그제큐트≫)이 끝났다
                 if (ctx.IsOpeningTurn || State.IsGameOver || ctx.AttacksDeclared >= MaxAiAttacksPerTurn
                     || AiPolicy.ChooseNextAttack(this, ctx.Memory) is not { } next)
                     break;
@@ -1191,7 +1211,7 @@ public partial class GoldfishEngine
             }
 
             // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료! (≪진격≫ 어택은 예외)
-            if (ctx.Memory < 0 && !ReferenceEquals(ctx.Attackers.Peek(), ctx.BlitzAttacker))
+            if (ctx.Memory < 0 && !ctx.EndPhase && !ReferenceEquals(ctx.Attackers.Peek(), ctx.BlitzAttacker))
             {
                 Log($"⚡ AI 메모리가 {ctx.Memory}(0 미만)이 되어 AI의 추가 공격 및 메인 페이즈가 즉시 종료됩니다!");
                 ctx.Attackers.Clear();
@@ -1256,7 +1276,8 @@ public partial class GoldfishEngine
             }
         }
 
-        FinishAiTurn(ctx);
+        if (ctx.EndPhase) EndAiTurn(ctx);
+        else FinishAiTurn(ctx);
     }
 
     private void EndAiAttack(AiTurnContext ctx, CardInstance aiAttacker)
@@ -1568,8 +1589,33 @@ public partial class GoldfishEngine
             ctx.BlitzAttacker = null;
         }
 
-        AddEffectEvent(State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" },
-            CaptureEffectLogs(() => { TriggerEndOfTurn(State.DummyOpponent); TriggerEndOfOpponentTurn(State.Player); }));
+        EndAiTurn(ctx);
+    }
+
+    /// <summary>AI 턴 종료: [자신의 턴 종료 시] → ≪볼텍스≫ · ≪에그제큐트≫ 어택(RunAiTurn이 처리하고 다시 여기로) → [상대의 턴 종료 시] → 내 턴</summary>
+    private void EndAiTurn(AiTurnContext ctx)
+    {
+        var endLabel = State.DummyOpponent.Tamers.FirstOrDefault() ?? State.DummyOpponent.BattleArea.FirstOrDefault()?.TopCard ?? new CardData { Name = "상대" };
+        if (!ctx.EndPhase)
+        {
+            ctx.EndPhase = true;
+            _endOfTurnAttacked.Clear();
+            AddEffectEvent(endLabel, CaptureEffectLogs(() => TriggerEndOfTurn(State.DummyOpponent)));
+        }
+        if (!State.IsGameOver && NextAiEndOfTurnAttack() is { } eot)
+        {
+            Log($"🤖 [{(eot.Execute ? "≪에그제큐트≫" : "≪볼텍스≫")}] AI [{eot.Attacker.TopCard.Name}]이(가) 턴 종료 시 어택합니다!");
+            ctx.AttackTarget = eot.Target;
+            ctx.Attackers.Enqueue(eot.Attacker);
+            RunAiTurn();
+            return;
+        }
+        if (State.IsGameOver)
+        {
+            _aiTurn = null;
+            return;
+        }
+        AddEffectEvent(endLabel, CaptureEffectLogs(() => TriggerEndOfOpponentTurn(State.Player)));
         int aiMemory = ctx.Memory;
         int aiEndOfTurnMemoryLoss = ctx.EndOfTurnMemoryLoss;
         if (aiMemory >= 0)

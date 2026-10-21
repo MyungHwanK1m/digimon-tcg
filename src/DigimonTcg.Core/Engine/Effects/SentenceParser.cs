@@ -54,7 +54,7 @@ internal static class SentenceParser
         ["Barrier"] = Keyword.Barrier, ["Evade"] = Keyword.Evade,
         ["Armor Purge"] = Keyword.ArmorPurge, ["Fortitude"] = Keyword.Fortitude, ["Collision"] = Keyword.Collision, ["Scapegoat"] = Keyword.Scapegoat,
         ["Iceclad"] = Keyword.Iceclad, ["Progress"] = Keyword.Progress,
-        ["Link +1"] = Keyword.LinkPlusOne,
+        ["Link +1"] = Keyword.LinkPlusOne, ["Vortex"] = Keyword.Vortex, ["Execute"] = Keyword.Execute,
     };
 
     /// <summary>파싱한 절을 스크립트에 등록하는 일 (전부 읽은 뒤에만 등록한다)</summary>
@@ -1759,6 +1759,7 @@ internal static class SentenceParser
         if (Regex.IsMatch(cond, @"^this card was face[- ]up$", RegexOptions.IgnoreCase)) return c => c.Engine.LastCheckedWasFaceUp;   // [시큐리티] 체크한 이 카드가 앞면이었는지
         if (Regex.Match(cond, @"^DigiXrosing(?: with (?<n>\d+) (?:or more )?cards)?$", RegexOptions.IgnoreCase) is { Success: true } xr)
         { int need = xr.Groups["n"].Success ? int.Parse(xr.Groups["n"].Value) : 1; return c => c.Engine.XrosCountOf(c.Self) >= need; }   // 디지크로스로 등장하는 중 (놓은 장수)
+        if (Regex.IsMatch(cond, @"^attacking by ＜Execute＞$", RegexOptions.IgnoreCase)) return c => c.Engine.IsExecuteAttack(c.Other ?? c.Self);   // ≪에그제큐트≫ 어택 중 (어택 사건이면 Other = 어택한 디지몬)
         if (Regex.Match(cond, $@"^any of them (?:have|has) the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase) is { Success: true } anyOf)
         { var xs = TargetSpec.Names(anyOf.Groups["x"].Value); return c => c.TriggerCard != null && xs.Any(x => TargetSpec.HasTrait(c.TriggerCard, x)); }   // "When cards are placed face up ~, if any of them have the [X] trait"
         Match m;

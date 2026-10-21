@@ -8,6 +8,7 @@ using Xunit;
 namespace DigimonTcg.Core.Tests;
 
 /// <summary>효과 확장 6단계 — 영어 효과 문장을 공식 한글판 표기로 만드는지 (공식 한글이 없는 카드의 화면 표시)</summary>
+[Collection("KoreanCardData")]   // KoreanCardData.Reload(전역)을 쓰는 테스트끼리 차례로
 public class KoreanEffectRendererTests
 {
     [Theory]

@@ -78,7 +78,7 @@ public partial class GoldfishEngine
             {
                 var ranked = cands.OrderBy(p => p.Instance != null ? 1 : 0).ToList();   // 추천 = 패 → 트래시 · 테이머 아래 → 필드
                 var idx = ChooseCardIndexes(owner, CardChoiceZone.Other, ranked.Select(p => p.Card).ToList(), max, upTo: true,
-                    $"[{card.Name}] 디지크로스 ({slot.Text}) — 아래에 놓을 카드를 고르세요 (1장마다 코스트 -{req.Reduction}, 필드의 디지몬은 그 카드만 놓고 진화원은 트래시).");
+                    $"[{card.Name}] 디지크로스 ({slot.Text}) — 패 · 필드에서 이 카드 아래에 놓을 카드를 고르세요 (1장마다 코스트 -{req.Reduction}, 필드의 디지몬은 그 카드만 놓고 진화원은 트래시).");
                 chosen = idx.Select(i => ranked[i]).ToList();
             }
             else

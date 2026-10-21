@@ -767,6 +767,7 @@ public partial class GoldfishEngine
             RunEffects(EffectTrigger.EndOfAttack, owner, attacker, attacker.TopCard);
             RecalculateFieldBuffs();
         }
+        FinishExecuteAttack(attacker);   // ≪에그제큐트≫: 어택 종료 시 소멸
     }
 
     /// <summary>[자신의 턴 개시 시] 효과 — 자신의 디지몬(메인 · 진화원)과 테이머</summary>
