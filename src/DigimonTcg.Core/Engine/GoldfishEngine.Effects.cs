@@ -699,7 +699,8 @@ public partial class GoldfishEngine
     {
         if (!ReferenceEquals(owner, State.Player) || PlayerChoices == null || options.Count <= 1)
             return recommended;
-        int pick = PlayerChoices.ChooseOption(State, question, options, recommended);
+        // 질문 · 선택지의 영어 카드 이름 → 공식 한글 이름
+        int pick = PlayerChoices.ChooseOption(State, KoreanNameLocalizer.Localize(question), options.Select(KoreanNameLocalizer.Localize).ToList(), recommended);
         return pick >= 0 && pick < options.Count ? pick : recommended;
     }
 

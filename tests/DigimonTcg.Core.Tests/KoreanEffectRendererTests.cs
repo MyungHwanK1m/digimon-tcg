@@ -150,4 +150,21 @@ public class KoreanEffectRendererTests
         // 공식 한글이 없는 카드도 같은 영어 이름의 공식 한글 이름으로 표시
         Assert.Equal("아구몬", KoreanCardData.DisplayName(new CardData { CardId = "TEST-NOOFF-1", Name = "Agumon", Type = CardType.Digimon }));
     }
+
+    [Fact]
+    public void Phase7Sentences_ShouldRender()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        Assert.Equal("【서로의 턴】 [턴에 1회] 이 디지몬이 자신의 효과 이외로 배틀 에어리어를 벗어날 때, 이 디지몬의 링크 카드를 1장 파기하는 것으로, 그 디지몬은 배틀 에어리어를 벗어나지 않는다.",
+            R("[All Turns] [Once Per Turn] When this Digimon would leave the battle area other than by your effects, by trashing 1 of its link cards, it doesn't leave."));
+        Assert.Contains("액티브가 되지 않는다", R("[On Play] 1 of your opponent's Digimon or Tamers can't unsuspend until the end of their turn."));
+        Assert.Contains("레스트할 수 없다", R("[On Play] 1 of your opponent's Digimon or Tamers can't suspend until the end of their turn."));
+        Assert.Equal("【등장 시】 디지몬 1마리를 레스트시킬 수 있다.", R("[On Play] You may suspend 1 Digimon."));
+        Assert.Contains("이 디지몬과 다른 자신의 디지몬으로, 패의 디지몬 카드로 조그레스 진화할 수 있다", R("[End of Your Turn] This Digimon and any of your other Digimon may DNA digivolve into a Digimon card in the hand."));
+        Assert.Contains("이 디지몬에게 코스트를 지불하지 않고 링크할 수 있다", R("[On Play] You may link 1 level 4 or lower Digimon card from your hand to this Digimon without paying the cost."));
+        Assert.Contains("이 디지몬이 링크했을 때", R("[Your Turn] When this Digimon gets linked, ＜Draw 1＞"));
+        Assert.Contains("이 카드를 시큐리티 아래에 앞면으로 놓는다", R("[Main] Add your bottom security card to the hand. Then, place this card face up as the bottom security card."));
+        // "이 효과로 등장한 카드의 【등장 시】 효과는 발휘하지 않는다"를 빼먹지 않는다 (BT2-038)
+        Assert.Contains("【등장 시】 효과는 발휘하지 않는다", R("[When Digivolving] You may play 1 yellow Tamer card from your hand without paying the cost. [On Play] effects of Tamers played by this effect don't activate."));
+    }
 }
