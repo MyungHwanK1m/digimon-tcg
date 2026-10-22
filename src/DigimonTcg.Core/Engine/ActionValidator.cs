@@ -43,7 +43,7 @@ public static class ActionValidator
         }
 
         // 공식 룰: 10을 넘는 코스트도 지불할 수 있다 (메모리는 상대 쪽 10에서 멈춘다)
-        int cost = CardScripts.EffectivePlayCost(state.Player, card);   // 카드의 코스트 감소 효과 반영
+        int cost = CardScripts.EffectivePlayCost(state.Player, card, state.DummyOpponent);   // 카드의 코스트 감소 효과 반영
         int projectedMemory = Math.Max(state.MemoryGauge - cost, -10);
 
         string guide = $"[{card.Name}] 등장 코스트 {cost}를 사용합니다.";

@@ -179,18 +179,27 @@ internal static class SentenceParser
             return null;
         }
         // 코스트 감소: "When this card would be played, if you have ~, reduce the play cost by 4."
-        var reduce = Regex.Match(clause, @"^(?:\[[^\]]+\]\s*)*When (?:this card would be played|you would play this card(?: from your hand)?|you would use this card), (?:if (?<cond>[^,]+), )?reduce (?:the|its) (?:play |use |memory )?cost by (?<n>\d+)\.?$", RegexOptions.IgnoreCase);
+        //  · "When you would play this card from your hand, reduce its play cost by 1 if you have a blue Digimon in play."
+        //  · "~, reduce the play cost by 2 for each of your opponent's Digimon" · "~ by 4 for every 10 cards in your trash"
+        var reduce = Regex.Match(Normalize(clause), @"^(?:\[[^\]]+\]\s*)*When (?:this card would be played(?: from (?:the|your) hand)?|you would play this (?:card|Digimon)(?: from (?:the|your) hand)?|you would use this card), (?:if (?<cond>[^,]+), )?reduce (?:the|its|this card's) (?:play |use |memory )?cost by (?<n>\d+)(?: for (?:each|every) (?<counter>.+?)| if (?<cond2>.+?))?\.?$", RegexOptions.IgnoreCase);
         if (reduce.Success)
         {
             int n = int.Parse(reduce.Groups["n"].Value);
-            Func<PlayerZones, bool> zc = _ => true;
-            if (reduce.Groups["cond"].Success)
+            Func<PlayerZones, PlayerZones, bool> cond = (_, _) => true;
+            string condText = reduce.Groups["cond"].Success ? reduce.Groups["cond"].Value : reduce.Groups["cond2"].Value;
+            if (condText.Length > 0)
             {
-                var parsedCond = ParseZoneCondition(reduce.Groups["cond"].Value);
-                if (parsedCond == null) return $"미지원 조건 (코스트 감소: {reduce.Groups["cond"].Value})";
-                zc = parsedCond;
+                if (ParseZoneCondition(condText) is { } zc) cond = (z, _) => zc(z);
+                else if (ParseSideCondition(condText) is { } sc) cond = sc;   // "if your opponent has ~" — 상대 필드도 본다
+                else return $"미지원 조건 (코스트 감소: {condText})";
             }
-            def?.ReducePlayCost(z => zc(z) ? n : 0);
+            Func<PlayerZones, PlayerZones, int> amount = (_, _) => n;
+            if (reduce.Groups["counter"].Success)
+            {
+                if (ParseCounter(reduce.Groups["counter"].Value) is not { } counter) return $"미지원 코스트 감소 셈: for each {reduce.Groups["counter"].Value}";
+                amount = (z, e) => n * Math.Min(counter(z, e, null), 20);
+            }
+            def?.ReducePlayCost((z, e) => cond(z, e) ? amount(z, e) : 0);
             return null;
         }
         // 옵션 사용 조건: "While you have a Tamer, you can ignore this card's color requirements."
@@ -1167,10 +1176,11 @@ internal static class SentenceParser
             return (_, e) => (what == "tamers" ? e.Tamers.Count : e.BattleArea.Count(d => what != "suspended digimon" || d.IsSuspended)) >= n;
         }
         // "you have a [Diaboromon] in play" · "you don't have an [Arata Sanada] card in play" — 이름이 같은 카드 (디지몬 · 테이머)
-        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:(?:a|an|any) )?\[(?<x>[^\]]+)\](?: card)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        //  · "you have [Angewomon] or [Mirei Mikagura]" · "you have [Guilmon], [Terriermon] or [Impmon] in play" · "you don't have another [ADR-02 Searcher] in play"
+        if ((m = Regex.Match(cond, $@"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:(?:a|an|any|another) )?(?<x>{TargetSpec.NameList})(?: card)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
         {
-            string x = m.Groups["x"].Value; bool neg = m.Groups["neg"].Success; bool opp = m.Groups["who"].Value.Contains("opponent", StringComparison.OrdinalIgnoreCase);
-            return (o, e) => { var z = opp ? e : o; return (z.BattleArea.Any(d => TargetSpec.NameHas(d.TopCard, x)) || z.Tamers.Any(t => TargetSpec.NameHas(t, x))) != neg; };
+            var xs = TargetSpec.Names(m.Groups["x"].Value); bool neg = m.Groups["neg"].Success; bool opp = m.Groups["who"].Value.Contains("opponent", StringComparison.OrdinalIgnoreCase);
+            return (o, e) => { var z = opp ? e : o; return xs.Any(x => z.BattleArea.Any(d => TargetSpec.NameHas(d.TopCard, x)) || z.Tamers.Any(t => TargetSpec.NameHas(t, x))) != neg; };
         }
         // "your opponent has a level 6 or higher Digimon in play" · "you have a Digimon with ＜Blocker＞ in play" · "you have a Digimon in play with [Omnimon] in its name"
         if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:a|an|any|1) (?<spec>[^,]*?Digimon)(?: in play)?(?<with> with [^,]+?)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
@@ -1208,6 +1218,21 @@ internal static class SentenceParser
         { bool me = m.Groups["who"].Value.Equals("you", StringComparison.OrdinalIgnoreCase); int n = int.Parse(m.Groups["n"].Value); return (o, e) => (me ? o : e).BattleArea.Count <= n; }
         if ((m = Regex.Match(cond, @"^you have (?<n>\d+) security cards?$", RegexOptions.IgnoreCase)).Success)
         { int n = int.Parse(m.Groups["n"].Value); return (o, _) => o.SecurityStack.Count == n; }
+        // 양쪽 필드: "there is a Digimon with 13000 DP or more" · "there are 2 or more suspended Digimon" · "there are 3 or more Digimon"
+        if ((m = Regex.Match(cond, @"^there (?:is|are) (?:a|an|(?<n>\d+) or more) (?<sus>suspended )?Digimon(?: with (?<dp>\d+) DP or (?<dir>more|less))?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        {
+            int n = m.Groups["n"].Success ? int.Parse(m.Groups["n"].Value) : 1; bool sus = m.Groups["sus"].Success;
+            int dp = m.Groups["dp"].Success ? int.Parse(m.Groups["dp"].Value) : -1; bool more = m.Groups["dir"].Value.Equals("more", StringComparison.OrdinalIgnoreCase);
+            return (o, e) => o.BattleArea.Concat(e.BattleArea).Count(d => (!sus || d.IsSuspended) && (dp < 0 || (more ? d.GetCurrentDP() >= dp : d.GetCurrentDP() <= dp))) >= n;
+        }
+        // "there are 12 or more levels' total worth of Digimon" — 양쪽 디지몬 레벨 합계
+        if ((m = Regex.Match(cond, @"^there are (?<n>\d+) or more levels' total worth of Digimon(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        { int n = int.Parse(m.Groups["n"].Value); return (o, e) => o.BattleArea.Concat(e.BattleArea).Sum(d => d.TopCard.Level) >= n; }
+        // 상대와 비교: "you have fewer Digimon than your opponent" · "your hand has fewer cards than your opponent's"
+        if (Regex.IsMatch(cond, @"^you have fewer Digimon than your opponent(?: does)?$", RegexOptions.IgnoreCase))
+            return (o, e) => o.BattleArea.Count < e.BattleArea.Count;
+        if (Regex.IsMatch(cond, @"^your hand has fewer cards than your opponent's(?: hand)?$|^you have fewer cards in (?:your )?hand than your opponent(?: does)?$", RegexOptions.IgnoreCase))
+            return (o, e) => o.Hand.Count < e.Hand.Count;
         if (Regex.IsMatch(cond, @"^(?<who>you|your opponent) (?:don't|doesn't|do not|does not) have (?:a|any) Digimon(?: in play)?$|^(?:you|your opponent) (?:have|has) no Digimon(?: in play)?$", RegexOptions.IgnoreCase))
         { bool me = cond.StartsWith("you ", StringComparison.OrdinalIgnoreCase); return (o, e) => (me ? o : e).BattleArea.Count == 0; }
         if (Regex.IsMatch(cond, @"^your opponent has no (?:unsuspended|active) Digimon(?: in play)?$|^they have no (?:unsuspended|active) Digimon(?: in play)?$", RegexOptions.IgnoreCase))

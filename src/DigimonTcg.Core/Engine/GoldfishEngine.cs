@@ -516,7 +516,7 @@ public partial class GoldfishEngine
         State.CanMulligan = false;
         State.Player.Hand.Remove(card);
         var xros = card.Type == CardType.Digimon ? TakeXrosMaterials(State.Player, card) : new List<CardData>();   // 디지크로스 재료 (1장마다 코스트 -N)
-        int cost = Math.Max(0, CardScripts.EffectivePlayCost(State.Player, card) - XrosReduction(card, xros.Count));   // 카드의 코스트 감소 효과 반영
+        int cost = Math.Max(0, CardScripts.EffectivePlayCost(State.Player, card, State.DummyOpponent) - XrosReduction(card, xros.Count));   // 카드의 코스트 감소 효과 반영
         State.MemoryGauge -= cost;
         State.TotalMemorySpent += cost;
 
@@ -1573,7 +1573,7 @@ public partial class GoldfishEngine
                 State.DummyOpponent.Hand.Remove(tamerCandidate);
                 int beforeMem = ctx.Memory;
                 State.DummyOpponent.Tamers.Add(tamerCandidate);
-                ctx.Memory -= CardScripts.EffectivePlayCost(State.DummyOpponent, tamerCandidate);
+                ctx.Memory -= CardScripts.EffectivePlayCost(State.DummyOpponent, tamerCandidate, State.Player);
                 RecalculateFieldBuffs();
                 Log($"🤖 [AI 테이머 등장] [{tamerCandidate.Name}(코스트 {tamerCandidate.PlayCost})] 배치! (AI 메모리: +{beforeMem} → {ctx.Memory})");
                 AddOpponentEvent(OpponentActionKind.Tamer, "테이머 등장", $"{tamerCandidate.Name} · 메모리 {beforeMem} → {ctx.Memory}", tamerCandidate);
@@ -1710,7 +1710,7 @@ public partial class GoldfishEngine
         var summoned = new CardInstance(card, State.CurrentTurn) { IsOwnersTurn = true };
         PlaceXrosMaterials(summoned, xros);
         opp.BattleArea.Add(summoned);
-        int cost = Math.Max(0, CardScripts.EffectivePlayCost(opp, card) - XrosReduction(card, xros.Count));
+        int cost = Math.Max(0, CardScripts.EffectivePlayCost(opp, card, State.Player) - XrosReduction(card, xros.Count));
         ctx.Memory -= cost;
         RecalculateFieldBuffs();
         Log($"🤖 [AI 등장] [{card.Name}(Lv.{card.Level}, 코스트 {cost})] 소환! (AI 메모리: +{beforeMem} → {ctx.Memory})");
@@ -1746,7 +1746,7 @@ public partial class GoldfishEngine
         if (!opp.Hand.Remove(use.Card))
             return;
         int beforeMem = ctx.Memory;
-        ctx.Memory -= CardScripts.EffectivePlayCost(opp, use.Card);
+        ctx.Memory -= CardScripts.EffectivePlayCost(opp, use.Card, State.Player);
         Log($"🤖 [AI 옵션 사용] [{use.Card.Name}(코스트 {use.Card.PlayCost})] (AI 메모리: +{beforeMem} → {ctx.Memory})");
         AddOpponentEvent(OpponentActionKind.Play, "옵션 사용", $"{use.Card.Name} · 메모리 {beforeMem} → {ctx.Memory}", use.Card);
         var target = use.Target != null && (State.Player.BattleArea.Contains(use.Target) || opp.BattleArea.Contains(use.Target)) ? use.Target : null;

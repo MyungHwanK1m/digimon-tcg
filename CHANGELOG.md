@@ -10,6 +10,15 @@
 
 ---
 
+## v0.14.0 — 2026-10-22
+등장 코스트 감소 — 상대 필드 조건 · 셈 · 여러 표기
+- 코스트 감소가 상대 필드도 봄: "if your opponent has 2 or more Digimon" · "for each of your opponent's Digimon" (CardScripts.EffectivePlayCost에 상대 필드 인수)
+- "~ reduce the play cost by 2 for each / for every ~" (셈만큼), 뒤에 붙는 조건 "~ reduce its play cost by 1 if you have a blue Digimon in play"
+- "When this card would be played from the hand" · "When you would play this Digimon" · "reduce this card's play cost"
+- 조건 표기(코스트 감소 · "If ~" · "While ~" 공용): "you have [A] or [B]" · "you don't have another [X] in play", "there is a Digimon with 13000 DP or more" · "there are 2 or more suspended Digimon"(양쪽), "there are N or more levels' total worth of Digimon", "you have fewer Digimon than your opponent" · "your hand has fewer cards than your opponent's"
+- 시나리오 테스트 PlayCostReductionTests 9개, AI 벤치마크 기준 그대로 (56.5% / 66.7%)
+- 도감 효과 문장 지원 6,406 → 6,457 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.13.0 — 2026-10-22
 효과로 하는 어택 — "~ may attack"
 - "This Digimon may attack" · "1 of your Digimon may attack" · "It / That Digimon may attack" (자기 턴에만, 등장한 턴 · 어택 불가 효과 확인)

@@ -214,6 +214,6 @@ public sealed class CardScript
     /// <summary>옵션: 이 조건(자신의 필드)을 만족하면 색 조건을 무시하고 [메인]으로 쓸 수 있다</summary>
     public Func<PlayerZones, bool>? IgnoreColorRequirement { get; set; }
 
-    /// <summary>"이 카드를 등장시킬 때 / 사용할 때 코스트 -N" — 자신의 필드를 받아 줄일 코스트를 돌려준다</summary>
-    public Func<PlayerZones, int>? PlayCostReduction { get; set; }
+    /// <summary>"이 카드를 등장시킬 때 / 사용할 때 코스트 -N" — (자신의 필드, 상대의 필드)를 받아 줄일 코스트를 돌려준다</summary>
+    public Func<PlayerZones, PlayerZones, int>? PlayCostReduction { get; set; }
 }
