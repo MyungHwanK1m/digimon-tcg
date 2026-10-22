@@ -1072,6 +1072,9 @@ public static class KoreanEffectRenderer
     /// 대상 구절 → 한글 ("1 of your opponent's Digimon with 4000 DP or less" → "DP 4000 이하인 상대의 디지몬 1마리").
     /// bare = 수 없이 ("자신의 디지몬이 있을 때" 같은 조건 · 사건용)
     /// </summary>
+    /// <summary>대상 구절의 한글 ("1 of your opponent's suspended Digimon" → 상대의 레스트 상태 디지몬 1마리) — 옵션 대상 안내(MainTargetRule)용</summary>
+    internal static string? TargetPhraseKo(string phrase) => TargetKo(phrase);
+
     private static string? TargetKo(string phrase, bool bare = false)
     {
         phrase = phrase.Trim().TrimEnd('.').Trim();

@@ -490,6 +490,32 @@ internal static class SentenceParser
         return null;
     }
 
+    // 옵션 [메인] 효과의 대상 구절 후보 ("Delete 1 of your opponent's Digimon with 4000 DP or less" · "1 of your Digimon gets +2000 DP")
+    private static readonly Regex OptionTargetPhrase = new(
+        @"(?<t>(?:up to )?1 of your (?:opponent's )?(?:[^,.]*? )?Digimon(?: with [^,.]+?)?)(?= gets?\b| gains?\b| to\b| can't\b| cannot\b| doesn't\b| isn't\b| and\b| for\b| without\b| into\b| as\b| at\b| on\b|,|\.|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 옵션 [메인]의 대상: 처음 나오는 "1 of your (opponent's) ~ Digimon"의 쪽 · 조건 (레스트 · 레벨 · DP · 특징 …).
+    /// 대상이 1마리가 아니거나(전부 · 여러 마리 · 양쪽) 읽지 못하면 대상 없음 — 엔진이 그대로 고른다
+    /// </summary>
+    private static (TargetKind Kind, Func<CardInstance, bool>? Filter, string? Rule) OptionMainTarget(string body)
+    {
+        foreach (Match m in OptionTargetPhrase.Matches(Normalize(body)))
+        {
+            string phrase = m.Groups["t"].Value;
+            if (TargetSpec.Parse(phrase) is not { } spec || spec.IsThis || spec.IsThat || spec.AnySide || spec.Count != 1)
+                continue;
+            var kind = spec.Opponent ? TargetKind.OpponentDigimon : TargetKind.OwnDigimon;
+            if (spec.Filters.Count == 0)
+                return (kind, null, null);
+            var filters = spec.Filters.ToList();
+            string rule = Regex.Replace(KoreanEffectRenderer.TargetPhraseKo(phrase) ?? phrase, @"\s*1마리$", "");
+            return (kind, d => filters.All(f => f(d)), rule);
+        }
+        return (TargetKind.None, null, null);
+    }
+
     /// <summary>한글 생성(KoreanEffectRenderer)이 같은 정리 · 문장 나누기를 쓰도록</summary>
     internal static string NormalizeForRender(string clause) => Normalize(clause);
     internal static List<string> SentencesForRender(string body) => MergeRevealSentences(SplitSentences(body));
@@ -1528,7 +1554,11 @@ internal static class SentenceParser
                 when = c => (turnWhen == null || turnWhen(c)) && eventCondition(c);
             }
             if (tr == EffectTrigger.Main)
-                pending.Registrations.Add(d => d.Main(TargetKind.None, resolve));
+            {
+                // 옵션 [메인]: 첫 대상("1 of your opponent's suspended Digimon")의 종류 · 조건 — 화면이 끌어 놓을 곳을 정하고, 조건에 안 맞는 디지몬이면 쓰기 전에 막는다
+                var (kind, filter, rule) = card.Type == CardType.Option ? OptionMainTarget(body) : (TargetKind.None, null, null);
+                pending.Registrations.Add(d => d.Main(kind, resolve, filter, rule));
+            }
             else if (inherited)
                 pending.Registrations.Add(d => d.Inherited(tr, resolve, when, oncePerTurn, twicePerTurn));
             else
