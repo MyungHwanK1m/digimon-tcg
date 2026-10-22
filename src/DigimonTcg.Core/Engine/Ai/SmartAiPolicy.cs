@@ -77,7 +77,7 @@ public sealed class SmartAiPolicy : IAiPolicy
         double bestScore = Tuning.OptionMinScore;
         foreach (var card in ai.Hand.Where(c => c.Type == CardType.Option).Distinct())
         {
-            int cost = CardScripts.EffectivePlayCost(ai, card);
+            int cost = CardScripts.EffectivePlayCost(ai, card, engine.State.Player);
             if (cost > limit || ActionValidator.MissingOptionColors(ai, card).Count > 0)
                 continue;
             string main = AiBoard.MainPart(card.EffectText);
@@ -149,8 +149,8 @@ public sealed class SmartAiPolicy : IAiPolicy
         if (ai.Tamers.Count >= 2)
             return null;
         return ai.Hand
-            .Where(c => c.Type == CardType.Tamer && CardScripts.EffectivePlayCost(ai, c) <= memory + MaxMemoryHandOver)
-            .OrderBy(c => CardScripts.EffectivePlayCost(ai, c))
+            .Where(c => c.Type == CardType.Tamer && CardScripts.EffectivePlayCost(ai, c, engine.State.Player) <= memory + MaxMemoryHandOver)
+            .OrderBy(c => CardScripts.EffectivePlayCost(ai, c, engine.State.Player))
             .FirstOrDefault();
     }
 
@@ -164,7 +164,7 @@ public sealed class SmartAiPolicy : IAiPolicy
         double bestScore = 0.5;
         foreach (var card in ai.Hand.Where(c => c.Type == CardType.Digimon).Distinct())
         {
-            int cost = CardScripts.EffectivePlayCost(ai, card);
+            int cost = CardScripts.EffectivePlayCost(ai, card, engine.State.Player);
             if (cost > memory + MaxMemoryHandOver)
                 continue;
             bool canGrow = ai.Hand.Any(h => h.Type == CardType.Digimon && h.EvoRequirementLevel == card.Level && h.EvoRequirementColor == card.Color);
