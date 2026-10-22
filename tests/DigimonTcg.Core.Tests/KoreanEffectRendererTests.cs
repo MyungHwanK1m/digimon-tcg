@@ -298,4 +298,16 @@ public class KoreanEffectRendererTests
     [InlineData("You may use an Option card with a memory cost of 7 in your hand without paying its memory cost.", "자신의 패에서 사용 코스트 7의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
     public void UseOptionWithoutPaying_ShouldUseOfficialNotation(string en, string ko) =>
         Assert.Equal($"【진화 시】 {ko}", KoreanEffectRenderer.RenderClause($"[When Digivolving] {en}"));
+
+    [Fact]
+    public void HandMainLegendArms_ShouldUseOfficialNotation()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        // 공식: "[패]【메인】1 코스트 지불하고, 이 카드를 특징으로 「Legend-Arms」를 가지거나 Lv.3의 자신의 디지몬의 진화원 아래에 놓는 것으로, 《1 드로우》."
+        Assert.StartsWith("[패] 【메인】 1 코스트 지불하고, 이 카드를 특징으로 「Legend-Arms」를 가지거나 Lv.3의 자신의 디지몬의 진화원 아래에 놓는 것으로, 이 턴 동안, 그 디지몬의 DP를 +4000 한다.",
+            R("[Hand] [Main] By paying 1 cost and placing this card as the bottom digivolution card of 1 of your Digimon that's level 3 or has the [Legend-Arms] trait, that Digimon gets +4000 DP for the turn."));
+        // 공식: "그 디지몬의 DP 이하의 상대 디지몬 1마리를 소멸시킨다."
+        Assert.EndsWith("그 디지몬의 DP 이하의 상대의 디지몬 1마리를 소멸시킨다.",
+            R("[Hand] [Main] By paying 3 cost and placing this card as the bottom digivolution card of 1 of your Digimon that's level 6 or has the [Legend-Arms] trait, delete 1 of your opponent's Digimon with as much or less DP as that Digimon."));
+    }
 }

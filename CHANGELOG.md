@@ -10,6 +10,12 @@
 
 ---
 
+## v0.23.1 — 2026-10-22
+생성 한글: [패]【메인】 「Legend-Arms」 비용 (v0.23.0의 패 · 트래시 [메인])
+- "[패]【메인】 1 코스트 지불하고, 이 카드를 특징으로 「Legend-Arms」를 가지거나 Lv.3의 자신의 디지몬의 진화원 아래에 놓는 것으로, ~" — 공식 표기
+- "그 디지몬의 DP 이하의 상대의 디지몬 1마리" (with as much or less DP as that Digimon)
+- 테스트 1개 (KoreanEffectRendererTests)
+
 ## v0.23.0 — 2026-10-22
 패 · 트래시의 카드로 쓰는 [메인] 효과 — 엔진 (화면 · AI 판단은 digimontcg-51)
 - "[Hand] [Main] ~" · "[Trash] [Main] ~"를 읽음 (EffectTrigger.HandMain · TrashMain)

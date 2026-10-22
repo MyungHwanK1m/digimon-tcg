@@ -658,6 +658,14 @@ public static class KoreanEffectRenderer
         if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) (?:from|in) (?<from>your hand or (?:your )?trash|your trash|your hand) face[- ]up as (?:the|your) (?<pos>top|bottom) security card$", RegexOptions.IgnoreCase)).Success
             && PickKo(m.Groups["pick"].Value) is { } fuCost)
             return $"{(m.Groups["from"].Value.Contains("trash") && m.Groups["from"].Value.Contains("hand") ? "자신의 패 또는 트래시에서" : m.Groups["from"].Value.Contains("hand") ? "자신의 패에서" : "자신의 트래시에서")} {fuCost}{J(fuCost, "을", "를")} 시큐리티 {(m.Groups["pos"].Value.Equals("top", StringComparison.OrdinalIgnoreCase) ? "위" : "아래")}에 앞면으로 놓는 것으로,";
+        // [패]【메인】 — 공식: "1 코스트 지불하고, 이 카드를 특징으로 「Legend-Arms」를 가지거나 Lv.3의 자신의 디지몬의 진화원 아래에 놓는 것으로,"
+        if ((m = Regex.Match(cost, @"^paying (?<n>\d+) (?:cost|memory) and (?<b>.+)$", RegexOptions.IgnoreCase)).Success && CostKo(m.Groups["b"].Value) is { } paidCost)
+            return $"{m.Groups["n"].Value} 코스트 지불하고, {paidCost}";
+        if ((m = Regex.Match(cost, $@"^placing this card as the bottom digivolution card of (?:1|one) of your Digimon that's level (?<lv>\d+) or has the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string x = NamesKo(m.Groups["x"].Value, trait: true);
+            return $"이 카드를 특징으로 {x}{J(x, "을", "를")} 가지거나 Lv.{m.Groups["lv"].Value}의 자신의 디지몬의 진화원 아래에 놓는 것으로,";
+        }
         // 공식: "이 테이머를 레스트시키고, 자신의 테이머 아래의 카드 1장을 그 디지몬의 진화원 아래에 놓는 것으로,"
         if ((m = Regex.Match(cost, @"^suspending this (?<w>Tamer|Digimon) and (?<b>.+)$", RegexOptions.IgnoreCase)).Success && CostKo(m.Groups["b"].Value) is { } andCost)
             return $"이 {(m.Groups["w"].Value.Equals("Tamer", StringComparison.OrdinalIgnoreCase) ? "테이머" : "디지몬")}를 레스트시키고, {andCost}";
@@ -1160,6 +1168,9 @@ public static class KoreanEffectRenderer
             Match m;
             if ((m = Regex.Match(rest, @"^(?:with |that has |that have |and |or )?(?:(?:a|an) )?(?<n>\d+) DP or (?<dir>less|more)", RegexOptions.IgnoreCase)).Success)
                 list.Add($"DP {m.Groups["n"].Value} {Dir(m.Groups["dir"].Value)}인");
+            // 공식: "그 디지몬의 DP 이하의 상대의 디지몬 1마리"
+            else if ((m = Regex.Match(rest, @"^with as much or less DP (?:as|than) (?<who>that|this) Digimon", RegexOptions.IgnoreCase)).Success)
+                list.Add($"{(m.Groups["who"].Value.Equals("this", StringComparison.OrdinalIgnoreCase) ? "이" : "그")} 디지몬의 DP 이하의");
             else if ((m = Regex.Match(rest, @"^(?:with |and )?(?:a |the )?play costs? of (?<n>\d+) or (?<dir>less|more)", RegexOptions.IgnoreCase)).Success)
                 list.Add($"등장 코스트 {m.Groups["n"].Value} {Dir(m.Groups["dir"].Value)}인");
             else if ((m = Regex.Match(rest, @"^(?:with |and )?the (?<which>highest|lowest) (?<what>DP|level|play cost)", RegexOptions.IgnoreCase)).Success)
