@@ -309,5 +309,13 @@ public class KoreanEffectRendererTests
         // 공식: "그 디지몬의 DP 이하의 상대 디지몬 1마리를 소멸시킨다."
         Assert.EndsWith("그 디지몬의 DP 이하의 상대의 디지몬 1마리를 소멸시킨다.",
             R("[Hand] [Main] By paying 3 cost and placing this card as the bottom digivolution card of 1 of your Digimon that's level 6 or has the [Legend-Arms] trait, delete 1 of your opponent's Digimon with as much or less DP as that Digimon."));
+        // v0.25.0 — 공식: "자신의 패의 「테슬라젤리몬」 1장을 자신의 「젤리몬」의 진화원 아래에 놓는 것으로, 그 디지몬을 이 카드로 진화 조건을 무시하고 진화 코스트 3으로 진화시킨다."
+        Assert.EndsWith("자신의 트래시의 「슈슈몬」 1장을 자신의 「슈몬」의 진화원 아래에 놓는 것으로, 그 디지몬을 이 카드로 진화 조건을 무시하고 진화 코스트 3으로 진화시킨다.",
+            R("[Hand] [Main] If you have [Arisa Kinosaki], by placing 1 [ShoeShoemon] from your trash as any of your [Shoemon]'s bottom digivolution card, it digivolves into this card for a digivolution cost of 3, ignoring digivolution requirements."));
+        Assert.EndsWith("자신의 「아구몬」 1마리를 이 카드로 진화 조건을 무시하고 진화 코스트 6으로 진화시킨다.",
+            R("[Hand] [Main] If you have [Nokia Shiramine], 1 of your [Agumon] digivolves into this card for a digivolution cost of 6, ignoring digivolution requirements."));
+        // 공식: "[트래시]【메인】자신의 패가 4장 이하라면, 이 카드를 지불하는 등장 코스트 -4 하여 등장시킨다."
+        Assert.Equal("[트래시] 【메인】 자신의 패가 4장 이하일 때, 이 카드를 지불하는 등장 코스트 -2 하여 등장시킨다.",
+            R("[Trash] [Main] If you have 4 or fewer cards in your hand, play this card with the play cost reduced by 2."));
     }
 }

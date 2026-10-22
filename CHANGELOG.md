@@ -10,6 +10,14 @@
 
 ---
 
+## v0.25.1 — 2026-10-22
+생성 한글: 패 · 트래시 [메인]의 진화 · 등장 (v0.25.0, 공식 표기)
+- "자신의 트래시의 「슈슈몬」 1장을 자신의 「슈몬」의 진화원 아래에 놓는 것으로, 그 디지몬을 이 카드로 진화 조건을 무시하고 진화 코스트 3으로 진화시킨다."
+- "자신의 「아구몬」 1마리를 이 카드로 진화 조건을 무시하고 진화 코스트 6으로 진화시킨다."
+- "[트래시]【메인】 ~ 이 카드를 지불하는 등장 코스트 -2 하여 등장시킨다."
+- 조건 "If you have [이름]" (a · in play 없는 표기)도 받는다
+- 테스트 3개 (KoreanEffectRendererTests)
+
 ## v0.25.0 — 2026-10-22
 패 · 트래시 [메인] 효과의 동작 · 비용 보강
 - "~, it digivolves into this card for a digivolution cost of 3, ignoring digivolution requirements" · "1 of your [Agumon] digivolves into this card ~" (패의 이 카드로 진화 조건을 무시하고 진화)

@@ -624,6 +624,21 @@ public static class KoreanEffectRenderer
             return new($"{from} {what}{J(what, "을", "를")} 코스트를 지불하지 않고 ", Ha("사용"));
         }
 
+        // [패]【메인】 — 공식: "그 디지몬을 이 카드로 진화 조건을 무시하고 진화 코스트 3으로 진화시킨다"
+        // "it digivolves into this card ~" · "1 of your [Agumon] digivolves ~" · "digivolve that Digimon into this card ~"
+        if ((m = Regex.Match(s, @"^(?:(?<t>it|that Digimon|(?:1|one) of your .+?) (?<may>may )?digivolves?|digivolve (?<t>it|that Digimon|this Digimon)) into this card for a digivolution cost of (?<n>\d+),? ignoring (?:its |this card's )?digivolution requirements$", RegexOptions.IgnoreCase)).Success
+            && (Regex.IsMatch(m.Groups["t"].Value, "^(?:it|that Digimon)$", RegexOptions.IgnoreCase) ? "그 디지몬"
+                : m.Groups["t"].Value.Equals("this Digimon", StringComparison.OrdinalIgnoreCase) ? "이 디지몬"
+                : TargetKo(m.Groups["t"].Value) ?? (Regex.Match(m.Groups["t"].Value, $@"^(?:1|one) of your (?<x>{TargetSpec.NameList})$", RegexOptions.IgnoreCase) is { Success: true } evoName ? $"자신의 {NamesKo(evoName.Groups["x"].Value)} 1마리" : null)) is { } evoT)
+        {
+            string n = m.Groups["n"].Value;
+            var evo = new Verb("진화시킨다", "진화시킬 수 있다", "진화시키는 것으로", "진화시키고");
+            return new($"{evoT}{J(evoT, "을", "를")} 이 카드로 진화 조건을 무시하고 진화 코스트 {n}{J(n, "으로", "로")} ", m.Groups["may"].Success ? new Verb("진화시킬 수 있다", "진화시킬 수 있다", "진화시키는 것으로", "진화시키고") : evo);
+        }
+        // [트래시]【메인】 — 공식: "이 카드를 지불하는 등장 코스트 -4 하여 등장시킨다"
+        if ((m = Regex.Match(s, @"^play this card(?: from your (?:hand|trash))? with the play cost reduced by (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
+            return new($"이 카드를 지불하는 등장 코스트 -{m.Groups["n"].Value} 하여 ", Siki("등장"));
+
         // ---- 진화 ----
         if ((m = Regex.Match(s, @"^reduce (?:the|its) digivolution cost by (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
             return new($"지불하는 진화 코스트를 -{m.Groups["n"].Value} ", Ha());
@@ -665,6 +680,12 @@ public static class KoreanEffectRenderer
         {
             string x = NamesKo(m.Groups["x"].Value, trait: true);
             return $"이 카드를 특징으로 {x}{J(x, "을", "를")} 가지거나 Lv.{m.Groups["lv"].Value}의 자신의 디지몬의 진화원 아래에 놓는 것으로,";
+        }
+        // 공식: "자신의 패의 「테슬라젤리몬」 1장을 자신의 「젤리몬」의 진화원 아래에 놓는 것으로,"
+        if ((m = Regex.Match(cost, $@"^placing (?:1|one) (?<x>{TargetSpec.NameList}) from your (?<z>hand|trash) (?:as (?:any|one|1) of your (?<y>{TargetSpec.NameList})'s bottom digivolution card|under (?:any|one|1) of your (?<y>{TargetSpec.NameList}) as its bottom digivolution card)$", RegexOptions.IgnoreCase)).Success)
+        {
+            string x = NamesKo(m.Groups["x"].Value), y = NamesKo(m.Groups["y"].Value);
+            return $"자신의 {(m.Groups["z"].Value.Equals("hand", StringComparison.OrdinalIgnoreCase) ? "패" : "트래시")}의 {x} 1장을 자신의 {y}의 진화원 아래에 놓는 것으로,";
         }
         // 공식: "이 테이머를 레스트시키고, 자신의 테이머 아래의 카드 1장을 그 디지몬의 진화원 아래에 놓는 것으로,"
         if ((m = Regex.Match(cost, @"^suspending this (?<w>Tamer|Digimon) and (?<b>.+)$", RegexOptions.IgnoreCase)).Success && CostKo(m.Groups["b"].Value) is { } andCost)
@@ -775,7 +796,7 @@ public static class KoreanEffectRenderer
             string x = NamesKo(m.Groups["x"].Value);
             return Have($"명칭에 {x}{J(x, "을", "를")} 포함하는 자신의 {(m.Groups["kind"].Value.Equals("Tamer", StringComparison.OrdinalIgnoreCase) ? "테이머가" : "디지몬이")}");
         }
-        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:a|an|any) \[(?<x>[^\]]+)\](?: card)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:(?<neg>don't|doesn't|do not|does not) )?ha(?:ve|s) (?:(?:a|an|any) )?\[(?<x>[^\]]+)\](?: card)?(?: in play)?$", RegexOptions.IgnoreCase)).Success)
         {
             string s = $"{Side(m.Groups["who"].Value)}의 「{NameKo(m.Groups["x"].Value)}」{J(NameKo(m.Groups["x"].Value), "이", "가")}";
             return m.Groups["neg"].Success ? NotHave(s) : Have(s);
