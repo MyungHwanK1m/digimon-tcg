@@ -257,7 +257,26 @@ public partial class GoldfishEngine
             return;
         if (effect.TwicePerTurn && ctx.Self != null && !ctx.Self.UsedOncePerTurn.Add(card.CardId) && !ctx.Self.UsedOncePerTurn.Add(card.CardId + "#2"))
             return;
+        int logsBefore = ctx.State.ActionLogs.Count;
+        string messageBefore = ctx.Message;
         effect.Resolve(ctx);
+        // 카드에 적힌 시점([등장 시] · [진화 시] · [어택 시] · [소멸 시])의 효과가 대상 · 조건이 없어 아무것도 안 했으면 그렇다고 남긴다.
+        // 조용히 넘어가면 "효과가 안 탔다"로 보인다 (사용자 신고: 로제몬 · 쥬드몬 · 엔젤우몬 등 내장 스크립트의 return)
+        if (ctx.State.ActionLogs.Count == logsBefore && ctx.Message == messageBefore && AnnouncedLabel(effect) is { } label)
+            ctx.Log($"[{label}] {card.Name}: 대상 · 조건에 맞는 것이 없어 효과가 일어나지 않았습니다");
+    }
+
+    private static string? AnnouncedLabel(CardEffect effect)
+    {
+        string? label = effect.Trigger switch
+        {
+            EffectTrigger.OnPlay => "등장 시",
+            EffectTrigger.WhenDigivolving => "진화 시",
+            EffectTrigger.WhenAttacking => "어택 시",
+            EffectTrigger.OnDeletion => "소멸 시",
+            _ => null,
+        };
+        return label != null && effect.Source == EffectSource.Inherited ? $"진화원 효과 · {label}" : label;
     }
 
     // =====================================================================
