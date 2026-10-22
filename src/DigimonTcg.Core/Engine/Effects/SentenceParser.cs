@@ -2516,7 +2516,8 @@ internal static class SentenceParser
             {
                 var d = Pick(linkTarget, c, security).Where(x => GoldfishEngine.MeetsLinkRequirement(c.Card, x) != false).FirstOrDefault();
                 if (d == null) { c.LastStepResolved = false; return; }
-                c.Owner.Hand.Remove(c.Card);   // 패에서 쓴 옵션이면 이미 패에 없다 · 트래시 처리는 엔진이 건너뛴다
+                // 옵션을 쓰는 경로(PlayCard · AI · 효과로 패의 옵션 사용)는 모두 이미 패에서 뺐다 — 여기서 또 빼면 같은 카드의 다른 사본이 사라진다.
+                // 트래시 처리는 엔진이 건너뛴다 (시큐리티에서 쓴 것은 엔진이 트래시에서 뺀다)
                 c.LinkedThisCard = true;
                 c.Engine.LinkCard(c.Owner, d, c.Card);
                 Emit(c, label, $"이 카드를 [{d.TopCard.Name}]에 링크");

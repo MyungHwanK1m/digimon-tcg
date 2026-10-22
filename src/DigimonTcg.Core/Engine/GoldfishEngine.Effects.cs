@@ -266,18 +266,18 @@ public partial class GoldfishEngine
             ctx.Log($"[{label}] {card.Name}: 대상 · 조건에 맞는 것이 없어 효과가 일어나지 않았습니다");
     }
 
-    private static string? AnnouncedLabel(CardEffect effect)
+    /// <summary>
+    /// "효과가 일어나지 않았다"를 남길 시점 — 카드 본체의 효과만. 진화원 효과는 어택마다 여러 장이 함께 발동해
+    /// 조건이 안 맞을 때마다 남기면 로그가 묻힌다 (대량 대전에서 디지타마 진화원 [어택 시]가 한 장에 수백 줄)
+    /// </summary>
+    private static string? AnnouncedLabel(CardEffect effect) => effect.Source != EffectSource.Main ? null : effect.Trigger switch
     {
-        string? label = effect.Trigger switch
-        {
-            EffectTrigger.OnPlay => "등장 시",
-            EffectTrigger.WhenDigivolving => "진화 시",
-            EffectTrigger.WhenAttacking => "어택 시",
-            EffectTrigger.OnDeletion => "소멸 시",
-            _ => null,
-        };
-        return label != null && effect.Source == EffectSource.Inherited ? $"진화원 효과 · {label}" : label;
-    }
+        EffectTrigger.OnPlay => "등장 시",
+        EffectTrigger.WhenDigivolving => "진화 시",
+        EffectTrigger.WhenAttacking => "어택 시",
+        EffectTrigger.OnDeletion => "소멸 시",
+        _ => null,
+    };
 
     // =====================================================================
     // 키워드
@@ -1667,6 +1667,8 @@ public partial class GoldfishEngine
         var ctx = RunEffects(EffectTrigger.Security, owner, null, option, other: attacker, chosenTarget: attacker, includeInherited: false);
         if (ctx.PlaceInBattleArea && owner.Trash.Remove(option))   // 시큐리티 체크 처리에서 이미 트래시로 갔다
             PlaceOption(owner, option);
+        if (ctx.LinkedThisCard)   // "link this card to ~" — 링크 카드가 되었으니 트래시에서 뺀다 (안 빼면 링크 · 트래시 두 곳에 남는다)
+            owner.Trash.Remove(option);
         return new($"{head} {ctx.Message}", $"[시큐리티 {option.Name}] {ctx.Summary}", ctx.AttackerRemoved, ctx.ReturnToHand);
     }
 
