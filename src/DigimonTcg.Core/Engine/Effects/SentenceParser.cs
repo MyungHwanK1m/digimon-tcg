@@ -2079,6 +2079,32 @@ internal static class SentenceParser
             int n = int.Parse(m.Groups["n"].Value);
             return (c => true, c => c.AddMemory(-n), c => c.OwnerMemory - n >= 0, $"메모리 {n}을(를) 지불하여");
         }
+        // "placing 1 [ShoeShoemon] from your trash as any of your [Shoemon]'s bottom digivolution card" · "~ from your hand under one of your [Jellymon] as its bottom digivolution card"
+        //  — 고른 자신의 디지몬 아래에 놓는다 (그 디지몬이 다음 문장의 "it" · "that Digimon")
+        if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) (?:in|from) (?<from>your hand|your trash) (?:face down )?(?:as (?<t>(?:any|1|one) of your .+?)'s bottom digivolution cards?|under (?<t>(?:any|1|one) of your .+?) as (?:its|their) bottom digivolution cards?)$", RegexOptions.IgnoreCase)).Success
+            && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } underPickOther
+            && OwnDigimonFilter(Regex.Replace(m.Groups["t"].Value, @"\]s\b", "]")) is { } otherFilter)
+        {
+            var (n, match) = underPickOther;
+            bool hand = m.Groups["from"].Value.EndsWith("hand", StringComparison.OrdinalIgnoreCase);
+            List<CardData> Zone(EffectContext c) => hand ? c.Owner.Hand : c.Owner.Trash;
+            List<CardInstance> Targets(EffectContext c) => c.Owner.BattleArea.Where(otherFilter).ToList();
+            return (c => Targets(c).Count > 0 && Zone(c).Count(x => match(x) && !ReferenceEquals(x, c.Card)) >= n,
+                    c =>
+                    {
+                        var d = c.Engine.ChooseTargets(c.Owner, Targets(c), 1, $"[{c.Card.Name}] 진화원 맨 아래에 카드를 놓을 디지몬을 고르세요.", optional: false, preselected: null).FirstOrDefault();
+                        if (d == null) return;
+                        var zone = Zone(c);
+                        foreach (var x in c.Engine.ChooseCards(c.Owner, hand ? CardChoiceZone.Hand : CardChoiceZone.Trash, zone.Where(x => match(x) && !ReferenceEquals(x, c.Card)).ToList(), n, upTo: false, $"[{c.Card.Name}] [{d.TopCard.Name}]의 진화원 맨 아래에 놓을 카드를 고르세요."))
+                        {
+                            zone.Remove(x);
+                            d.AddBottomSource(x);
+                        }
+                        c.LastTargets = new List<CardInstance> { d };
+                        c.RecalculateFieldBuffs();
+                    },
+                    _ => true, $"{(hand ? "패" : "트래시")}의 카드를 자신의 디지몬 진화원 맨 아래에 놓아");
+        }
         // [Hand] [Main]: "paying 1 cost and placing this card as the bottom digivolution card of 1 of your Digimon that's level 3 or has the [Legend-Arms] trait"
         //  · "~ as 1 of your level 5 or higher Digimon's bottom digivolution card" — 놓은 디지몬이 다음 문장의 "that Digimon"
         if ((m = Regex.Match(cost, @"^paying (?<n>\d+) (?:memory|cost) and placing this card (?:as the bottom digivolution card of (?<t>.+)|as (?<t>.+?)'s bottom digivolution card|under (?<t>.+?) as its bottom digivolution card)$", RegexOptions.IgnoreCase)).Success
@@ -2115,6 +2141,12 @@ internal static class SentenceParser
         }
         if (TargetSpec.Parse(phrase) is { Opponent: false, AnySide: false, IsThis: false, IsThat: false } spec)
             return d => spec.Filters.All(f => f(d));
+        // 이름만: "1 of your [Shoemon]" · "1 of your [Jellymon] or [TeslaJellymon]"
+        if ((m = Regex.Match(phrase, $@"^1 of your (?<x>{TargetSpec.NameList})$", RegexOptions.IgnoreCase)).Success)
+        {
+            var names = TargetSpec.Names(m.Groups["x"].Value);
+            return d => names.Any(x => TargetSpec.NameHas(d.TopCard, x));
+        }
         return null;
     }
 
@@ -2423,6 +2455,31 @@ internal static class SentenceParser
                 c.Owner.Hand.Add(x);
                 Emit(c, label, "뒷면 시큐리티 맨 위 1장을 패에 넣는다");
             }, null);
+        // [Hand] · [Trash] [Main]: "play this card (from your trash) with the play cost reduced by 4" — 패 · 트래시의 이 카드를 줄인 코스트로 등장
+        if ((m = Regex.Match(s, @"^Play this card(?: from (?:your|the) (?:hand|trash))? with the (?:play )?cost reduced by (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
+        {
+            int n = int.Parse(m.Groups["n"].Value);
+            return (c =>
+            {
+                if (!(c.Owner.Hand.Remove(c.Card) || c.Owner.Trash.Remove(c.Card))) { c.LastStepResolved = false; Emit(c, label, "이 카드를 등장시킬 수 없습니다"); return; }
+                c.Engine.PlayPayingCost(c.Owner, c.Card, Math.Max(0, CardScripts.EffectivePlayCost(c.Owner, c.Card, c.Enemy) - n));
+            }, null);
+        }
+        // [Hand] [Main]: "it digivolves into this card for a digivolution cost of 3, ignoring digivolution requirements" · "1 of your [Agumon] digivolves into this card ~"
+        if ((m = Regex.Match(s, @"^(?<t>it|that Digimon|1 of your .+?) digivolves? into this card for (?:a )?digivolution cost of (?<n>\d+),? ignoring (?:its |this card's |the )?digivolution requirements$", RegexOptions.IgnoreCase)).Success
+            && TargetSpec.Parse(m.Groups["t"].Value) is { Opponent: false, AnySide: false } evoBase)
+        {
+            int n = int.Parse(m.Groups["n"].Value);
+            return (c =>
+            {
+                var d = Pick(evoBase, c, security).FirstOrDefault(x => c.Owner.BattleArea.Contains(x));
+                if (d == null || !c.Owner.Hand.Contains(c.Card)) { c.LastStepResolved = false; Emit(c, label, "진화할 디지몬이 없습니다"); return; }
+                int cost = Math.Max(0, n);
+                c.Engine.EvolveByEffect(c.Owner, d, c.Card, cost, c.Owner.Hand);   // 진화 조건을 무시한다
+                c.LastTargets = new List<CardInstance> { d };
+                Emit(c, label, $"[{d.TopCard.Name}]이(가) 이 카드로 진화 (코스트 {cost}, 진화 조건 무시)");
+            }, null);
+        }
         // 효과로 옵션 사용: "You may use 1 Option card with a cost of 5 or less in your hand without paying the cost"
         //  · "~ from your hand or under your Tamers ~" · "use 1 use cost 3 or lower Option card with [X] in its text from your hand or trash ~"
         //  사용할 수 있는 옵션만 (색 조건은 그대로 — 코스트만 내지 않는다)

@@ -10,6 +10,15 @@
 
 ---
 
+## v0.25.0 — 2026-10-22
+패 · 트래시 [메인] 효과의 동작 · 비용 보강
+- "~, it digivolves into this card for a digivolution cost of 3, ignoring digivolution requirements" · "1 of your [Agumon] digivolves into this card ~" (패의 이 카드로 진화 조건을 무시하고 진화)
+- "play this card (from your trash) with the play cost reduced by 4" (패 · 트래시의 이 카드를 줄인 코스트로 등장)
+- 비용 "placing 1 [ShoeShoemon] from your trash as any of your [Shoemon]'s bottom digivolution card" · "~ from your hand under one of your [Jellymon] as its bottom digivolution card" (놓은 디지몬 = 다음 문장의 "it")
+- 자신의 디지몬 조건에 이름만 쓴 표기 ("1 of your [Shoemon]")
+- 시나리오 테스트 ZoneAbilityTests에 2개 추가
+- 도감 효과 문장 지원 6,764 → 6,777 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.24.0 — 2026-10-22
 화면 · AI: 패 · 트래시의 카드로 쓰는 [메인] 효과 (v0.23.0 엔진을 연결)
 - 패 카드 우클릭 → 그 카드의 패 [메인] 효과 (쓸 수 있으면 카드에 "우클릭: 이 카드의 패 [메인] 효과 쓰기" 툴팁)

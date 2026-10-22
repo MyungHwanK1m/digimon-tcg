@@ -89,6 +89,45 @@ public class ZoneAbilityTests
     }
 
     [Fact]
+    public void HandMain_PlaceFromTrashThenDigivolveIgnoringRequirements()
+    {
+        var (state, engine) = NewMainPhase();
+        state.Player.Tamers.Add(Card("ZA-ARISA", type: CardType.Tamer, level: 0));
+        state.Player.Tamers[0].Name = "Arisa Kinosaki";
+        var shoemon = new CardInstance(Card("ZA-SHOE"), 1);
+        shoemon.TopCard.Name = "Shoemon";
+        state.Player.BattleArea.Add(shoemon);
+        var material = Card("ZA-SHOESHOE");
+        material.Name = "ShoeShoemon";
+        state.Player.Trash.Add(material);
+        var evo = Card("ZA-EVO", "[Hand] [Main] If you have [Arisa Kinosaki], by placing 1 [ShoeShoemon] from your trash as any of your [Shoemon]'s bottom digivolution card, it digivolves into this card for a digivolution cost of 3, ignoring digivolution requirements.", level: 5);
+        Assert.Equal(EffectSupportLevel.Full, EffectSupport.For(evo).Level);
+        state.Player.Hand.Add(evo);
+
+        Assert.True(engine.ActivateHandEffect(evo).CanExecute);
+
+        Assert.Same(evo, shoemon.TopCard);                                               // Lv.3 → Lv.5 (진화 조건 무시)
+        Assert.Contains(material, shoemon.EvolutionSources);
+        Assert.Equal(5 - 3, state.MemoryGauge);
+    }
+
+    [Fact]
+    public void TrashMain_PlayWithReducedCost()
+    {
+        var (state, engine) = NewMainPhase();
+        var card = Card("ZA-RISE", "[Trash] [Main] If you have 4 or fewer cards in your hand, play this card with the play cost reduced by 2.", level: 4);
+        card.PlayCost = 5;
+        Assert.Equal(EffectSupportLevel.Full, EffectSupport.For(card).Level);
+        state.Player.Trash.Add(card);
+
+        Assert.True(engine.ActivateTrashEffect(card).CanExecute);
+
+        Assert.Contains(state.Player.BattleArea, d => ReferenceEquals(d.TopCard, card));
+        Assert.DoesNotContain(card, state.Player.Trash);
+        Assert.Equal(5 - 3, state.MemoryGauge);
+    }
+
+    [Fact]
     public void NotInMainPhase_Fails()
     {
         var (state, engine) = NewMainPhase();
