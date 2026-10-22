@@ -10,6 +10,14 @@
 
 ---
 
+## v0.15.0 — 2026-10-22
+어택 대상 변경 — 발동 시점 · 동작 · 잠금
+- 새 발동 시점: "When an attack target is switched" · "When attack targets change"(어느 쪽이든), "When this Digimon's attack target is switched", "When one of your Digimon's attack targets is switched" — 효과(RedirectAttack)나 ≪돌진≫으로 대상이 바뀐 뒤
+- "Change / Switch the attack target to 1 of your (suspended / [X] trait) Digimon" (이 디지몬으로만 되던 것을 넓힘)
+- "This Digimon's attack target can't change / can't be switched": 이 어택 동안(효과) · 지속 효과([Your Turn] 등) — 효과로도 ≪돌진≫으로도 바뀌지 않음
+- 시나리오 테스트 AttackTargetSwitchTests 3개, AI 벤치마크 기준 그대로 (56.5% / 66.7%)
+- 도감 효과 문장 지원 6,457 → 6,503 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.14.2 — 2026-10-22
 화면 한글 정리 (실제 앱 화면 점검)
 - 화면 표시(51): 카드 상세 머리말 · 덱 목록 · 카드 배지 · 덱 빌더 COLOR / TYPE 필터의 색 · 종류를 한글로 (레드 디지몬 · 테이머 · 옵션 · 디지타마), 효과 지원 상자는 동작하지 않는 절을 생성 한글로 보여 주고 영어 원문 · 사유는 툴팁으로, 덱 빌더 툴팁이 대전 화면에 남던 문제, 창이 작업 영역보다 커서 아래가 작업 표시줄에 가리던 문제 (시작할 때 작업 영역 가운데에 맞춤)

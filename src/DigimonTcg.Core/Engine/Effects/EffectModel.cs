@@ -62,6 +62,8 @@ public enum EffectTrigger
     AllySecurityRemoved,            // 자신의 시큐리티에서 카드가 빠졌을 때 (체크 · 파기 · 패에 추가 등, TriggerCard = 빠진 카드)
     OpponentSecurityRemoved,        // 상대의 시큐리티에서 카드가 빠졌을 때 (TriggerCard)
     AllySecurityAdded,              // 자신의 시큐리티에 카드가 놓였을 때 (≪리커버리≫ 등, TriggerCard = 놓인 카드)
+    AttackTargetSwitched,           // 어느 쪽이든 어택 대상이 바뀌었을 때 (효과 · ≪돌진≫, Other = 어택 중인 디지몬)
+    AllyAttackTargetSwitched,       // 자신의 디지몬의 어택 대상이 바뀌었을 때 (Other = 어택 중인 자신의 디지몬)
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>
@@ -95,6 +97,7 @@ public enum Keyword
     Scapegoat,               // ≪스케이프고트≫: 자신의 효과 이외로 소멸할 때 다른 자신의 디지몬 1마리를 소멸시키는 것으로 소멸하지 않는다
     Iceclad,                 // ≪빙장≫: 시큐리티 디지몬 이외와의 배틀에서는 DP가 아니라 진화원 매수를 비교한다
     Progress,                // ≪프로그레스≫: 어택 중인 이 디지몬은 상대의 효과를 받지 않는다
+    AttackTargetLocked,      // (지속 효과) 이 디지몬의 어택 대상은 바뀌지 않는다 ("[Your Turn] This Digimon's attack target can't change")
 }
 
 /// <summary>지속 효과가 바꾸는 수치</summary>

@@ -744,7 +744,7 @@ public partial class GoldfishEngine
             }
         }
 
-        if (CardScripts.HasKeyword(attacker, Keyword.Raid))
+        if (CardScripts.HasKeyword(attacker, Keyword.Raid) && !IsAttackTargetLocked(attacker))
         {
             var best = enemy.BattleArea.Where(d => !d.IsSuspended && !CardScripts.HasKeyword(d, Keyword.CannotBeAttacked)).OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault();
             if (best != null && !ReferenceEquals(best, target))
@@ -755,6 +755,7 @@ public partial class GoldfishEngine
                 if (AskYesNo(owner, attacker, $"≪돌진≫ [{attacker.TopCard.Name}]: 어택 대상을 상대 [{best.TopCard.Name}(DP {best.GetCurrentDP():N0})]로 바꿀까요?", recommended))
                 {
                     EffectLog(owner, $"[≪돌진≫] [{attacker.TopCard.Name}]의 어택 대상을 액티브 상태의 [{best.TopCard.Name}(DP {best.GetCurrentDP():N0})]로 바꿉니다!");
+                    NotifyAttackTargetSwitched(attacker);
                     return best;
                 }
             }
@@ -766,6 +767,7 @@ public partial class GoldfishEngine
     private void EndAttack(CardInstance attacker)
     {
         if (ReferenceEquals(CurrentAttacker, attacker)) CurrentAttacker = null;
+        attacker.AttackTargetLocked = false;
         attacker.AttackDpBonus = 0;
         attacker.AttackSecurityAttackBonus = 0;
         RecalculateFieldBuffs();
@@ -1060,19 +1062,44 @@ public partial class GoldfishEngine
     /// </summary>
     internal bool RedirectAttack(PlayerZones defender, CardInstance newTarget)
     {
-        if (!defender.BattleArea.Contains(newTarget))
+        if (!defender.BattleArea.Contains(newTarget) || (CurrentAttacker is { } locked && IsAttackTargetLocked(locked)))
             return false;
         if (ReferenceEquals(defender, State.Player) && _aiTurn != null)
         {
             _aiTurn.AttackTarget = newTarget;
+            NotifyAttackTargetSwitched(CurrentAttacker);
             return true;
         }
         if (ReferenceEquals(defender, State.DummyOpponent) && _aiTurn == null)
         {
             _playerAttackRedirect = newTarget;
+            NotifyAttackTargetSwitched(CurrentAttacker);
             return true;
         }
         return false;
+    }
+
+    /// <summary>이 디지몬의 어택 대상은 바뀌지 않는다 — 이 어택 동안("can't be switched for the turn") 또는 지속 효과("[Your Turn] ~ can't change")</summary>
+    private static bool IsAttackTargetLocked(CardInstance attacker) =>
+        attacker.AttackTargetLocked || CardScripts.HasKeyword(attacker, Keyword.AttackTargetLocked);
+
+    // 어택 대상이 바뀌었을 때 효과를 처리하는 중 (그 효과가 다시 대상을 바꿔도 거듭 발동하지 않는다)
+    private bool _notifyingTargetSwitch;
+
+    /// <summary>"When an attack target is switched" · "When this Digimon's attack target is switched" — 효과 · ≪돌진≫으로 어택 대상이 바뀐 뒤</summary>
+    private void NotifyAttackTargetSwitched(CardInstance? attacker)
+    {
+        if (attacker == null || _notifyingTargetSwitch || State.IsGameOver)
+            return;
+        var owner = OwnerOf(attacker);
+        _notifyingTargetSwitch = true;
+        try
+        {
+            FireForSide(EffectTrigger.AttackTargetSwitched, owner, attacker);
+            FireForSide(EffectTrigger.AttackTargetSwitched, EnemyOf(owner), attacker);
+            FireForSide(EffectTrigger.AllyAttackTargetSwitched, owner, attacker);
+        }
+        finally { _notifyingTargetSwitch = false; }
     }
 
     /// <summary>

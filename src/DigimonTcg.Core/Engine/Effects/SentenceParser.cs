@@ -626,6 +626,13 @@ internal static class SentenceParser
             return One(EffectTrigger.OpponentTamerPlayed);
         if (Regex.IsMatch(ev, @"^(?:an|one of your) opponent's Tamers? (?:becomes suspended|suspends|is suspended)$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.OpponentTamerSuspended);
+        // 어택 대상이 바뀌었을 때: "When an attack target is switched" · "When attack targets change" · "When this Digimon's attack target is switched"
+        if (Regex.IsMatch(ev, @"^(?:an|the) attack targets? (?:is|are) (?:switched|changed)$|^attack targets? (?:change|changes|switch|switches)$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AttackTargetSwitched);
+        if (Regex.IsMatch(ev, @"^this Digimon's attack target (?:is switched|is changed|changes|switches)$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyAttackTargetSwitched, c => c.Self != null && ReferenceEquals(c.Other, c.Self));
+        if (Regex.IsMatch(ev, @"^(?:one|any) of your Digimon's attack targets? (?:is|are) (?:switched|changed)$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyAttackTargetSwitched);
         if (Regex.IsMatch(ev, @"^you use an Option card$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.AllyOptionUsed);
         if (Regex.IsMatch(ev, @"^your opponent uses an Option card$", RegexOptions.IgnoreCase))
@@ -1023,6 +1030,12 @@ internal static class SentenceParser
         {
             var c2 = cond;
             pending.Registrations.Add(d => d.Static(StaticStat.Keyword, source, c => c2(c) ? 1 : 0, Keyword.CannotBeAttacked));
+            return null;
+        }
+        if (Regex.IsMatch(s, @"^(?:this Digimon's|its) attack target can't (?:change|be changed|be switched|switch)$", RegexOptions.IgnoreCase))
+        {
+            var c2 = cond;
+            pending.Registrations.Add(d => d.Static(StaticStat.Keyword, source, c => c2(c) ? 1 : 0, Keyword.AttackTargetLocked));
             return null;
         }
         if (Regex.IsMatch(s, @"^your opponent can't reduce (?:digivolution|digivolve) costs$", RegexOptions.IgnoreCase))
@@ -2870,13 +2883,27 @@ internal static class SentenceParser
         var unsus = Regex.Match(s, @"^(?<t>.+?) unsuspends?$", RegexOptions.IgnoreCase);
         if (unsus.Success && !s.StartsWith("Unsuspend", StringComparison.OrdinalIgnoreCase))
             return ParseAction($"Unsuspend {unsus.Groups["t"].Value}", card, triggers);
-        // "Change the attack target to this Digimon"
-        if (Regex.IsMatch(s, @"^Change the attack target to this Digimon$", RegexOptions.IgnoreCase))
+        // "This Digimon's attack target can't change" · "~ can't be switched" — 이 어택 동안 (어택 중이 아니면 효과 없음)
+        if (Regex.IsMatch(s, @"^(?:This Digimon's|Its) attack target can't (?:change|be changed|be switched|switch)(?: for the turn)?$", RegexOptions.IgnoreCase))
             return (c =>
             {
-                if (c.Self != null && c.Engine.RedirectAttack(c.Owner, c.Self))
-                    Emit(c, label, $"어택 대상을 [{c.Self.TopCard.Name}]으로 바꿨습니다");
+                if (c.Self != null && ReferenceEquals(c.Engine.CurrentAttacker, c.Self)) { c.Self.AttackTargetLocked = true; Emit(c, label, "이 어택의 대상이 바뀌지 않습니다"); }
+                else c.LastStepResolved = false;
             }, null);
+        // "Change the attack target to this Digimon" · "switch the attack target to 1 of your [Eosmon]" · "~ to 1 of your suspended Digimon with the [WG] trait"
+        if ((m = Regex.Match(s, @"^(?:Change|Switch) the attack target to (?<t>.+)$", RegexOptions.IgnoreCase)).Success)
+        {
+            var target = TargetSpec.Parse(m.Groups["t"].Value);
+            if (target == null || target.Opponent || target.AnySide || target.IsThat) return (null, $"미지원 대상 (어택 대상 변경): {m.Groups["t"].Value}");
+            target.PreferOwnSide = true;
+            return (c =>
+            {
+                var d = Pick(target, c, security).FirstOrDefault();
+                if (d != null && c.Engine.RedirectAttack(c.Owner, d))
+                    Emit(c, label, $"어택 대상을 [{d.TopCard.Name}]으로 바꿨습니다");
+                else c.LastStepResolved = false;
+            }, null);
+        }
 
         var dur = ParseDuration(s, out string core);
 
