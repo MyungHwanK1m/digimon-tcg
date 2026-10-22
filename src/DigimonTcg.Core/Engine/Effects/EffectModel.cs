@@ -182,6 +182,12 @@ public sealed class CardScript
     /// <summary>옵션 [메인] 효과의 대상 종류 (UI 대상 선택)</summary>
     public TargetKind MainTarget { get; set; }
 
+    /// <summary>옵션 [메인] 효과의 대상 조건 (예: 전기 충격은 레스트 상태인 상대 디지몬만) — 없으면 MainTarget의 디지몬 아무나</summary>
+    public Func<CardInstance, bool>? MainTargetFilter { get; set; }
+
+    /// <summary>대상 조건의 설명 ("레스트 상태인 상대 디지몬") — 조건에 안 맞는 대상에 쓰려 할 때 안내</summary>
+    public string? MainTargetRule { get; set; }
+
     /// <summary>카드에 적힌 다른 진화 조건 (예: 오메가몬 "Lv.6 레드 · 블루에서 진화") — 진화 대상 디지몬을 받아 진화할 수 있는지</summary>
     public Func<CardInstance, bool>? AlternativeEvolution { get; set; }
 

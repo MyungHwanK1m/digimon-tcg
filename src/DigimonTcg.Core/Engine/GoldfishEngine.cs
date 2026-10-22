@@ -517,6 +517,11 @@ public partial class GoldfishEngine
         var validation = ActionValidator.ValidatePlay(State, card);
         if (!validation.CanExecute)
             return validation;
+        // 옵션을 대상 조건에 안 맞는 디지몬에 놓았다 (예: 전기 충격을 액티브 디지몬에) — 메모리를 쓰기 전에 막는다.
+        // 그냥 쓰면 엔진이 조건에 맞는 다른 디지몬을 말없이 고르거나 효과 없이 끝난다
+        if (card.Type == CardType.Option
+            && CardScripts.InvalidMainTarget(card, target, CardScripts.MainTargetOf(card) == TargetKind.OpponentDigimon ? State.DummyOpponent.BattleArea : State.Player.BattleArea) is { } invalidTarget)
+            return ActionResult.Fail(invalidTarget);
 
         State.CanMulligan = false;
         State.Player.Hand.Remove(card);

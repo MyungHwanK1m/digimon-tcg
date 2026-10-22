@@ -49,6 +49,19 @@ public static class CardScripts
     /// <summary>옵션 [메인] 효과를 쓸 때 고를 대상 종류</summary>
     public static TargetKind MainTargetOf(CardData card) => For(card)?.MainTarget ?? TargetKind.None;
 
+    /// <summary>옵션 [메인] 효과의 대상이 될 수 있는지 (대상 조건이 없으면 true) — 화면이 놓을 수 있는 디지몬을 강조할 때도 쓴다</summary>
+    public static bool IsValidMainTarget(CardData card, CardInstance target) =>
+        For(card)?.MainTargetFilter is not { } filter || filter(target);
+
+    /// <summary>
+    /// 옵션을 놓은 디지몬이 대상 조건에 안 맞으면 안내 문구, 맞거나 조건이 없으면 null.
+    /// targetSide = 대상 종류에 맞는 쪽의 배틀 에어리어 (상대 디지몬 대상이면 상대 쪽) — 다른 쪽 디지몬에 놓은 것은 여기서 따지지 않는다
+    /// </summary>
+    public static string? InvalidMainTarget(CardData card, CardInstance? target, IEnumerable<CardInstance> targetSide) =>
+        target != null && For(card) is { MainTargetFilter: { } filter } script && targetSide.Contains(target) && !filter(target)
+            ? $"[{card.Name}]은(는) {script.MainTargetRule ?? "조건에 맞는 디지몬"}에게만 쓸 수 있습니다. [{target.TopCard.Name}]은(는) 대상이 될 수 없습니다."
+            : null;
+
     /// <summary>
     /// 실제로 지불할 등장 · 사용 코스트 (카드의 코스트 감소 효과 반영, 0 미만이 되지 않음).
     /// enemy = 상대의 필드 ("if your opponent has ~" · "for each of your opponent's Digimon"). 모르면 빈 필드로 본다
@@ -104,10 +117,12 @@ public sealed class CardScriptDefinition
     public CardScriptDefinition OnDeletion(Action<EffectContext> resolve) => On(EffectTrigger.OnDeletion, resolve);
     public CardScriptDefinition Security(Action<EffectContext> resolve) => On(EffectTrigger.Security, resolve);
 
-    /// <summary>옵션 [메인] 효과</summary>
-    public CardScriptDefinition Main(TargetKind target, Action<EffectContext> resolve)
+    /// <summary>옵션 [메인] 효과 (filter · rule = 대상 조건과 그 설명, 예: 레스트 상태인 상대 디지몬)</summary>
+    public CardScriptDefinition Main(TargetKind target, Action<EffectContext> resolve, Func<CardInstance, bool>? filter = null, string? rule = null)
     {
         _script.MainTarget = target;
+        _script.MainTargetFilter = filter;
+        _script.MainTargetRule = rule;
         return On(EffectTrigger.Main, resolve);
     }
 

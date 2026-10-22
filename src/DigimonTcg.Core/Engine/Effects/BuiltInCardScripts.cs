@@ -260,7 +260,7 @@ internal static class BuiltInCardScripts
                 }
                 LockAttackAndBlock(enemy, c.TurnSequence + 1);
                 c.Message = $"❄️ 소로 블루: 상대 [{enemy.TopCard.Name}]은(는) 다음 상대 턴 종료 시까지 어택 · 블록 불가!";
-            })
+            }, filter: d => d.EvolutionSources.Count == 0, rule: "진화원을 갖지 않은 상대 디지몬")
             .Security(c =>
             {
                 var t = c.PickEnemy(d => d.EvolutionSources.Count == 0, c.Other);
@@ -476,7 +476,7 @@ internal static class BuiltInCardScripts
                 }
                 c.BounceEnemy(enemy);
                 c.Message = $"⚡ 전기 충격: 레스트 상태의 상대 [{enemy.TopCard.Name}]을(를) 패로 되돌렸습니다!";
-            })
+            }, filter: d => d.IsSuspended, rule: "레스트 상태인 상대 디지몬")
             .Security(c =>   // 어택 중인 디지몬은 레스트 상태
             {
                 var t = c.PickEnemy(d => d.IsSuspended, c.Other);
@@ -563,7 +563,7 @@ internal static class BuiltInCardScripts
                 }
                 c.DeleteEnemy(enemy);
                 c.Message = $"🔥 제노사이드 어택: 상대 [{enemy.TopCard.Name}] 소멸!";
-            })
+            }, filter: d => d.TopCard.PlayCost <= 7, rule: "등장 코스트 7 이하인 상대 디지몬")
             .Security(c =>
             {
                 var t = c.PickEnemy(d => d.TopCard.PlayCost <= 7, c.Other);
@@ -637,7 +637,7 @@ internal static class BuiltInCardScripts
                 c.DeleteOwn(sacrifice);
                 c.DeleteEnemy(enemy);
                 c.Message = $"💀 데스 클로: 내 [{sacrifice.TopCard.Name}]을(를) 소멸시켜 상대 [{enemy.TopCard.Name}] 소멸!";
-            })
+            }, filter: d => d.TopCard.Level <= 4, rule: "Lv.4 이하인 상대 디지몬")
             .Security(c =>   // Lv.4 이하 상대 디지몬 1마리 소멸
             {
                 var t = c.PickEnemy(d => d.TopCard.Level <= 4, c.Other);
