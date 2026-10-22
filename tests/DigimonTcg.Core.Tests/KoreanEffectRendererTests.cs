@@ -242,4 +242,31 @@ public class KoreanEffectRendererTests
         Assert.StartsWith("【메인】 자신의 테이머 아래의 뒷면 카드를 아래에서부터 1장 파기하는 것으로,", R("[Main] By trashing the bottom face-down card from under any of your Tamers, gain 2 memory."));
         Assert.Contains("아래에서부터 1장 또는 자신의 시큐리티를 위에서부터 1장 파기하는 것으로,", R("[Main] By trashing the bottom face-down card from under any of your Tamers or your top security card, gain 2 memory."));
     }
+
+    [Fact]
+    public void DigivolutionCostReduction_ShouldUseOfficialNotation()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        // 공식: "【자신의 턴】이 디지몬이 특징으로 「곤충형」을 가진 디지몬 카드로 진화할 때, 지불하는 진화 코스트를 -1 한다."
+        Assert.Equal("【자신의 턴】 이 디지몬이 특징으로 「로얄 나이츠」를 가진 디지몬 카드로 진화할 때, 지불하는 진화 코스트를 -1 한다.",
+            R("[Your Turn] When this Digimon would digivolve into a Digimon card with the [Royal Knight] trait, reduce the digivolution cost by 1."));
+        Assert.Equal("【자신의 턴】 이 디지몬이 명칭에 「그레이몬」을 포함하는 카드로 진화할 때, 지불하는 진화 코스트를 -1 한다.",
+            R("[Your Turn] When this Digimon would digivolve into a card with [Greymon] in its name, reduce the digivolution cost by 1."));
+        Assert.Equal("【자신의 턴】 [턴에 1회] 이 디지몬이 진화할 때, 지불하는 진화 코스트를 -1 한다.",
+            R("[Your Turn] [Once Per Turn] When this Digimon would digivolve, reduce the digivolution cost by 1."));
+        // 비용 2개 — 공식: "이 테이머를 레스트시키고, 자신의 테이머 아래의 카드 1장을 그 디지몬의 진화원 아래에 놓는 것으로,"
+        Assert.Equal("【자신의 턴】 자신의 디지몬이 《세이브》가 기술되어 있는 디지몬 카드로 진화할 때, 이 테이머를 레스트시키고, 자신의 테이머 아래의 카드 1장을 그 디지몬의 진화원 아래에 놓는 것으로, 지불하는 진화 코스트를 -1 한다.",
+            R("[Your Turn] When one of your Digimon would digivolve into a Digimon card with ＜Save＞ in its text, by suspending this Tamer and placing 1 card from under one of your Tamers as the bottom digivolution card of that Digimon, reduce the digivolution cost by 1."));
+        // 주어 · 셈
+        Assert.Contains("패의 이 카드로 진화할 때, 그 디지몬의 뒷면의 진화원 1장마다 지불하는 진화 코스트를 -1 한다.",
+            R("When any of your [Hybrid] trait Digimon would digivolve into this card, for each of their face-down digivolution cards, reduce the digivolution cost by 1."));
+        Assert.Equal("자신의 디지몬이 패의 이 카드로 진화할 때, 자신의 그린/블랙의 테이머 1장마다 지불하는 진화 코스트를 -1 한다.",
+            R("When one of your Digimon would digivolve into this card, reduce the digivolution cost by 1 for each green or black Tamer you have in play."));
+        // 트래시의 장수 조건 (공식: "자신의 트래시에 명칭에 「묘티스몬」을 포함하는 카드가 5장 이상 있을 때,") · 최다 시큐리티 비용
+        Assert.Equal("【등장 시】 자신의 트래시에 명칭에 「묘티스몬」을 포함하는 카드가 5장 이상 있을 때, 액티브 상태인 상대의 디지몬 1마리를 소멸시킨다.",
+            R("[On Play] If you have 5 or more cards with [Myotismon] in their names in your trash, delete 1 of your opponent's unsuspended Digimon."));
+        Assert.Contains("자신의 트래시에 「루체몬」/", R("When this card would be played, if you have 4 or more cards with [Lucemon] or [Witchelny] in its text in your trash, reduce the play cost by 5."));
+        Assert.StartsWith("【진화 시】 시큐리티가 가장 많은 플레이어 1명의 시큐리티를 위에서부터 1장 파기하는 것으로,",
+            R("[When Digivolving] By trashing the top security card of 1 player with the most security cards, 1 of your opponent's Digimon or Tamers can't suspend until their turn ends."));
+    }
 }
