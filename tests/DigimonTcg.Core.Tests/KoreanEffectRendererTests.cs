@@ -269,4 +269,22 @@ public class KoreanEffectRendererTests
         Assert.StartsWith("【진화 시】 시큐리티가 가장 많은 플레이어 1명의 시큐리티를 위에서부터 1장 파기하는 것으로,",
             R("[When Digivolving] By trashing the top security card of 1 player with the most security cards, 1 of your opponent's Digimon or Tamers can't suspend until their turn ends."));
     }
+
+    [Theory]
+    // v0.19.0 시점 묶음 — 공식: "자신의 효과로 자신의 패를 파기했을 때," · "자신의 덱이 파기되었을 때," · "자신이 사용 코스트 2 이상의 옵션 카드를 사용했을 때," · "자신의 디지몬이 효과로 레스트했을 때,"
+    [InlineData("When one of your effects trashes a card in your hand", "자신의 효과로 자신의 패를 파기했을 때,")]
+    [InlineData("When you trash a card in your hand using one of your effects", "자신의 효과로 자신의 패를 파기했을 때,")]
+    [InlineData("When your opponent's hand is trashed from", "상대의 패가 파기되었을 때,")]
+    [InlineData("When a card is trashed from your deck", "자신의 덱이 파기되었을 때,")]
+    [InlineData("When an effect adds cards to your opponent's hand", "효과로 상대의 패에 카드가 추가되었을 때,")]
+    [InlineData("When you use an Option card with a cost of 2 or more", "자신이 사용 코스트 2 이상의 옵션 카드를 사용했을 때,")]
+    [InlineData("When you use [Royal Knight] trait Option cards", "자신이 특징으로 「로얄 나이츠」를 가진 옵션 카드를 사용했을 때,")]
+    [InlineData("When an effect plays one of your Digimon", "효과로 자신의 디지몬이 등장했을 때,")]
+    [InlineData("When an effect plays an opponent's Digimon or Tamer", "효과로 상대의 디지몬 또는 테이머가 등장했을 때,")]
+    [InlineData("When an effect suspends one of your Digimon", "자신의 디지몬이 효과로 레스트했을 때,")]
+    [InlineData("When an effect suspends this Digimon", "이 디지몬이 효과로 레스트했을 때,")]
+    [InlineData("When an effect suspends another Digimon or Tamer", "다른 디지몬 또는 테이머가 효과로 레스트했을 때,")]
+    [InlineData("When any Digimon suspend", "디지몬이 레스트했을 때,")]
+    public void TriggerVariants_ShouldUseOfficialNotation(string en, string ko) =>
+        Assert.StartsWith($"【서로의 턴】 {ko} 《1 드로우》", KoreanEffectRenderer.RenderClause($"[All Turns] {en}, ＜Draw 1＞"));
 }

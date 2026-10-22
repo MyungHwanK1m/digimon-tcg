@@ -890,6 +890,32 @@ public static class KoreanEffectRenderer
         if (Regex.IsMatch(ev, @"^(?:an|the) attack targets? (?:is|are) (?:switched|changed)$|^attack targets? (?:change|changes|switch|switches)$", RegexOptions.IgnoreCase)) return "어택의 대상이 변경되었을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon's attack target (?:is switched|is changed|changes|switches)$", RegexOptions.IgnoreCase)) return "이 디지몬의 어택의 대상이 변경되었을 때,";
         if (Regex.IsMatch(ev, @"^(?:one|any) of your Digimon's attack targets? (?:is|are) (?:switched|changed)$", RegexOptions.IgnoreCase)) return "자신의 디지몬의 어택의 대상이 변경되었을 때,";
+        // v0.19.0 시점 묶음 (공식 표기)
+        if (Regex.IsMatch(ev, @"^(?:one of your effects trashes (?:a card|cards) in your hand|you trash (?:a card|cards) in your hand using one of your effects)$", RegexOptions.IgnoreCase)) return "자신의 효과로 자신의 패를 파기했을 때,";
+        if ((m = Regex.Match(ev, @"^your opponent's hand is trashed from(?: or effects trash cards from under (?<t>this Tamer|your Tamers))?$", RegexOptions.IgnoreCase)).Success)
+            return m.Groups["t"].Success ? $"상대의 패가 파기되거나, 효과로 {(m.Groups["t"].Value.StartsWith("this", StringComparison.OrdinalIgnoreCase) ? "이 테이머" : "자신의 테이머")} 아래의 카드가 파기되었을 때," : "상대의 패가 파기되었을 때,";
+        if (Regex.IsMatch(ev, @"^(?:a card is|cards are) trashed from your deck$", RegexOptions.IgnoreCase)) return "자신의 덱이 파기되었을 때,";
+        if (Regex.IsMatch(ev, @"^an effect adds (?:a card|cards) to your opponent's hand$", RegexOptions.IgnoreCase)) return "효과로 상대의 패에 카드가 추가되었을 때,";
+        if ((m = Regex.Match(ev, @"^you use an Option card with a (?:use |memory )?cost (?:of )?(?<n>\d+) or (?<dir>more|less|higher|lower)$", RegexOptions.IgnoreCase)).Success)
+            return $"자신이 사용 코스트 {m.Groups["n"].Value} {Dir(m.Groups["dir"].Value)}의 옵션 카드를 사용했을 때,";
+        if ((m = Regex.Match(ev, $@"^you (?<would>would )?use (?:an? )?(?<x>{TargetSpec.NameList}) trait Option cards?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string x = NamesKo(m.Groups["x"].Value, trait: true);
+            return $"자신이 특징으로 {x}{J(x, "을", "를")} 가진 옵션 카드를 {(m.Groups["would"].Success ? "사용할" : "사용했을")} 때,";
+        }
+        if ((m = Regex.Match(ev, @"^an effect plays (?<t>one of your Digimon|a Digimon|an opponent's Digimon(?<tm> or Tamer)?|one of your opponent's Digimon)$", RegexOptions.IgnoreCase)).Success)
+        {
+            string t = m.Groups["t"].Value.ToLowerInvariant();
+            string who = t.StartsWith("one of your digimon") ? "자신의 디지몬" : t.StartsWith("a digimon") ? "디지몬" : m.Groups["tm"].Success ? "상대의 디지몬 또는 테이머" : "상대의 디지몬";
+            return $"효과로 {who}{J(who, "이", "가")} 등장했을 때,";
+        }
+        if ((m = Regex.Match(ev, @"^an effect suspends (?<t>one of your Digimon|this Digimon|(?:a|another) Digimon(?<tm> or Tamer)?)$", RegexOptions.IgnoreCase)).Success)
+        {
+            string t = m.Groups["t"].Value.ToLowerInvariant();
+            string who = t.StartsWith("one of") ? "자신의 디지몬" : t.StartsWith("this") ? "이 디지몬" : (t.StartsWith("another") ? "다른 " : "") + (m.Groups["tm"].Success ? "디지몬 또는 테이머" : "디지몬");
+            return $"{who}{J(who, "이", "가")} 효과로 레스트했을 때,";
+        }
+        if (Regex.IsMatch(ev, @"^any Digimon suspends?$", RegexOptions.IgnoreCase)) return "디지몬이 레스트했을 때,";
         // 진화 코스트 감소의 시점 (공식: "이 디지몬이 특징으로 「곤충형」을 가진 디지몬 카드로 진화할 때,")
         if ((m = Regex.Match(ev, @"^(?:(?<who>this Digimon|you)|(?:one|any) of your (?<spec>.*?Digimon(?: with .+?)?)|an? (?<spec>Digimon with .+?)) would digivolve(?: into (?<into>this card(?: in (?:the|your) hand)?|.+?))?$", RegexOptions.IgnoreCase)).Success)
         {
