@@ -51,14 +51,22 @@ public partial class MainWindow : Window
     private Border? _dragGhostBadgeBorder;
     private TextBlock? _dragGhostBadgeText;
 
-    // 옵션 [메인] 효과의 대상 종류는 카드 스크립트(CardScripts)에 적혀 있다
-    private static bool IsAllyTargetedOption(CardData card) =>
+    // 옵션 [메인] 효과의 대상 종류는 카드 스크립트(CardScripts)에 적혀 있다.
+    // 대상 쪽에 대상 조건을 만족하는 디지몬이 하나도 없으면 대상 옵션으로 다루지 않는다 —
+    // 공식 룰상 대상이 없어도 옵션은 쓸 수 있다 (예: "상대 디지몬 1마리를 소멸시킨다. 그 뒤 ≪1 드로우≫"를 드로우하려고).
+    private bool IsAllyTargetedOption(CardData card) =>
         card.Type == CardType.Option &&
-        CardScripts.MainTargetOf(card) is TargetKind.OwnDigimon or TargetKind.OwnDigimonWithDigimonSource;   // 자신의 디지몬 1마리 대상
+        CardScripts.MainTargetOf(card) is TargetKind.OwnDigimon or TargetKind.OwnDigimonWithDigimonSource &&   // 자신의 디지몬 1마리 대상
+        _gameState.Player.BattleArea.Any(d => IsValidAllyOptionTarget(card, d));
 
-    private static bool IsEnemyTargetedOption(CardData card) =>
+    private bool IsEnemyTargetedOption(CardData card) =>
         card.Type == CardType.Option &&
-        CardScripts.MainTargetOf(card) == TargetKind.OpponentDigimon;   // 상대 디지몬 대상
+        CardScripts.MainTargetOf(card) == TargetKind.OpponentDigimon &&   // 상대 디지몬 대상
+        _gameState.DummyOpponent.BattleArea.Any(d => CardScripts.IsValidMainTarget(card, d));
+
+    private static bool IsValidAllyOptionTarget(CardData option, CardInstance d) =>
+        CardScripts.IsValidMainTarget(option, d)
+        && (CardScripts.MainTargetOf(option) != TargetKind.OwnDigimonWithDigimonSource || d.EvolutionSources.Any(s => s.Type == CardType.Digimon));
 
     /// <summary>상대 디지몬 대상 옵션을 빈 칸에 놓았을 때의 대상: 대상 조건을 만족하는 상대 디지몬 중 DP가 가장 높은 것 (없으면 null)</summary>
     private CardInstance? BestEnemyOptionTarget(CardData option) =>
@@ -2965,6 +2973,11 @@ public partial class MainWindow : Window
                     isValidPendingTarget = false;
                     invalidTargetReason = $"{_pendingHandCard.DisplayName}은(는) 진화원에 디지몬 카드가 있는 디지몬에게만 사용할 수 있습니다.";
                 }
+                else if (!CardScripts.IsValidMainTarget(_pendingHandCard, instance))
+                {
+                    isValidPendingTarget = false;
+                    invalidTargetReason = $"{_pendingHandCard.DisplayName}의 대상 조건에 맞지 않는 디지몬입니다.";
+                }
                 else
                 {
                     isValidPendingTarget = true;
@@ -3957,7 +3970,7 @@ public partial class MainWindow : Window
                 else if (IsAllyTargetedOption(card))
                 {
                     var allyTarget = info.AllyDigimon
-                        ?? (info.OverBattleZone ? _gameState.Player.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault() : null);
+                        ?? (info.OverBattleZone ? _gameState.Player.BattleArea.Where(d => IsValidAllyOptionTarget(card, d)).OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault() : null);
 
                     if (allyTarget != null && !_gameState.Player.BattleArea.Contains(allyTarget))
                         allyTarget = null;
@@ -3977,10 +3990,14 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    bool overPlaymat = info.OverBattleZone || info.OverBreedingZone;
+                    // 대상이 필요 없는 옵션, 또는 대상 쪽에 조건에 맞는 디지몬이 없어 대상 없이 쓰는 옵션
+                    bool overPlaymat = info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null
+                                       || info.OverOpponentBattleZone || info.OverOpponentSecurityZone || info.OpponentDigimon != null;
+                    string noTarget = CardScripts.MainTargetOf(card) is TargetKind.OpponentDigimon or TargetKind.OwnDigimon or TargetKind.OwnDigimonWithDigimonSource
+                        ? " — 대상으로 고를 디지몬이 없어 대상 없이 씁니다" : "";
                     HighlightDropZone(overPlaymat ? BattleAreaZoneBorder : null, "#89B4FA");
                     _dragGhostBadgeText.Text = overPlaymat
-                        ? $"⚡ [{card.DisplayName}] 즉시 발동! (코스트 {PlayCostNow(card)})"
+                        ? $"⚡ [{card.DisplayName}] 즉시 발동! (코스트 {PlayCostNow(card)}){noTarget}"
                         : $"🖱️ 배틀 에어리어에 드롭하여 [{card.DisplayName}] 발동!";
                     _dragGhostBadgeBorder.Background = BrushFromHex(overPlaymat ? "#A6E3A1" : "#F9E2AF");
                 }
@@ -4195,18 +4212,13 @@ public partial class MainWindow : Window
                         ExecutePlayCardWithEffects(draggedHand, oppTarget);
                         return;
                     }
-                    if (overZone && _gameState.DummyOpponent.BattleArea.Count > 0)
-                    {
-                        ShowToast(false, $"⚠️ [{draggedHand.DisplayName}]을(를) 쓸 수 있는 상대 디지몬이 없습니다 (대상 조건에 맞는 디지몬 없음).");
-                        return;
-                    }
                 }
                 else if (isAllyTargeted)
                 {
                     var allyTarget = (info.AllyDigimon != null && _gameState.Player.BattleArea.Contains(info.AllyDigimon))
                         ? info.AllyDigimon
                         : (info.OverBattleZone
-                            ? _gameState.Player.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault()
+                            ? _gameState.Player.BattleArea.Where(d => IsValidAllyOptionTarget(draggedHand, d)).OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault()
                             : null);
                     if (allyTarget != null)
                     {
@@ -4214,7 +4226,9 @@ public partial class MainWindow : Window
                         return;
                     }
                 }
-                else if (info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null)
+                // 대상이 필요 없는 옵션 · 대상 쪽에 조건에 맞는 디지몬이 없는 옵션: 필드 어디에 놓아도 대상 없이 쓴다
+                else if (info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null
+                         || info.OverOpponentBattleZone || info.OverOpponentSecurityZone || info.OpponentDigimon != null)
                 {
                     ExecutePlayCardWithEffects(draggedHand);
                     return;
