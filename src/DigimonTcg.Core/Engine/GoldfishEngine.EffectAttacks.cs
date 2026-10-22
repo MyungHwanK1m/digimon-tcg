@@ -25,7 +25,7 @@ public partial class GoldfishEngine
     {
         bool skip = _nextAttackWithoutSuspending;
         _nextAttackWithoutSuspending = false;
-        if (!skip) Suspend(attacker);
+        if (!skip) SuspendAsAttacker(attacker);
     }
 
     internal bool CanEffectAttack(PlayerZones owner, CardInstance d, bool withoutSuspending) =>

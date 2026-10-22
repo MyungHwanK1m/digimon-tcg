@@ -691,6 +691,36 @@ internal static class SentenceParser
             return One(EffectTrigger.AllyAttackTargetSwitched);
         if (Regex.IsMatch(ev, @"^you use an Option card$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.AllyOptionUsed);
+        // "When you use an Option card with a cost of 3 or more" · "When you use [TS] trait Option cards" — 사용한 옵션의 조건
+        if ((m = Regex.Match(ev, @"^you use (?:an? |1 )?(?<pre>[^,]*?)Option cards?(?<with> with .+)?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string with = Regex.Replace(m.Groups["with"].Value, @"\ba (?:use |memory )?cost (?:of )?(?=\d)", "a cost of ", RegexOptions.IgnoreCase);
+            if (ParseCardPick($"1 {m.Groups["pre"].Value}Option card{with}") is { } optPick)
+            {
+                var match = optPick.Match;
+                return One(EffectTrigger.AllyOptionUsed, c => c.TriggerCard != null && match(c.TriggerCard));
+            }
+        }
+        // 패 · 덱에서 버려졌을 때: "When your hand is trashed from" · "When one of your effects trashes a card in your hand" · "When a card is trashed from your deck"
+        if (Regex.IsMatch(ev, @"^your hand is trashed from$|^one of your effects trashes (?:a card|cards) in your hand$|^you trash (?:a card|cards) in your hand using one of your effects$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyHandTrashed);
+        if (Regex.IsMatch(ev, @"^your opponent's hand is trashed from$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.OpponentHandTrashed);
+        if (Regex.IsMatch(ev, @"^(?:a card is|cards are) trashed from your deck$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyDeckTrashed);
+        if (Regex.IsMatch(ev, @"^an effect adds (?:a card|cards) to your opponent's hand$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.OpponentHandAddedByEffect);
+        // 효과로 등장 · 레스트: "When an effect plays one of your Digimon" · "When an effect suspends one of your Digimon" · "When any Digimon suspend"
+        if (Regex.IsMatch(ev, @"^an effect plays (?:one of your|a) Digimon$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyDigimonPlayed, c => c.Engine.PlayingByEffect);
+        if (Regex.IsMatch(ev, @"^an effect plays (?:an|one of your) opponent's Digimon$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.OpponentDigimonPlayed, c => c.Engine.PlayingByEffect);
+        if (Regex.IsMatch(ev, @"^an effect suspends one of your Digimon$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.AllyDigimonSuspended, c => !c.Engine.SuspendingForAttack && !c.Engine.SuspendingForBlock);
+        if (Regex.IsMatch(ev, @"^an effect suspends this Digimon$", RegexOptions.IgnoreCase))
+            return One(EffectTrigger.ThisDigimonSuspends, c => !c.Engine.SuspendingForAttack && !c.Engine.SuspendingForBlock);
+        if (Regex.IsMatch(ev, @"^any Digimon (?:suspend|suspends|becomes? suspended)$", RegexOptions.IgnoreCase))
+            return (new List<EffectTrigger> { EffectTrigger.AllyDigimonSuspended, EffectTrigger.OpponentDigimonSuspended }, null);
         if (Regex.IsMatch(ev, @"^your opponent uses an Option card$", RegexOptions.IgnoreCase))
             return One(EffectTrigger.OpponentOptionUsed);
         if (Regex.IsMatch(ev, @"^(?:a|any) player uses an Option card$", RegexOptions.IgnoreCase))
@@ -1840,11 +1870,13 @@ internal static class SentenceParser
             return (c => c.Owner.Hand.Count(match) >= n,
                     c =>
                     {
-                        foreach (var x in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, c.Owner.Hand.Where(match).OrderBy(x => x.Level).ToList(), n, upTo: false, $"[{c.Card.Name}] 비용으로 버릴 패 {n}장을 고르세요."))
+                        var trashed = c.Engine.ChooseCards(c.Owner, CardChoiceZone.Hand, c.Owner.Hand.Where(match).OrderBy(x => x.Level).ToList(), n, upTo: false, $"[{c.Card.Name}] 비용으로 버릴 패 {n}장을 고르세요.");
+                        foreach (var x in trashed)
                         {
                             c.Owner.Hand.Remove(x);
                             c.Owner.Trash.Add(x);
                         }
+                        c.Engine.NotifyHandTrashed(c.Owner, trashed);
                     },
                     c => c.Owner.Hand.Count >= n + 2, $"패에서 조건에 맞는 카드 {n}장을 버려");
         }

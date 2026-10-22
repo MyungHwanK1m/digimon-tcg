@@ -10,6 +10,17 @@
 
 ---
 
+## v0.19.0 — 2026-10-22
+발동 시점 묶음 — 옵션 사용 조건 · 패/덱 파기 · 효과로 등장/레스트 · 상대 패
+- "When you use an Option card with a cost of 3 or more" · "When you use [TS] trait Option cards" (사용한 옵션의 조건, "use cost" · "memory cost" 표기 포함)
+- "When your hand is trashed from" · "When one of your effects trashes a card in your hand" · "When your opponent's hand is trashed from" (패를 버린 뒤 1번)
+- "When a card is trashed from your deck" (덱 위 파기 1번에 1회)
+- "When an effect adds cards to your opponent's hand" (패로 되돌리기)
+- "When an effect plays one of your / an opponent's Digimon" (코스트 없이 효과로 등장했을 때만)
+- "When an effect suspends one of your Digimon / this Digimon" (어택 · 블록으로 레스트한 것은 빼고), "When any Digimon suspend" (양쪽)
+- 시나리오 테스트 TriggerVariantTests 9개, KeywordTests의 "미지원 문장" 예시 교체, AI 벤치마크 기준 그대로 (56.5% / 66.7%)
+- 도감 효과 문장 지원 6,669 → 6,742 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.18.1 — 2026-10-22
 생성 한글: 진화 코스트 감소 (v0.18.0) 등
 - "이 디지몬이 특징으로 「로얄 나이츠」를 가진 디지몬 카드로 진화할 때, 지불하는 진화 코스트를 -1 한다." — 공식 표기

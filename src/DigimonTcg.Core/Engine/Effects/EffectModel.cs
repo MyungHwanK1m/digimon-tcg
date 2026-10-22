@@ -64,6 +64,10 @@ public enum EffectTrigger
     AllySecurityAdded,              // 자신의 시큐리티에 카드가 놓였을 때 (≪리커버리≫ 등, TriggerCard = 놓인 카드)
     AttackTargetSwitched,           // 어느 쪽이든 어택 대상이 바뀌었을 때 (효과 · ≪돌진≫, Other = 어택 중인 디지몬)
     AllyAttackTargetSwitched,       // 자신의 디지몬의 어택 대상이 바뀌었을 때 (Other = 어택 중인 자신의 디지몬)
+    AllyHandTrashed,                // 자신의 패가 (효과 · 비용으로) 버려졌을 때 (TriggerCard = 버린 카드 중 1장)
+    OpponentHandTrashed,            // 상대의 패가 버려졌을 때 (TriggerCard)
+    AllyDeckTrashed,                // 자신의 덱에서 카드가 파기되었을 때 (덱 위 파기, TriggerCard = 파기한 카드 중 1장)
+    OpponentHandAddedByEffect,      // 효과로 상대의 패에 카드가 들어갔을 때 (패로 되돌리기 등, TriggerCard)
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>

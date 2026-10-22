@@ -846,14 +846,19 @@ public partial class GoldfishEngine
     internal void Mill(PlayerZones zones, int count, string reason)
     {
         int n = 0;
+        CardData? first = null;
         while (n < count && zones.MainDeck.Count > 0)
         {
+            first ??= zones.MainDeck[0];
             zones.Trash.Add(zones.MainDeck[0]);
             zones.MainDeck.RemoveAt(0);
             n++;
         }
         if (n > 0)
+        {
             Log($"[효과] {reason}: {SideName(zones)} 덱 위에서 {n}장 파기");
+            FireForSide(EffectTrigger.AllyDeckTrashed, zones, null, triggerCard: first);   // "When a card is trashed from your deck"
+        }
     }
 
     internal CardData? DrawFor(PlayerZones zones)
@@ -908,6 +913,7 @@ public partial class GoldfishEngine
             zones.Trash.Add(inst.EvolutionSources.Pop());
         zones.Hand.Add(inst.TopCard);
         PurgeTokens(zones);
+        FireForSide(EffectTrigger.OpponentHandAddedByEffect, EnemyOf(zones), null, triggerCard: inst.TopCard);   // "When an effect adds cards to your opponent's hand"
     }
 
     /// <summary>≪퇴화 N≫ — 버린 매수 반환</summary>
@@ -1026,6 +1032,13 @@ public partial class GoldfishEngine
     /// 카드를 코스트 없이 등장시킨다 (효과로 등장 — [등장 시] 효과는 발휘한다). 디지몬은 배틀 에어리어, 테이머는 테이머 존.
     /// </summary>
     internal void PlayWithoutCost(PlayerZones owner, CardData card, bool triggerOnPlay = true, bool suspended = false)
+    {
+        _playingByEffect++;
+        try { PlayWithoutCostCore(owner, card, triggerOnPlay, suspended); }
+        finally { _playingByEffect--; }
+    }
+
+    private void PlayWithoutCostCore(PlayerZones owner, CardData card, bool triggerOnPlay, bool suspended)
     {
         if (card.Type == CardType.Tamer)
         {
@@ -1161,7 +1174,34 @@ public partial class GoldfishEngine
             zones.Hand.Remove(c);
             zones.Trash.Add(c);
         }
+        NotifyHandTrashed(zones, picks);
         return picks.Count;
+    }
+
+    /// <summary>"When your hand is trashed from" · "When your opponent's hand is trashed from" — 패를 버린 뒤 (1번에 1회)</summary>
+    internal void NotifyHandTrashed(PlayerZones zones, IReadOnlyCollection<CardData> trashed)
+    {
+        if (trashed.Count == 0)
+            return;
+        var first = trashed.First();
+        FireForSide(EffectTrigger.AllyHandTrashed, zones, null, triggerCard: first);
+        FireForSide(EffectTrigger.OpponentHandTrashed, EnemyOf(zones), null, triggerCard: first);
+    }
+
+    // 효과로 등장시키는 중 ("When an effect plays one of your Digimon")
+    private int _playingByEffect;
+
+    /// <summary>지금 등장하는 카드가 효과로 등장하는지 (PlayWithoutCost 안)</summary>
+    internal bool PlayingByEffect => _playingByEffect > 0;
+
+    /// <summary>어택하면서 레스트시키는 중 ("When an effect suspends ~"는 어택 · 블록으로 레스트한 것을 빼고)</summary>
+    internal bool SuspendingForAttack { get; private set; }
+
+    private void SuspendAsAttacker(CardInstance attacker)
+    {
+        SuspendingForAttack = true;
+        try { Suspend(attacker); }
+        finally { SuspendingForAttack = false; }
     }
 
     /// <summary>지금이 owner의 턴인지</summary>

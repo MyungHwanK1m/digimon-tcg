@@ -1252,7 +1252,7 @@ public partial class GoldfishEngine
             if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || (aiAttacker.IsSuspended && !noSuspend) || EffectRules.IsAttackLocked(State, aiAttacker))
                 continue;
 
-            if (!noSuspend) Suspend(aiAttacker);
+            if (!noSuspend) SuspendAsAttacker(aiAttacker);
             State.OpponentAttackedThisTurn = true;
 
             // AI 디지몬의 [어택 시] 효과 (플레이어와 같은 카드 스크립트) → ≪연계≫ · ≪돌진≫
