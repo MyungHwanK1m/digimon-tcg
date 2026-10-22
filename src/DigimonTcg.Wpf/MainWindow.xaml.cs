@@ -60,6 +60,13 @@ public partial class MainWindow : Window
         card.Type == CardType.Option &&
         CardScripts.MainTargetOf(card) == TargetKind.OpponentDigimon;   // 상대 디지몬 대상
 
+    /// <summary>상대 디지몬 대상 옵션을 빈 칸에 놓았을 때의 대상: 대상 조건을 만족하는 상대 디지몬 중 DP가 가장 높은 것 (없으면 null)</summary>
+    private CardInstance? BestEnemyOptionTarget(CardData option) =>
+        _gameState.DummyOpponent.BattleArea
+            .Where(d => CardScripts.IsValidMainTarget(option, d))
+            .OrderByDescending(d => d.GetCurrentDP())
+            .FirstOrDefault();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -2222,7 +2229,9 @@ public partial class MainWindow : Window
 
         foreach (var opp in _gameState.DummyOpponent.BattleArea.ToList())
         {
-            bool isTargetForOption = _pendingHandCard != null && !_pendingIsEvolution && _pendingTargetsOpponent;
+            // 옵션의 대상 조건(예: 전기 충격 = 레스트 상태)에 맞는 디지몬만 강조 · 클릭 대상
+            bool isTargetForOption = _pendingHandCard != null && !_pendingIsEvolution && _pendingTargetsOpponent
+                                     && CardScripts.IsValidMainTarget(_pendingHandCard, opp);
             bool isTargetForAttack = _pendingAttackerInstance != null && opp.IsSuspended;
             bool isHighlighted = isTargetForOption || isTargetForAttack;
 
@@ -3924,9 +3933,15 @@ public partial class MainWindow : Window
                 if (_pendingTargetsOpponent)
                 {
                     var oppTarget = info.OpponentDigimon
-                        ?? (info.OverOpponentBattleZone ? _gameState.DummyOpponent.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault() : null);
+                        ?? (info.OverOpponentBattleZone ? BestEnemyOptionTarget(card) : null);
 
-                    if (oppTarget != null)
+                    if (oppTarget != null && !CardScripts.IsValidMainTarget(card, oppTarget))
+                    {
+                        ResetDropZoneHighlights();
+                        _dragGhostBadgeText.Text = $"❌ [{oppTarget.TopCard.DisplayName}]에게는 [{card.DisplayName}]을(를) 쓸 수 없습니다 (대상 조건)";
+                        _dragGhostBadgeBorder.Background = BrushFromHex("#F38BA8");
+                    }
+                    else if (oppTarget != null)
                     {
                         HighlightDropZone(OpponentBattleAreaBorder, "#A6E3A1");
                         _dragGhostBadgeText.Text = $"🔥 상대 [{oppTarget.TopCard.DisplayName}]에게 [{card.DisplayName}] 발동!";
@@ -4171,13 +4186,18 @@ public partial class MainWindow : Window
 
                 if (isEnemyTargeted)
                 {
-                    var oppTarget = info.OpponentDigimon
-                        ?? ((info.OverOpponentBattleZone || info.OverOpponentSecurityZone || info.OverBattleZone)
-                            ? _gameState.DummyOpponent.BattleArea.OrderByDescending(d => d.GetCurrentDP()).FirstOrDefault()
-                            : null);
+                    // 디지몬 위에 놓았으면 그 디지몬 (대상 조건에 안 맞으면 엔진이 메모리를 쓰기 전에 거절하고 안내한다),
+                    // 빈 칸이면 대상 조건(예: 전기 충격 = 레스트 상태)을 만족하는 상대 디지몬 중 DP가 가장 높은 것
+                    bool overZone = info.OverOpponentBattleZone || info.OverOpponentSecurityZone || info.OverBattleZone;
+                    var oppTarget = info.OpponentDigimon ?? (overZone ? BestEnemyOptionTarget(draggedHand) : null);
                     if (oppTarget != null)
                     {
                         ExecutePlayCardWithEffects(draggedHand, oppTarget);
+                        return;
+                    }
+                    if (overZone && _gameState.DummyOpponent.BattleArea.Count > 0)
+                    {
+                        ShowToast(false, $"⚠️ [{draggedHand.DisplayName}]을(를) 쓸 수 있는 상대 디지몬이 없습니다 (대상 조건에 맞는 디지몬 없음).");
                         return;
                     }
                 }
