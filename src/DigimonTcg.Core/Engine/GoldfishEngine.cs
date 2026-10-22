@@ -582,6 +582,7 @@ public partial class GoldfishEngine
         int baseCost = ActionValidator.EvolutionCost(target, evoCard);
         int evoCost = baseCost - TryDigisorption(State.Player, target, evoCard, baseCost, State.MemoryGauge);
         State.Player.Hand.Remove(evoCard);
+        evoCost = ApplyEvoCostModifiers(State.Player, target, evoCard, evoCost);   // "When this Digimon would digivolve, reduce the digivolution cost by N"
         target.Evolve(evoCard);
         State.MemoryGauge -= evoCost;
         State.TotalMemorySpent += evoCost;
@@ -1693,6 +1694,7 @@ public partial class GoldfishEngine
         int baseCost = ActionValidator.EvolutionCost(fieldDigimon, evoCard);
         int evoCost = baseCost - TryDigisorption(opp, fieldDigimon, evoCard, baseCost, ctx.Memory);
         opp.Hand.Remove(evoCard);
+        evoCost = ApplyEvoCostModifiers(opp, fieldDigimon, evoCard, evoCost);
         int beforeMem = ctx.Memory;
         string prev = fieldDigimon.TopCard.Name;
         fieldDigimon.Evolve(evoCard);

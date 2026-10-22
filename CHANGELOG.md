@@ -10,6 +10,17 @@
 
 ---
 
+## v0.18.0 — 2026-10-22
+진화하기 직전의 진화 코스트 감소
+- "When this Digimon would digivolve (into a [X] trait Digimon card), reduce the digivolution cost by N" · "When one of your (suspended / [X] trait) Digimon would digivolve into ~" · "When one of your Digimon with ~ would digivolve into this card in your hand, reduce the memory cost of the digivolution by N" (패의 그 카드)
+- [Your Turn] · [Once Per Turn](효과가 있는 곳마다), 조건 "if you have ~", 비용 "by ~ing, reduce ~"(낼지 묻는다 — AI는 추천대로)
+- 효과가 있는 곳: 자신의 디지몬(맨 위 카드 · 진화원 효과) · 테이머 · 진화할 카드 자신. 상대가 진화 코스트 감소를 막고 있으면 적용하지 않음
+- 플레이어 진화 · AI 진화 · 효과로 진화(코스트를 낼 때) 모두에 적용, GoldfishEngine.PreviewEvoCost(owner, target, card) — 비용 없는 감소만 넣은 미리보기
+- 카드 조건: "with ＜Save＞ in its text" · "multicolored (purple or yellow) Digimon", 대상 조건 "with a Tamer card in its digivolution cards", 원문 오타 "trait trait"
+- 조건 "you have 4 or more cards with [X] in its text in your trash", 비용 "trashing the top security card of 1 player with the most security cards"
+- 시나리오 테스트 EvoCostModifierTests 6개, AI 벤치마크 기준 그대로 (56.5% / 66.7%)
+- 도감 효과 문장 지원 6,579 → 6,669 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.17.1 — 2026-10-22
 생성 한글: v0.17.0의 새 비용 표기
 - "자신의 시큐리티의 위 또는 아래에서 1장 파기하는 것으로,"

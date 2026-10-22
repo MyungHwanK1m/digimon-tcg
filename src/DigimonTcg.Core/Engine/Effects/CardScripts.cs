@@ -141,6 +141,13 @@ public sealed class CardScriptDefinition
 
     public CardScriptDefinition ReducePlayCost(Func<PlayerZones, int> reduction) => ReducePlayCost((z, _) => reduction(z));
 
+    /// <summary>진화하기 직전의 진화 코스트 감소 ("When this Digimon would digivolve into ~, reduce the digivolution cost by N")</summary>
+    public CardScriptDefinition EvoCostModifier(EvoCostModifier modifier)
+    {
+        _script.EvoCostModifiers.Add(modifier);
+        return this;
+    }
+
     /// <summary>등장할 때 비용을 내면 코스트 -N ("When this card would be played, by ~ing, reduce the play cost by N")</summary>
     public CardScriptDefinition OptionalPlayCostReduction(PlayCostOption option)
     {

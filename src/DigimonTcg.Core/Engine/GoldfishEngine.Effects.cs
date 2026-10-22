@@ -1110,6 +1110,7 @@ public partial class GoldfishEngine
     {
         if (!(from ?? owner.Hand).Remove(evoCard))
             return;
+        cost = ApplyEvoCostModifiers(owner, target, evoCard, cost);   // "When this Digimon would digivolve, reduce the digivolution cost" (코스트 없는 진화는 그대로 0)
         target.Evolve(evoCard);
         AddMemory(owner, -cost);
         if (ReferenceEquals(owner, State.Player))

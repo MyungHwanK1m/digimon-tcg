@@ -149,6 +149,12 @@ public sealed class TargetSpec
             {
                 spec.Filters.Add(d => d.EvolutionSources.Count == 0);
             }
+            else if ((m = Regex.Match(rest, @"^(?:with |that has |and )?(?:a|an) (?<kind>Tamer|Option|Digimon) card in its digivolution cards", RegexOptions.IgnoreCase)).Success)
+            {
+                // "with a Tamer card in its digivolution cards" — 진화원에 그 종류의 카드가 있다
+                var kind = Enum.Parse<CardType>(m.Groups["kind"].Value, ignoreCase: true);
+                spec.Filters.Add(d => d.EvolutionSources.Any(s => s.Type == kind));
+            }
             else if ((m = Regex.Match(rest, @"^(?:with |and )?(?<n>\d+) or (?<dir>more|fewer|less) digivolution cards", RegexOptions.IgnoreCase)).Success)
             {
                 int n = int.Parse(m.Groups["n"].Value);

@@ -222,7 +222,28 @@ public sealed class CardScript
 
     /// <summary>"When this card would be played, by deleting 1 of your Digimon, reduce the play cost by 4." — 등장할 때 비용을 낼지 묻는 코스트 감소</summary>
     public List<PlayCostOption> PlayCostOptions { get; } = new();
+
+    /// <summary>"When this Digimon would digivolve (into ~), reduce the digivolution cost by N" — 진화하기 직전에 진화 코스트를 바꾸는 효과</summary>
+    public List<EvoCostModifier> EvoCostModifiers { get; } = new();
 }
+
+/// <summary>진화 코스트 감소가 걸리는 진화: 이 디지몬이 진화할 때 · 자신의 디지몬이 진화할 때 · (패의) 이 카드로 진화할 때</summary>
+public enum EvoCostSubject { ThisDigimon, AnyOwnDigimon, IntoThisCard }
+
+/// <summary>
+/// 진화 코스트 감소 효과 하나. Source = 이 효과가 적힌 곳 (진화원 효과면 그 카드가 진화원에 있을 때만).
+/// Subject 조건(SubjectFilter: 효과 상황, 진화하는 디지몬) · 진화할 카드 조건(Into) · 필드 조건(Condition) · 비용(Cost — 낼지 묻는다)을 모두 만족하면 Reduce만큼 줄인다.
+/// </summary>
+public sealed record EvoCostModifier(
+    EffectSource Source,
+    EvoCostSubject Subject,
+    Func<EffectContext, CardInstance, bool>? SubjectFilter,
+    Func<CardData, bool>? Into,
+    Func<PlayerZones, PlayerZones, bool>? Condition,
+    PlayCostOption? Cost,
+    int Reduce,
+    bool OncePerTurn,
+    bool YourTurnOnly);
 
 /// <summary>등장할 때 고르는 코스트 감소: 비용(낼 수 있는지 · 내기 · 추천 · 설명)을 내면 Reduce만큼 줄인다</summary>
 public sealed record PlayCostOption(int Reduce, Func<EffectContext, bool> CanPay, Action<EffectContext> Pay, Func<EffectContext, bool> Recommend, string Describe);
