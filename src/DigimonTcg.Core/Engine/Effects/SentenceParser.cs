@@ -213,7 +213,7 @@ internal static class SentenceParser
             if (evoMod.Groups["cost"].Success)
             {
                 if (ParseCost(evoMod.Groups["cost"].Value, card) is not { } c) return $"미지원 비용 (진화 코스트 감소: by {evoMod.Groups["cost"].Value})";
-                evoPay = new PlayCostOption(reduceBy, c.CanPay, c.Pay, c.Recommend, c.Describe);
+                evoPay = new PlayCostOption(reduceBy, c.CanPay, c.Pay, c.Recommend, c.Describe, evoMod.Groups["cost"].Value);
             }
             def?.EvoCostModifier(new EvoCostModifier(inherited ? EffectSource.Inherited : EffectSource.Main, subject, filter, into, evoCond, evoPay, reduceBy,
                 OncePerTurn: evoLabels.Contains("[Once Per Turn]", StringComparison.OrdinalIgnoreCase),
@@ -227,7 +227,7 @@ internal static class SentenceParser
         {
             string costText = paid.Groups["cost"].Success ? paid.Groups["cost"].Value : $"{Gerund(paid.Groups["verb"].Value)}{paid.Groups["obj"].Value}";
             if (ParseCost(costText, card) is not { } payCost) return $"미지원 비용 (코스트 감소: by {costText})";
-            def?.OptionalPlayCostReduction(new PlayCostOption(int.Parse(paid.Groups["n"].Value), payCost.CanPay, payCost.Pay, payCost.Recommend, payCost.Describe));
+            def?.OptionalPlayCostReduction(new PlayCostOption(int.Parse(paid.Groups["n"].Value), payCost.CanPay, payCost.Pay, payCost.Recommend, payCost.Describe, costText));
             return null;
         }
         // 코스트 감소: "When this card would be played, if you have ~, reduce the play cost by 4."

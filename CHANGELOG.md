@@ -10,6 +10,12 @@
 
 ---
 
+## v0.20.8 — 2026-10-22
+AI용 등장 코스트 미리보기 (선택형 감소 포함)
+- GoldfishEngine.PreviewPlayCostWithOptions(owner, card): 상대 필드를 포함한 코스트에서, 지금 낼 수 있고 추천이 참인 "비용을 내면 -N" 감소를 뺀 값 (부작용 없음 — AI가 실제로 낼 때와 같은 기준)
+- PlayCostOption.CostText: 원문 비용 구절 ("deleting 1 of your Digimon" 등) — AI가 비용 종류를 가늠
+- 게임 동작은 그대로 (AI 정책 반영은 다음 버전)
+
 ## v0.20.7 — 2026-10-22
 덱 위 공개: 같은 카드 2장을 모두 고를 수 있게
 - 같은 카드 여러 장은 같은 카드 객체라, "Among them, add 1 [X] to the hand and trash 1 such card"처럼 두 번 고를 때 앞에서 1장을 가져가면 남은 같은 카드까지 고를 수 없었음 → 공개한 순서의 번호로 기억해서 고름

@@ -255,5 +255,5 @@ public sealed record EvoCostModifier(
     bool OncePerTurn,
     bool YourTurnOnly);
 
-/// <summary>등장할 때 고르는 코스트 감소: 비용(낼 수 있는지 · 내기 · 추천 · 설명)을 내면 Reduce만큼 줄인다</summary>
-public sealed record PlayCostOption(int Reduce, Func<EffectContext, bool> CanPay, Action<EffectContext> Pay, Func<EffectContext, bool> Recommend, string Describe);
+/// <summary>등장할 때 고르는 코스트 감소: 비용(낼 수 있는지 · 내기 · 추천 · 설명)을 내면 Reduce만큼 줄인다. CostText = 원문 비용 구절 (예: "deleting 1 of your Digimon" — AI가 비용 종류를 가늠)</summary>
+public sealed record PlayCostOption(int Reduce, Func<EffectContext, bool> CanPay, Action<EffectContext> Pay, Func<EffectContext, bool> Recommend, string Describe, string CostText = "");

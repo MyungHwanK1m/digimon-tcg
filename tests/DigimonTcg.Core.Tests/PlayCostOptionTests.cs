@@ -77,6 +77,23 @@ public class PlayCostOptionTests
         Assert.Equal(8 - 2, state.MemoryGauge);
     }
 
+    [Theory]
+    [InlineData(3, 4)]
+    [InlineData(0, 6)]
+    public void Preview_UsesRecommendedPayableReductions(int spareCards, int expected)
+    {
+        var (state, engine) = NewMainPhase(pay: false);
+        var card = Card("PO-4", "When this card would be played, by trashing 1 card in your hand, reduce the play cost by 2.");
+        for (int i = 0; i < spareCards; i++) state.Player.Hand.Add(Card("PO-SPARE" + i, type: CardType.Option, level: 0, playCost: 1));
+        state.Player.Hand.Add(card);
+        int handBefore = state.Player.Hand.Count;
+
+        Assert.Equal(expected, engine.PreviewPlayCostWithOptions(state.Player, card));   // 패가 넉넉하면 추천 = 비용을 낸다
+        Assert.Equal(handBefore, state.Player.Hand.Count);                                // 미리보기는 아무것도 바꾸지 않는다
+        Assert.Equal(8, state.MemoryGauge);
+        Assert.Equal("trashing 1 card in your hand", CardScripts.For(card)!.PlayCostOptions[0].CostText);
+    }
+
     [Fact]
     public void NothingToPay_FullCost()
     {
