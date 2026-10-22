@@ -1700,6 +1700,16 @@ public partial class GoldfishEngine
     }
 
     /// <summary>옵션 카드를 배틀 에어리어에 놓는다 (≪딜레이≫: 놓은 다음 턴부터 [메인]으로 파기해 효과를 발휘)</summary>
+    /// <summary>
+    /// 효과로 옵션을 코스트 없이 사용 ("You may use 1 Option card ~ in your hand without paying the cost") — 원래 있던 곳에서 이미 뺀 카드.
+    /// [메인] 효과 → 사용 뒤 처리(트래시 · 링크 · 배틀 에어리어) → "옵션을 사용했을 때". 대상은 엔진이 고른다 (플레이어는 묻는다)
+    /// </summary>
+    internal void UseOptionByEffect(PlayerZones owner, CardData option)
+    {
+        EffectLog(owner, $"[효과] 옵션 [{option.Name}]을(를) 코스트 없이 사용");
+        ApplyOptionEffect(owner, option, null);
+    }
+
     internal void PlaceOption(PlayerZones owner, CardData option)
     {
         owner.OptionsInPlay.Add(new PlacedOption { Card = option, PlacedTurn = State.TurnSequence });

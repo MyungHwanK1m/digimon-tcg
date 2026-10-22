@@ -2377,6 +2377,36 @@ internal static class SentenceParser
                 c.Owner.Hand.Add(x);
                 Emit(c, label, "뒷면 시큐리티 맨 위 1장을 패에 넣는다");
             }, null);
+        // 효과로 옵션 사용: "You may use 1 Option card with a cost of 5 or less in your hand without paying the cost"
+        //  · "~ from your hand or under your Tamers ~" · "use 1 use cost 3 or lower Option card with [X] in its text from your hand or trash ~"
+        //  사용할 수 있는 옵션만 (색 조건은 그대로 — 코스트만 내지 않는다)
+        if ((m = Regex.Match(s, @"^Use (?<pick>.+?) (?:in|from) (?<from>your hand or (?:from )?(?:your )?trash|your hand or (?:from )?under (?:one of )?your Tamers|under (?:this Tamer|(?:one of )?your Tamers)|your hand|your trash) without paying (?:the|its) (?:memory |use )?cost$", RegexOptions.IgnoreCase)).Success)
+        {
+            string pt = Regex.Replace(m.Groups["pick"].Value.Trim(), @"^(?:an?|one) ", "1 ", RegexOptions.IgnoreCase);
+            pt = Regex.Replace(pt, @"^(?<n>\d+) (?:use |memory |play )?cost (?<c>\d+) or (?:lower|less) (?<rest>.+?Option cards?)", "${n} ${rest} with a cost of ${c} or less", RegexOptions.IgnoreCase);
+            if (ParseCardPick(pt) is not { } optPick) return (null, $"미지원 옵션 사용 조건: {m.Groups["pick"].Value}");
+            var (count, pickMatch) = optPick;
+            string from = m.Groups["from"].Value.ToLowerInvariant();
+            bool fromHand = from.Contains("hand"), fromTrash = from.Contains("trash"), fromUnder = from.Contains("under");
+            return (c =>
+            {
+                bool Usable(CardData x) => x.Type == CardType.Option && pickMatch(x) && ActionValidator.MissingOptionColors(c.Owner, x).Count == 0;
+                var pool = new List<PoolCard>();
+                if (fromHand) pool.AddRange(PoolFrom(c.Owner.Hand, Usable));
+                if (fromTrash) pool.AddRange(PoolFrom(c.Owner.Trash, Usable));
+                if (fromUnder) pool.AddRange(PoolFrom(c.Owner.UnderTamers, Usable));
+                var zoneKind = fromUnder ? CardChoiceZone.Other : fromHand && fromTrash ? CardChoiceZone.HandOrTrash : fromHand ? CardChoiceZone.Hand : CardChoiceZone.Trash;
+                var picks = ChooseFromPool(c, zoneKind, pool.OrderByDescending(x => x.Card.PlayCost).ToList(), count, $"[{c.Card.Name}] 코스트 없이 사용할 옵션 카드를 고르세요.");
+                int used = 0;
+                foreach (var p in picks)
+                {
+                    if (!TakeFromPool(c, p)) continue;
+                    c.Engine.UseOptionByEffect(c.Owner, p.Card);
+                    used++;
+                }
+                if (used == 0) { c.LastStepResolved = false; Emit(c, label, "사용할 수 있는 옵션 카드가 없습니다"); }
+            }, null);
+        }
         // "Play 1 blue or yellow [TS] trait Digimon card from your hand with the play cost reduced by 3" · "~ for a play cost of 3" — 코스트를 낸다
         // (메모리가 상대 쪽으로 넘어가지 않는 카드만 후보 — 넘기면서까지 내는 선택은 하지 않는다)
         if ((m = Regex.Match(s, @"^Play (?<pick>.+?) from (?<from>your hand or (?:from )?(?:your )?trash|your trash|your hand) (?:with the (?:play |memory )?cost reduced by (?<red>\d+)|for a (?:play |memory )?cost of (?<fix>\d+))$", RegexOptions.IgnoreCase)).Success
@@ -3630,7 +3660,7 @@ internal static class SentenceParser
             return ParseSingleCardPick(part.Remove(nonEgg.Index, nonEgg.Length)) is { } inner
                 ? (inner.Count, c => c.Type != CardType.Digitama && inner.Match(c)) : null;
         var m = Regex.Match(part.Trim(),
-            $@"^(?:up to )?(?<n>\d+|a|an|all) (?<adj>(?:(?:\d+-colou?r|multicolou?r(?:ed)?|{TargetSpec.NameList}(?: traits?)?|level \d+(?: or (?:lower|higher|(?:level )?\d+))?|play costs? \d+ or (?:lower|higher|less|more)|(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)\s+)*)(?<kind>Digimon|Tamer|Option)?\s*(?:cards?)?(?<filter>.*)$",
+            $@"^(?:up to )?(?<n>\d+|a|an|all) (?<adj>(?:(?:\d+-colou?r|multicolou?r(?:ed)?|single-colou?r|{TargetSpec.NameList}(?: traits?)?|level \d+(?: or (?:lower|higher|(?:level )?\d+))?|play costs? \d+ or (?:lower|higher|less|more)|(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)\s+)*)(?<kind>Digimon|Tamer|Option)?\s*(?:cards?)?(?<filter>.*)$",
             RegexOptions.IgnoreCase);
         if (!m.Success) return null;
         int count = int.TryParse(m.Groups["n"].Value, out int k) ? k : m.Groups["n"].Value.Equals("all", StringComparison.OrdinalIgnoreCase) ? 99 : 1;
@@ -3641,7 +3671,7 @@ internal static class SentenceParser
         else if (kind == "option") filters.Add(c => c.Type == CardType.Option);
 
         string adj = m.Groups["adj"].Value;
-        foreach (Match a in Regex.Matches(adj, $@"(?<multi>\d+)-colou?r|(?<multicolor>multicolou?r(?:ed)?)|(?<names>{TargetSpec.NameList})(?<trait> traits?)?|level (?<lv>\d+)(?: or (?:(?<dir>lower|higher)|(?:level )?(?<lv2>\d+)))?|play costs? (?<pc>\d+) or (?<pdir>lower|higher|less|more)|(?<colors>(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)", RegexOptions.IgnoreCase))
+        foreach (Match a in Regex.Matches(adj, $@"(?<multi>\d+)-colou?r|(?<multicolor>multicolou?r(?:ed)?)|(?<single>single-colou?r)|(?<names>{TargetSpec.NameList})(?<trait> traits?)?|level (?<lv>\d+)(?: or (?:(?<dir>lower|higher)|(?:level )?(?<lv2>\d+)))?|play costs? (?<pc>\d+) or (?<pdir>lower|higher|less|more)|(?<colors>(?:{Colors})(?:(?:,| or| and/or|/) (?:{Colors}))*)", RegexOptions.IgnoreCase))
         {
             if (a.Groups["multi"].Success)
             {
@@ -3650,6 +3680,8 @@ internal static class SentenceParser
             }
             else if (a.Groups["multicolor"].Success)
                 filters.Add(c => c.AllColors.Count >= 2);   // "multicolored" — 색이 2개 이상
+            else if (a.Groups["single"].Success)
+                filters.Add(c => c.AllColors.Count == 1);   // "single-color" — 색이 1개
             else if (a.Groups["names"].Success)
             {
                 var xs = TargetSpec.Names(a.Groups["names"].Value);
@@ -3707,9 +3739,9 @@ internal static class SentenceParser
             { int v = int.Parse(f.Groups["n"].Value); filters.Add(c => c.AllColors.Count >= v); }
             else if ((f = Regex.Match(rest, @"^with (?:an? )?inherited effects?", RegexOptions.IgnoreCase)).Success)
             { filters.Add(c => c.InheritedEffectText.Trim().Length > 0); }
-            else if ((f = Regex.Match(rest, @"^with (?:a )?(?:memory |play )?cost of (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
+            else if ((f = Regex.Match(rest, @"^with (?:a )?(?:memory |play |use )?cost of (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
             { int v = int.Parse(f.Groups["n"].Value); filters.Add(c => c.PlayCost == v); }
-            else if ((f = Regex.Match(rest, @"^(?:with |and |or )?(?:a |an )?(?:memory |play )?cost of (?<n>\d+) or (?<dir>less|more|lower|higher)", RegexOptions.IgnoreCase)).Success)
+            else if ((f = Regex.Match(rest, @"^(?:with |and |or )?(?:a |an )?(?:memory |play |use )?cost of (?<n>\d+) or (?<dir>less|more|lower|higher)", RegexOptions.IgnoreCase)).Success)
             { int v = int.Parse(f.Groups["n"].Value); bool less = f.Groups["dir"].Value is "less" or "lower"; filters.Add(c => less ? c.PlayCost <= v : c.PlayCost >= v); }
             else if ((f = Regex.Match(rest, @"^(?:with |and |or )?＜(?<k>[^＞]+?)\s*＞(?: in (?:its|their) texts?)?", RegexOptions.IgnoreCase)).Success)
             {

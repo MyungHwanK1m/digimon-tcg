@@ -10,6 +10,14 @@
 
 ---
 
+## v0.22.0 — 2026-10-22
+효과로 옵션을 코스트 없이 사용
+- "You may use 1 Option card with a cost of 5 or less in your hand without paying the cost" · "~ from your hand or under your Tamers ~" · "~ from your hand or trash ~" · "1 use cost 3 or lower Option card with [X] in its text" · "single-color Option card"
+- 코스트만 내지 않고 색 조건은 그대로 확인 — 사용할 수 있는 옵션만 고름. [메인] 효과 → 트래시 · 링크 등 사용 뒤 처리 → "옵션을 사용했을 때"까지 보통 사용과 같음
+- 카드 조건: "use cost" 표기, "single-color"(1색)
+- 시나리오 테스트 OptionUseByEffectTests 3개
+- 도감 효과 문장 지원 6,742 → 6,758 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.21.1 — 2026-10-22
 생성 한글: 옵션을 코스트 없이 사용 (공식 표기)
 - "자신의 패에서 사용 코스트 5 이하의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다."
