@@ -190,4 +190,19 @@ public class RevealVariantTests
 
         Assert.Equal(new[] { black }, state.Player.Hand);                               // 패 1장을 버리고 1장 추가
     }
+
+    [Fact]
+    public void SameCardObjectTwice_BothCanBePicked()
+    {
+        // 같은 카드 2장은 같은 CardData 객체 — 앞 고르기에서 1장을 가져가도 다른 1장은 다음 고르기에 남아 있어야 한다
+        var greymon = Deck("Greymon", CardType.Digimon, CardColor.Red);
+        var (state, engine) = NewMainPhase(greymon, greymon, Deck("Opt", CardType.Option, CardColor.Red));
+        var opt = Api("RV-OPT-9", "[Main] Reveal the top 3 cards of your deck. Among them, add 1 [Greymon] to the hand and trash 1 such card. Return the rest to the bottom of the deck.");
+
+        Use(state, engine, opt);
+
+        Assert.Equal(1, state.Player.Hand.Count(c => ReferenceEquals(c, greymon)));
+        Assert.Equal(1, state.Player.Trash.Count(c => ReferenceEquals(c, greymon)));
+        Assert.DoesNotContain(greymon, state.Player.MainDeck);
+    }
 }

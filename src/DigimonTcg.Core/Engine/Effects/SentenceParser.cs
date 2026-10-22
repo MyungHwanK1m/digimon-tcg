@@ -3477,7 +3477,8 @@ internal static class SentenceParser
             var deck = c.Owner.MainDeck;
             var revealed = deck.Take(total).ToList();
             deck.RemoveRange(0, revealed.Count);
-            var taken = new List<CardData>();
+            // 같은 카드 여러 장은 같은 CardData 객체이므로, 고른 카드는 공개한 순서의 번호로 기억한다
+            var takenIndex = new HashSet<int>();
             var chosen = new List<(RevealAction Action, List<CardData> Cards)>();
             foreach (var action in actions)
             {
@@ -3486,14 +3487,17 @@ internal static class SentenceParser
                 string what = action.Verb switch { RevealVerb.Play => "등장시킬", RevealVerb.Trash => "파기할", RevealVerb.Place => "진화원 아래에 놓을", RevealVerb.AddOrPlace => "패에 넣거나 진화원 아래에 놓을", _ => "패에 넣을" };
                 foreach (var (count, match, upTo) in action.Picks)
                 {
-                    var pool = revealed.Where(x => !taken.Contains(x) && match(x) && (!play || x.Type is CardType.Digimon or CardType.Tamer));
-                    foreach (var pick in c.Engine.ChooseCards(c.Owner, CardChoiceZone.Other, pool.OrderByDescending(x => x.Level).ThenByDescending(x => x.DP).ToList(), count, upTo,
+                    var pool = Enumerable.Range(0, revealed.Count)
+                        .Where(i => !takenIndex.Contains(i) && match(revealed[i]) && (!play || revealed[i].Type is CardType.Digimon or CardType.Tamer))
+                        .OrderByDescending(i => revealed[i].Level).ThenByDescending(i => revealed[i].DP).ToList();
+                    foreach (int k in c.Engine.ChooseCardIndexes(c.Owner, CardChoiceZone.Other, pool.Select(i => revealed[i]).ToList(), count, upTo,
                                  $"[{c.Card.Name}] 공개한 카드 중 {what} 카드를 고르세요."))
-                    { taken.Add(pick); cards.Add(pick); }
+                    { takenIndex.Add(pool[k]); cards.Add(revealed[pool[k]]); }
                 }
                 chosen.Add((action, cards));
             }
-            foreach (var t in taken) revealed.Remove(t);
+            int takenCount = takenIndex.Count;
+            revealed = revealed.Where((_, i) => !takenIndex.Contains(i)).ToList();
             if (restMode == 2) c.Owner.Trash.AddRange(revealed);
             else if (restMode == 1) deck.InsertRange(0, revealed);
             else deck.AddRange(revealed);
@@ -3535,7 +3539,7 @@ internal static class SentenceParser
                 played.Add(t.Name);
             }
             if (played.Count > 0) log.Add($"[{string.Join(", ", played)}] 코스트 없이 등장");
-            if (taken.Count == 0) c.LastStepResolved = false;   // "If you added cards, ~"
+            if (takenCount == 0) c.LastStepResolved = false;   // "If you added cards, ~"
             bool onlyPlay = actions.All(x => x.Verb == RevealVerb.Play);
             Emit(c, label, log.Count > 0 ? $"덱 위 {total}장 공개 → {string.Join(" · ", log)}"
                 : onlyPlay ? $"덱 위 {total}장 공개 → 등장시킬 카드 없음" : $"덱 위 {total}장 공개 → 조건에 맞는 카드 없음");
