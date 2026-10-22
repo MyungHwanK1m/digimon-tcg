@@ -10,6 +10,15 @@
 
 ---
 
+## v0.23.0 — 2026-10-22
+패 · 트래시의 카드로 쓰는 [메인] 효과 — 엔진 (화면 · AI 판단은 digimontcg-51)
+- "[Hand] [Main] ~" · "[Trash] [Main] ~"를 읽음 (EffectTrigger.HandMain · TrashMain)
+- 엔진: GetHandMainAbilities · GetTrashMainAbilities(owner) — 필드 [메인]과 같은 MainAbility(Zone = Hand / Trash), ActivateHandEffect · ActivateTrashEffect(card) — 자기 메인 페이즈에, 같은 카드 1장마다 턴에 1번, 조건 · 비용이 맞지 않으면 Fail(이유)
+- AI: 필드 [메인]과 함께 패 · 트래시 효과도 AiPolicy.ShouldUseMainAbility로 판단
+- 비용 "paying N cost and placing this card as the bottom digivolution card of 1 of your Digimon (that's level 3 or has the [X] trait)" — 놓은 디지몬이 다음 문장의 "that Digimon", "the Digimon this was placed under" 표기
+- 시나리오 테스트 ZoneAbilityTests 5개, AI 벤치마크 그대로 (56.5% / 67.6%)
+- 도감 효과 문장 지원 6,758 → 6,764 / 10,279 (화면 연결 뒤 플레이어가 쓸 수 있음, 수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.22.0 — 2026-10-22
 효과로 옵션을 코스트 없이 사용
 - "You may use 1 Option card with a cost of 5 or less in your hand without paying the cost" · "~ from your hand or under your Tamers ~" · "~ from your hand or trash ~" · "1 use cost 3 or lower Option card with [X] in its text" · "single-color Option card"

@@ -1241,8 +1241,8 @@ public partial class GoldfishEngine
     // [메인] 기동 효과 — 테이머 · 디지몬 (≪디지버스트≫ 포함)
     // =====================================================================
 
-    /// <summary>쓸 수 있는 [메인] 기동 효과 1건 (Digimon = 효과를 가진 디지몬, 테이머면 null)</summary>
-    public sealed record MainAbility(CardInstance? Digimon, CardData Card);
+    /// <summary>쓸 수 있는 [메인] 기동 효과 1건 (Digimon = 효과를 가진 디지몬, 테이머 · 패 · 트래시면 null, Zone = 효과를 쓰는 곳)</summary>
+    public sealed record MainAbility(CardInstance? Digimon, CardData Card, MainAbilityZone Zone = MainAbilityZone.Field);
 
     // 이번 턴에 쓴 기동 효과 (같은 효과를 한 턴에 여러 번 쓰지 않도록 — 비용이 없는 효과의 무한 반복 방지)
     // 테이머는 같은 카드가 여러 장일 수 있어(같은 CardData 참조) 쓴 횟수를 센다 — 장수만큼 쓸 수 있다
@@ -1300,11 +1300,20 @@ public partial class GoldfishEngine
     /// <summary>AI: 쓸 만한 [메인] 기동 효과를 쓴다 (효과 문장 점수가 양수인 것)</summary>
     private void AiUseMainAbilities()
     {
-        foreach (var ability in GetMainAbilities(State.DummyOpponent).ToList())
+        var abilities = GetMainAbilities(State.DummyOpponent)
+            .Concat(GetHandMainAbilities(State.DummyOpponent))
+            .Concat(GetTrashMainAbilities(State.DummyOpponent)).ToList();
+        foreach (var ability in abilities)
         {
             if (State.IsGameOver || (_aiTurn?.Memory ?? 0) < 0) break;
+            if (ability.Zone != MainAbilityZone.Field && !GetZoneAbilities(State.DummyOpponent, ability.Zone).Any(a => ReferenceEquals(a.Card, ability.Card)))
+                continue;   // 앞의 효과로 패 · 트래시를 떠났거나 이미 썼다
             if (!AiPolicy.ShouldUseMainAbility(this, ability, _aiTurn?.Memory ?? 0)) continue;
-            AddEffectEvent(ability.Card, CaptureEffectLogs(() => UseMainAbility(State.DummyOpponent, ability.Digimon, ability.Card)));
+            AddEffectEvent(ability.Card, CaptureEffectLogs(() =>
+            {
+                if (ability.Zone == MainAbilityZone.Field) UseMainAbility(State.DummyOpponent, ability.Digimon, ability.Card);
+                else UseZoneAbility(State.DummyOpponent, ability.Card, ability.Zone);
+            }));
         }
     }
 

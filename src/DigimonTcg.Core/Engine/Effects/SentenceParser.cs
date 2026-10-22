@@ -271,9 +271,11 @@ internal static class SentenceParser
         var triggers = new List<EffectTrigger>();
         var qualifier = Qualifier.None;
         bool oncePerTurn = false, twicePerTurn = false;
+        string? zoneLabel = null;   // [Hand] · [Trash] — 패 · 트래시에서 쓰는 효과
         foreach (var label in labels)
         {
             if (EventTriggers.TryGetValue(label, out var t)) triggers.Add(t);
+            else if (label.Equals("Hand", StringComparison.OrdinalIgnoreCase) || label.Equals("Trash", StringComparison.OrdinalIgnoreCase)) zoneLabel ??= label;
             else if (label.Equals("End of All Turns", StringComparison.OrdinalIgnoreCase)) { triggers.Add(EffectTrigger.EndOfYourTurn); triggers.Add(EffectTrigger.EndOfOpponentsTurn); }
             else if (label.Equals("Your Turn", StringComparison.OrdinalIgnoreCase)) qualifier = Qualifier.YourTurn;
             else if (label.Equals("Opponent's Turn", StringComparison.OrdinalIgnoreCase)) qualifier = Qualifier.OpponentsTurn;
@@ -281,6 +283,13 @@ internal static class SentenceParser
             else if (label.Equals("Once Per Turn", StringComparison.OrdinalIgnoreCase)) oncePerTurn = true;
             else if (label.Equals("Twice Per Turn", StringComparison.OrdinalIgnoreCase)) twicePerTurn = true;
             else return $"미지원 시점 [{label}]";
+        }
+        // "[Hand] [Main] ~" · "[Trash] [Main] ~" — 패 · 트래시의 이 카드로 쓰는 [메인] 기동 효과 (그 밖의 패 · 트래시 시점은 아직 미지원)
+        if (zoneLabel != null)
+        {
+            if (inherited || triggers.Count != 1 || triggers[0] != EffectTrigger.Main || qualifier != Qualifier.None)
+                return $"미지원 시점 [{zoneLabel}]";
+            triggers[0] = zoneLabel.Equals("Hand", StringComparison.OrdinalIgnoreCase) ? EffectTrigger.HandMain : EffectTrigger.TrashMain;
         }
 
         // "When this Digimon ~, ~" — 문장 안의 발동 시점
@@ -550,6 +559,7 @@ internal static class SentenceParser
         s = Regex.Replace(s, @"\bbatttle\b", "battle", RegexOptions.IgnoreCase);   // 원문 오타
         s = Regex.Replace(s, @"\b(rest|cards) the the (bottom|top)\b", "$1 to the $2", RegexOptions.IgnoreCase);   // 원문 오타 "Return the rest the the bottom"
         s = Regex.Replace(s, @"\bBy Reveal\b", "Reveal");   // 원문 오타 "By Reveal the top 4 cards"
+        s = Regex.Replace(s, @"\bthe Digimon (?:this|this card|it) was placed under\b", "that Digimon", RegexOptions.IgnoreCase);   // "attack ~ with the Digimon this was placed under"
         // 어택: "you may attack with this Digimon without suspending it" → "this Digimon may attack without suspending"
         s = Regex.Replace(s, @"\byou may attack with (?<t>this Digimon|it|that Digimon)(?<nosus> without suspending(?: it)?)?(?=[.,]|$)", "${t} may attack${nosus}", RegexOptions.IgnoreCase);
         // 진화: "you may digivolve this Digimon into ~" → "this Digimon may digivolve into ~" (주어를 앞으로)
@@ -2069,6 +2079,42 @@ internal static class SentenceParser
             int n = int.Parse(m.Groups["n"].Value);
             return (c => true, c => c.AddMemory(-n), c => c.OwnerMemory - n >= 0, $"메모리 {n}을(를) 지불하여");
         }
+        // [Hand] [Main]: "paying 1 cost and placing this card as the bottom digivolution card of 1 of your Digimon that's level 3 or has the [Legend-Arms] trait"
+        //  · "~ as 1 of your level 5 or higher Digimon's bottom digivolution card" — 놓은 디지몬이 다음 문장의 "that Digimon"
+        if ((m = Regex.Match(cost, @"^paying (?<n>\d+) (?:memory|cost) and placing this card (?:as the bottom digivolution card of (?<t>.+)|as (?<t>.+?)'s bottom digivolution card|under (?<t>.+?) as its bottom digivolution card)$", RegexOptions.IgnoreCase)).Success
+            && OwnDigimonFilter(m.Groups["t"].Value) is { } underFilter)
+        {
+            int n = int.Parse(m.Groups["n"].Value);
+            List<CardInstance> Targets(EffectContext c) => c.Owner.BattleArea.Where(underFilter).OrderByDescending(d => d.GetCurrentDP()).ToList();
+            return (c => (c.Owner.Hand.Contains(c.Card) || c.Owner.Trash.Contains(c.Card)) && Targets(c).Count > 0,
+                    c =>
+                    {
+                        var d = c.Engine.ChooseTargets(c.Owner, Targets(c), 1, $"[{c.Card.Name}] 이 카드를 진화원 맨 아래에 놓을 디지몬을 고르세요.", optional: false, preselected: null).FirstOrDefault();
+                        if (d == null) return;
+                        c.AddMemory(-n);
+                        if (!c.Owner.Hand.Remove(c.Card)) c.Owner.Trash.Remove(c.Card);
+                        d.AddBottomSource(c.Card);
+                        c.LastTargets = new List<CardInstance> { d };
+                        c.RecalculateFieldBuffs();
+                    },
+                    c => c.OwnerMemory - n >= 0, $"메모리 {n}을(를) 지불하고 이 카드를 진화원 맨 아래에 놓아");
+        }
+        return null;
+    }
+
+    /// <summary>"1 of your Digimon with ~" · "any of your level 5 or higher Digimon" · "1 of your Digimon that's level 3 or has the [X] trait" → 자신의 디지몬 조건</summary>
+    private static Func<CardInstance, bool>? OwnDigimonFilter(string phrase)
+    {
+        phrase = Regex.Replace(phrase.Trim(), @"^(?:any|one) of your ", "1 of your ", RegexOptions.IgnoreCase);
+        var m = Regex.Match(phrase, $@"^1 of your Digimon that's level (?<lv>\d+) or has the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            int lv = int.Parse(m.Groups["lv"].Value);
+            var xs = TargetSpec.Names(m.Groups["x"].Value);
+            return d => d.TopCard.Level == lv || xs.Any(x => TargetSpec.HasTrait(d.TopCard, x));
+        }
+        if (TargetSpec.Parse(phrase) is { Opponent: false, AnySide: false, IsThis: false, IsThat: false } spec)
+            return d => spec.Filters.All(f => f(d));
         return null;
     }
 

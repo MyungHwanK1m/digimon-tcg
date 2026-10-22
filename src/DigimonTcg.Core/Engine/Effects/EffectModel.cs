@@ -68,6 +68,8 @@ public enum EffectTrigger
     OpponentHandTrashed,            // 상대의 패가 버려졌을 때 (TriggerCard)
     AllyDeckTrashed,                // 자신의 덱에서 카드가 파기되었을 때 (덱 위 파기, TriggerCard = 파기한 카드 중 1장)
     OpponentHandAddedByEffect,      // 효과로 상대의 패에 카드가 들어갔을 때 (패로 되돌리기 등, TriggerCard)
+    HandMain,                       // [패] [메인]: 패의 이 카드로 쓰는 기동 효과 (플레이어 · AI가 메인 페이즈에 고른다)
+    TrashMain,                      // [트래시] [메인]: 트래시의 이 카드로 쓰는 기동 효과
 }
 
 /// <summary>효과가 적힌 곳 — 맨 위 카드(메인)인지, 진화원인지</summary>
