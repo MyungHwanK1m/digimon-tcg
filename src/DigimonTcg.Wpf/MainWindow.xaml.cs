@@ -2912,7 +2912,10 @@ public partial class MainWindow : Window
 
         // 2) 플레이매트 우측: 메인 덱 장수 및 트래시(묘지) 맨 위 카드 렌더링
         TxtMainDeckVisualCount.Text = $"{_gameState.Player.MainDeck.Count}장";
-        TxtTrashVisualCount.Text = $"{_gameState.Player.Trash.Count}장";
+        // 트래시의 카드로 쓸 수 있는 [Trash] [Main] 효과가 있으면 표시 (트래시 칸 우클릭으로 고른다)
+        int trashAbilities = _gameState.CurrentPhase == Phase.Main ? _engine.GetTrashMainAbilities(_gameState.Player).Count : 0;
+        TxtTrashVisualCount.Text = trashAbilities > 0 ? $"{_gameState.Player.Trash.Count}장 · ⚡{trashAbilities}" : $"{_gameState.Player.Trash.Count}장";
+        PlayerTrashZoneBorder.ToolTip = trashAbilities > 0 ? $"우클릭: 트래시의 카드로 쓰는 [메인] 효과 ({trashAbilities}개)" : null;
 
         if (_gameState.Player.Trash.Count > 0)
         {
@@ -3459,6 +3462,7 @@ public partial class MainWindow : Window
     private void RenderHand()
     {
         HandPanel.Children.Clear();
+        var handAbilities = _gameState.CurrentPhase == Phase.Main ? _engine.GetHandMainAbilities(_gameState.Player) : Array.Empty<GoldfishEngine.MainAbility>();
 
         int handCount = _gameState.Player.Hand.Count;
         int handIndex = 0;
@@ -3562,6 +3566,15 @@ public partial class MainWindow : Window
                     _potentialDragFieldAttacker = null;
                     _potentialDragBreedingDigimon = null;
                 }
+            };
+
+            // 우클릭: 패의 이 카드로 쓰는 [Hand] [Main] 효과
+            if (handAbilities.Any(a => ReferenceEquals(a.Card, card)))
+                wrapper.ToolTip = "우클릭: 이 카드의 패 [메인] 효과 쓰기";
+            wrapper.MouseRightButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                TryActivateZoneAbility(card, MainAbilityZone.Hand);
             };
 
             HandPanel.Children.Add(wrapper);
@@ -4431,6 +4444,56 @@ public partial class MainWindow : Window
         bool go = _engine.PlayerChoices?.Confirm(_gameState, digimon, $"[{card.DisplayName}]의 [메인] 효과를 쓸까요?\n\n{effectText}", true) ?? true;
         if (go)
             ApplyActionResult(_engine.ActivateMainAbility(digimon, card));
+    }
+
+    /// <summary>
+    /// 패 · 트래시의 카드로 쓰는 [메인] 효과 ([Hand] [Main] · [Trash] [Main]) — 패 카드 우클릭 · 트래시 칸 우클릭.
+    /// 필드 [메인] 효과(TryActivateMainAbility)와 같은 조건 · 확인 창.
+    /// </summary>
+    private void TryActivateZoneAbility(CardData card, MainAbilityZone zone)
+    {
+        string zoneName = zone == MainAbilityZone.Hand ? "패" : "트래시";
+        if (_gameState.IsGameOver || _gameState.CurrentPhase != Phase.Main || _gameState.PendingBlock != null || IsReplayRunning)
+        {
+            ShowToast(false, $"{zoneName}의 [메인] 효과는 내 메인 페이즈에만 쓸 수 있습니다.");
+            return;
+        }
+        var abilities = zone == MainAbilityZone.Hand ? _engine.GetHandMainAbilities(_gameState.Player) : _engine.GetTrashMainAbilities(_gameState.Player);
+        if (!abilities.Any(a => ReferenceEquals(a.Card, card)))
+        {
+            ShowToast(false, $"[{card.DisplayName}]은(는) 지금 {zoneName}에서 쓸 수 있는 [메인] 효과가 없습니다. (효과가 없거나 이번 턴에 이미 썼습니다)");
+            return;
+        }
+        string tag = zone == MainAbilityZone.Hand ? @"\[Hand\]|\[패\]|【패】" : @"\[Trash\]|\[트래시\]|【트래시】";
+        string effectText = string.Join("\n", card.DisplayEffectText.Split('\n')
+            .Where(l => System.Text.RegularExpressions.Regex.IsMatch(l, tag, System.Text.RegularExpressions.RegexOptions.IgnoreCase)));
+        if (effectText.Length == 0)
+            effectText = card.DisplayEffectText;
+        bool go = _engine.PlayerChoices?.Confirm(_gameState, null, $"{zoneName}의 [{card.DisplayName}]로 [메인] 효과를 쓸까요?\n\n{effectText}", true) ?? true;
+        if (go)
+            ApplyActionResult(zone == MainAbilityZone.Hand ? _engine.ActivateHandEffect(card) : _engine.ActivateTrashEffect(card));
+    }
+
+    /// <summary>트래시 칸 우클릭: 쓸 수 있는 [Trash] [Main] 효과가 여러 장이면 고르고, 1장이면 바로 확인</summary>
+    private void PlayerTrashZone_MouseRightButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        var abilities = _gameState.CurrentPhase == Phase.Main ? _engine.GetTrashMainAbilities(_gameState.Player) : Array.Empty<GoldfishEngine.MainAbility>();
+        if (abilities.Count == 0)
+        {
+            ShowToast(false, "트래시에서 지금 쓸 수 있는 [메인] 효과가 없습니다.");
+            return;
+        }
+        var card = abilities[0].Card;
+        if (abilities.Count > 1)
+        {
+            int pick = _engine.PlayerChoices?.ChooseOption(_gameState, "트래시의 어느 카드로 [메인] 효과를 쓸까요?",
+                abilities.Select(a => $"[{a.Card.CardId}] {a.Card.DisplayName}").Append("쓰지 않음").ToList(), 0) ?? 0;
+            if (pick < 0 || pick >= abilities.Count)
+                return;
+            card = abilities[pick].Card;
+        }
+        TryActivateZoneAbility(card, MainAbilityZone.Trash);
     }
 
     private void BtnStartSt1_Click(object sender, RoutedEventArgs e)

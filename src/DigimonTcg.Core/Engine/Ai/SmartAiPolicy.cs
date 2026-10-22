@@ -188,8 +188,20 @@ public sealed class SmartAiPolicy : IAiPolicy
     {
         if (!Tuning.SmartMainAbility)
             return Legacy.ShouldUseMainAbility(engine, ability, memory);
-        string text = AiBoard.MainPart(ability.Card.EffectText);
-        return AiBoard.TextValue(text) > 0 && AiBoard.HasUsefulTarget(engine.State, engine.State.DummyOpponent, text);
+        string text = ability.Zone == MainAbilityZone.Field
+            ? AiBoard.MainPart(ability.Card.EffectText)
+            : ZoneClause(ability.Card.EffectText, ability.Zone) ?? AiBoard.MainPart(ability.Card.EffectText);
+        // 패의 카드로 쓰는 효과는 그 카드를 내지 못하게 되므로 이득이 조금 더 커야 쓴다 (트래시는 이미 쓴 카드라 그대로)
+        double minValue = ability.Zone == MainAbilityZone.Hand ? 1.0 : 0;
+        return AiBoard.TextValue(text) > minValue && AiBoard.HasUsefulTarget(engine.State, engine.State.DummyOpponent, text);
+    }
+
+    /// <summary>카드 효과 문장에서 패 · 트래시 [메인] 효과 줄만 (없으면 null)</summary>
+    private static string? ZoneClause(string effectText, MainAbilityZone zone)
+    {
+        string tag = zone == MainAbilityZone.Hand ? @"\[Hand\]|\[패\]|【패】" : @"\[Trash\]|\[트래시\]|【트래시】";
+        var m = Regex.Match(effectText, $@"(?:{tag})[^\n]*", RegexOptions.IgnoreCase);
+        return m.Success ? m.Value : null;
     }
 
     public CardData? ChooseTamerToPlay(GoldfishEngine engine, int memory)

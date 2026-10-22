@@ -441,7 +441,7 @@
                                                 </Grid>
                                             </DockPanel>
                                         </Border>
-                                        <Border x:Name="PlayerTrashZoneBorder" Grid.Row="1" Style="{StaticResource Duel.Zone}">
+                                        <Border x:Name="PlayerTrashZoneBorder" Grid.Row="1" Style="{StaticResource Duel.Zone}" MouseRightButtonUp="PlayerTrashZone_MouseRightButtonUp">
                                             <DockPanel>
                                                 <DockPanel DockPanel.Dock="Top">
                                                     <TextBlock Text="TRASH" Style="{StaticResource Duel.ZoneLabel}"/>

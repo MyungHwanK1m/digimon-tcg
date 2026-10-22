@@ -198,6 +198,23 @@ public class AiPolicyTests
     }
 
     [Fact]
+    public void Smart_ZoneAbility_ShouldJudgeOnlyThatZonesClause()
+    {
+        // [등장 시] 제거는 크게 이득이지만, 패에서 쓰는 효과는 "이 카드를 버린다"뿐 — 패 효과는 그 줄만 보고 판단한다
+        var (state, engine, cards) = AiTurn();
+        Field(state.Player, cards["ST1-07"]);
+        var card = new CardData
+        {
+            CardId = "AI-ZONE-1", Name = "AI-ZONE-1", Type = CardType.Digimon, Color = CardColor.Red, Level = 4, DP = 5000, PlayCost = 5,
+            EffectText = "[On Play] Delete 1 of your opponent's Digimon.\n[Hand] [Main] Trash this card in your hand.",
+        };
+        var smart = new SmartAiPolicy();
+
+        Assert.True(smart.ShouldUseMainAbility(engine, new GoldfishEngine.MainAbility(null, card, MainAbilityZone.Field), memory: 3));
+        Assert.False(smart.ShouldUseMainAbility(engine, new GoldfishEngine.MainAbility(null, card, MainAbilityZone.Hand), memory: 3));
+    }
+
+    [Fact]
     public void Smart_ShouldUseADpBuffOption_OnlyWhenItWinsTheBlockedAttack()
     {
         // 그레이몬 4000은 코어드라몬 ≪블로커≫ 6000에게 막혀 진다 → 섀도 윙(이 턴 DP +3000, 코스트 1)이면 7000으로 이긴다
