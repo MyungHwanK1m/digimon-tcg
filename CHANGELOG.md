@@ -10,6 +10,13 @@
 
 ---
 
+## v0.16.1 — 2026-10-22
+생성 한글: 코스트 감소를 공식 표기로 (v0.16.0의 비용을 내고 줄이기 포함)
+- "패의 이 카드를 등장시킬 때, 자신의 「디아블로몬」 1마리를 소멸시키는 것으로, 지불하는 등장 코스트를 -12 한다." — "by ~ing, reduce" · "you may ~ to reduce"
+- 셈 "상대의 디지몬 1마리마다 지불하는 등장 코스트를 -2 한다." · 조건 "블루인 자신의 디지몬이 있다면 지불하는 등장 코스트를 -1 한다."
+- 옵션은 "이 카드를 사용할 때, ~ 지불하는 사용 코스트를 -N 한다." (전에는 등장 · 사용을 한 문장으로 썼음)
+- 테스트 1개 추가 · 1개 표기 수정 (KoreanEffectRendererTests)
+
 ## v0.16.0 — 2026-10-22
 비용을 내고 등장 코스트를 줄이는 효과
 - "When this card would be played, by deleting 1 of your Digimon, reduce the play cost by 4." · "~ you may delete 1 of your [Diaboromon] to reduce this card's play cost by 12."

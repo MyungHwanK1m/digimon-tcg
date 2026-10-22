@@ -77,12 +77,18 @@ public static class KoreanEffectRenderer
         if (Regex.Match(clause, @"^Your (?<who>.+?) can digivolve into this card in (?:your|the) hand for a (?:memory |digivolution )?cost of (?<n>\d+), ignoring (?:this card's )?digivolution requirements\.?$", RegexOptions.IgnoreCase) is { Success: true } sp
             && WhoKo(sp.Groups["who"].Value) is { } spWho)
             return $"자신의 {spWho}{J(spWho, "은", "는")} 패의 이 카드로, 진화 조건을 무시하고 진화 코스트 {sp.Groups["n"].Value}로 진화할 수 있다.";
-        if (Regex.Match(clause, @"^When (?:this card would be played|you would play this card(?: from your hand)?|you would use this card), (?:if (?<cond>[^,]+), )?reduce (?:the|its) (?:play |use |memory )?cost by (?<n>\d+)(?: if (?<cond2>[^,]+?))?\.?$", RegexOptions.IgnoreCase) is { Success: true } red)
+        // 코스트 감소 (공식 표기): "패의 이 카드를 등장시킬 때, 자신의 「디아블로몬」 1마리를 소멸시키는 것으로, 지불하는 등장 코스트를 -12 한다."
+        if (Regex.Match(clause, @"^When (?:(?<play>this card would be played|you would play this card(?: from your hand)?)|you would use this card), (?:if (?<cond>[^,]+), )?(?:by (?<cost>[^,]+), |you may (?<cverb>suspend|trash|delete|return|place)\b(?<cobj>[^,]*?) to )?reduce (?:the|its|this card's) (?:play |use |memory )?cost by (?<n>\d+)(?: for (?:each|every) (?<cnt>[^,]+?))?(?: if (?<cond2>[^,]+?))?\.?$", RegexOptions.IgnoreCase) is { Success: true } red)
         {
-            // 조건이 앞("if ~, reduce") 또는 뒤("reduce ~ if ~")
-            string? head = red.Groups["cond"].Success ? CondKo(red.Groups["cond"].Value)?.If : red.Groups["cond2"].Success ? CondKo(red.Groups["cond2"].Value)?.If : "";
-            if (head == null) return null;
-            return $"이 카드를 등장시키거나 사용할 때, {(head.Length > 0 ? head + " " : "")}지불하는 코스트를 -{red.Groups["n"].Value} 한다.";
+            bool play = red.Groups["play"].Success;
+            // 조건이 앞("if ~, reduce") 또는 뒤("reduce ~ if ~") — 공식은 "~있다면 지불하는"
+            string? cond = red.Groups["cond"].Success ? CondKo(red.Groups["cond"].Value)?.Then : red.Groups["cond2"].Success ? CondKo(red.Groups["cond2"].Value)?.Then : "";
+            string? cost = red.Groups["cost"].Success ? CostKo(red.Groups["cost"].Value)
+                : red.Groups["cverb"].Success ? CostKo($"{Gerund(red.Groups["cverb"].Value)}{red.Groups["cobj"].Value}") : "";
+            string? per = red.Groups["cnt"].Success ? CounterKo(red.Groups["cnt"].Value) : "";
+            if (cond == null || cost == null || per == null) return null;
+            string mid = string.Join(" ", new[] { cond.TrimEnd(','), cost, per }.Where(x => x.Length > 0));
+            return $"{(play ? "패의 이 카드를 등장시킬 때," : "이 카드를 사용할 때,")} {(mid.Length > 0 ? mid + " " : "")}지불하는 {(play ? "등장" : "사용")} 코스트를 -{red.Groups["n"].Value} 한다.";
         }
 
         var prefix = Regex.Match(clause, @"^((?:\s*\[[^\]]+\])*)\s*(.*)$");

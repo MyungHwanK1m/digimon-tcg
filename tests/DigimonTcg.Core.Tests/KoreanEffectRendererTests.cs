@@ -197,7 +197,7 @@ public class KoreanEffectRendererTests
         Assert.StartsWith("《디코드》", R("＜Decode＞"));
         Assert.Contains("명칭에 「스카몬」을 포함하는 자신의 다른 디지몬 1마리를 소멸시키는 것으로, 그 디지몬은 소멸하지 않는다", R("[All Turns] When this Digimon would be deleted, by deleting 1 other Digimon with [Sukamon] in its name, prevent that deletion."));
         Assert.Contains("다음 상대의 액티브 페이즈에 액티브가 되지 않는다", R("[On Play] 1 of their Digimon or Tamers can't unsuspend in their next unsuspend phase."));
-        Assert.Contains("옐로인 자신의 디지몬이 있을 때, 지불하는 코스트를 -1 한다", R("When you would play this card from your hand, reduce its play cost by 1 if you have a yellow Digimon in play."));
+        Assert.Contains("옐로인 자신의 디지몬이 있다면 지불하는 등장 코스트를 -1 한다", R("When you would play this card from your hand, reduce its play cost by 1 if you have a yellow Digimon in play."));
         Assert.Contains("액티브 상태인 상대의 디지몬이 없는 동안", R("[All Turns] While your opponent has no unsuspended Digimon in play, this Digimon gets +1000 DP."));
         Assert.Contains("이 디지몬이 2색 이상인 동안", R("[All Turns] While this Digimon has 2 or more colors, it gets +1000 DP."));
         Assert.Contains("자신의 다른 디지몬이 등장하거나 진화했을 때, 그중 특징으로", R("[Your Turn] When your other Digimon are played or digivolve, if any of them have the [ADVENTURE] trait, 1 of your Digimon gains ＜Alliance＞ for the turn."));
@@ -211,5 +211,18 @@ public class KoreanEffectRendererTests
         Assert.StartsWith("【서로의 턴】 어택의 대상이 변경되었을 때,", R("[All Turns] When an attack target is switched, ＜Draw 1＞"));
         Assert.StartsWith("【자신의 턴】 이 디지몬의 어택의 대상이 변경되었을 때,", R("[Your Turn] When this Digimon's attack target is switched, it gets +3000 DP for the turn."));
         Assert.Contains("어택의 대상을 레스트 상태인 자신의 디지몬 1마리로 변경할 수 있다", R("[Opponent's Turn] When one of your opponent's Digimon attacks, you may switch the attack target to 1 of your suspended Digimon."));
+    }
+
+    [Fact]
+    public void PlayCostReductionSentences_ShouldUseOfficialNotation()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        // 비용을 내고 줄이기 (v0.16.0) — 공식: "패의 이 카드를 등장시킬 때, 자신의 「디아블로몬」 1마리를 소멸시키는 것으로, 지불하는 등장 코스트를 -12 한다."
+        Assert.Equal("패의 이 카드를 등장시킬 때, 자신의 디지몬 1마리를 소멸시키는 것으로, 지불하는 등장 코스트를 -4 한다.", R("When this card would be played, by deleting 1 of your Digimon, reduce the play cost by 4."));
+        Assert.Equal("패의 이 카드를 등장시킬 때, 자신의 「디아블로몬」 1마리를 소멸시키는 것으로, 지불하는 등장 코스트를 -12 한다.", R("When you would play this card from your hand, you may delete 1 of your [Diaboromon] to reduce this card's play cost by 12."));
+        Assert.Contains("「사이보그형」/「Ver.1」을 가진 카드 1장을 파기하는 것으로, 지불하는 등장 코스트를 -2 한다.", R("When this card would be played, by trashing 1 [Cyborg] or [Ver.1] trait card from your hand, reduce the play cost by 2."));
+        // 셈 · 조건
+        Assert.Equal("패의 이 카드를 등장시킬 때, 상대의 디지몬 1마리마다 지불하는 등장 코스트를 -2 한다.", R("When this card would be played, reduce the play cost by 2 for each of your opponent's Digimon."));
+        Assert.Equal("패의 이 카드를 등장시킬 때, 블루인 자신의 디지몬이 있다면 지불하는 등장 코스트를 -1 한다.", R("When this card would be played, reduce its play cost by 1 if you have a blue Digimon in play."));
     }
 }
