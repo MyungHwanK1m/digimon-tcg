@@ -10,6 +10,16 @@
 
 ---
 
+## v0.17.0 — 2026-10-22
+비용("By ~ing, ~") 표기 확장
+- "By suspending 2 Digimon" · "By suspending 1 of your [WG] trait Digimon"(자신의 디지몬, 이 디지몬도 가능) · "By suspending 1 of your yellow Tamers"
+- "By unsuspending this Digimon"
+- "By trashing your top or bottom security card" · "~ the top or bottom card of your security stack" (위 · 아래 중 고름)
+- "By placing 1 card in your hand (face down) as this Digimon's bottom digivolution card" · "~ from your trash ~" · "By placing your deck's top card face down as ~"
+- "By trashing the bottom face-down card from under any of your Tamers" (테이머 아래 카드 — 마지막에 놓인 것이 맨 아래)
+- 시나리오 테스트 CostVariantTests 4개, AI 벤치마크 기준 그대로 (56.5% / 66.7%)
+- 도감 효과 문장 지원 6,516 → 6,579 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.16.1 — 2026-10-22
 생성 한글: 코스트 감소를 공식 표기로 (v0.16.0의 비용을 내고 줄이기 포함)
 - "패의 이 카드를 등장시킬 때, 자신의 「디아블로몬」 1마리를 소멸시키는 것으로, 지불하는 등장 코스트를 -12 한다." — "by ~ing, reduce" · "you may ~ to reduce"

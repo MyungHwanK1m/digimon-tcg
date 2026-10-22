@@ -1691,6 +1691,74 @@ internal static class SentenceParser
             IEnumerable<CardInstance> Others(EffectContext c) => c.Owner.BattleArea.Where(d => !d.IsSuspended && !ReferenceEquals(d, c.Self)).OrderBy(d => d.HasBlocker ? 1 : 0).ThenBy(d => d.GetCurrentDP());
             return (c => Others(c).Count() >= n, c => { foreach (var d in Others(c).Take(n).ToList()) c.Engine.Suspend(d); }, _ => true, $"다른 디지몬 {n}마리를 레스트시켜");
         }
+        // "suspending 2 Digimon" · "suspending 1 of your [WG] trait Digimon" — 자신의 디지몬 (이 디지몬도 될 수 있다)
+        if ((m = Regex.Match(cost, @"^suspending (?<n>\d+) (?:of your )?(?<spec>(?:[^,]*? )?Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success
+            && !m.Groups["spec"].Value.StartsWith("other", StringComparison.OrdinalIgnoreCase)
+            && TargetSpec.Parse($"all of your {m.Groups["spec"].Value}") is { } susSpec)
+        {
+            int n = int.Parse(m.Groups["n"].Value);
+            IEnumerable<CardInstance> Able(EffectContext c) => c.Owner.BattleArea.Where(d => !d.IsSuspended && susSpec.Filters.All(f => f(d)) && !EffectRules.IsSuspendLocked(c.Engine.State, d))
+                .OrderBy(d => d.HasBlocker ? 1 : 0).ThenBy(d => d.GetCurrentDP());
+            return (c => Able(c).Count() >= n,
+                    c => { foreach (var d in c.Engine.ChooseTargets(c.Owner, Able(c).ToList(), n, $"[{c.Card.Name}] 비용으로 레스트시킬 디지몬 {n}마리를 고르세요.", optional: false, preselected: null)) c.Engine.Suspend(d); },
+                    _ => true, $"디지몬 {n}마리를 레스트시켜");
+        }
+        // "suspending 1 of your yellow Tamers"
+        if ((m = Regex.Match(cost, $@"^suspending (?<n>\d+) of your (?:(?<color>{Colors}) )?Tamers?$", RegexOptions.IgnoreCase)).Success)
+        {
+            int n = int.Parse(m.Groups["n"].Value);
+            CardColor? color = m.Groups["color"].Success ? Enum.Parse<CardColor>(m.Groups["color"].Value, ignoreCase: true) : null;
+            IEnumerable<CardData> Able(EffectContext c) => c.Owner.Tamers.Distinct().Where(t => c.Owner.HasActiveTamer(t) && (color == null || t.AllColors.Contains(color.Value)));
+            return (c => Able(c).Count() >= n, c => { foreach (var t in Able(c).Take(n).ToList()) c.Engine.SuspendTamer(c.Owner, t); }, _ => true, $"테이머 {n}명을 레스트시켜");
+        }
+        if (Regex.IsMatch(cost, @"^unsuspending this Digimon$", RegexOptions.IgnoreCase))
+            return (c => c.Self != null && c.Self.IsSuspended && c.Owner.BattleArea.Contains(c.Self) && !EffectRules.IsUnsuspendLocked(c.Engine.State, c.Self),
+                    c => c.Engine.Unsuspend(c.Self!), _ => true, "이 디지몬을 액티브로 하여");
+        // "trashing the top or bottom card of your security stack" · "trashing your top or bottom security card" — 위 · 아래 중 고른다 (추천: 위)
+        if (Regex.IsMatch(cost, @"^trashing (?:the top or bottom card of your security stack|your top or bottom security card)$", RegexOptions.IgnoreCase))
+            return (c => c.Owner.SecurityStack.Count > 0,
+                    c =>
+                    {
+                        var sec = c.Owner.SecurityStack;
+                        int index = sec.Count > 1 && !c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] 시큐리티 맨 위 카드를 파기할까요? (아니오 = 맨 아래)", true) ? sec.Count - 1 : 0;
+                        var x = sec[index];
+                        sec.RemoveAt(index);
+                        c.Owner.Trash.Add(x);
+                        c.Engine.NotifySecurityRemoved(c.Owner, x);
+                    },
+                    c => c.Owner.SecurityStack.Count >= 3, "시큐리티 위 또는 아래 1장을 파기하여");
+        // 진화원 아래에 놓기: "placing 1 card in your hand face down as this Digimon's bottom digivolution card" · "~ from your trash ~" · "placing your deck's top card ~"
+        if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) (?:in|from) (?<from>your hand|your trash) (?:face down )?as (?:this Digimon's|its) bottom digivolution cards?$", RegexOptions.IgnoreCase)).Success
+            && (ParseCardPick(m.Groups["pick"].Value) ?? ParseNamePick(m.Groups["pick"].Value)) is { } srcPick)
+        {
+            var (n, match) = srcPick;
+            bool hand = m.Groups["from"].Value.EndsWith("hand", StringComparison.OrdinalIgnoreCase);
+            List<CardData> Zone(EffectContext c) => hand ? c.Owner.Hand : c.Owner.Trash;
+            return (c => c.Self != null && c.Owner.BattleArea.Contains(c.Self) && Zone(c).Count(match) >= n,
+                    c =>
+                    {
+                        var zone = Zone(c);
+                        foreach (var x in c.Engine.ChooseCards(c.Owner, hand ? CardChoiceZone.Hand : CardChoiceZone.Trash, zone.Where(match).OrderBy(x => x.Level).ToList(), n, upTo: false, $"[{c.Card.Name}] 진화원 아래에 놓을 카드 {n}장을 고르세요."))
+                        {
+                            zone.Remove(x);
+                            c.Self!.AddBottomSource(x);
+                        }
+                        c.RecalculateFieldBuffs();
+                    },
+                    c => !hand || c.Owner.Hand.Count >= n + 2, $"{(hand ? "패" : "트래시")}의 카드 {n}장을 진화원 아래에 놓아");
+        }
+        if (Regex.IsMatch(cost, @"^placing (?:your deck's top card|the top card of your deck) (?:face down )?as (?:this Digimon's|its) bottom digivolution card$", RegexOptions.IgnoreCase))
+            return (c => c.Self != null && c.Owner.BattleArea.Contains(c.Self) && c.Owner.MainDeck.Count > 0,
+                    c => { var x = c.Owner.MainDeck[0]; c.Owner.MainDeck.RemoveAt(0); c.Self!.AddBottomSource(x); c.RecalculateFieldBuffs(); },
+                    c => c.Owner.MainDeck.Count >= 5, "덱 위 1장을 진화원 아래에 놓아");
+        // "trashing the bottom face-down card from under any of your Tamers" — 테이머 아래 카드 (마지막에 놓인 것이 맨 아래)
+        if ((m = Regex.Match(cost, @"^trashing (?:the|(?<n>\d+)) bottom (?:face[- ]down )?cards? from under (?:any of |one of |1 of )?your Tamers$", RegexOptions.IgnoreCase)).Success)
+        {
+            int n = m.Groups["n"].Success ? int.Parse(m.Groups["n"].Value) : 1;
+            return (c => c.Owner.UnderTamers.Count >= n,
+                    c => { for (int i = 0; i < n; i++) { var x = c.Owner.UnderTamers[^1]; c.Owner.UnderTamers.RemoveAt(c.Owner.UnderTamers.Count - 1); c.Owner.Trash.Add(x); } },
+                    _ => true, $"테이머 아래 카드 {n}장을 파기하여");
+        }
         if (Regex.IsMatch(cost, @"^trashing (?:the top card of your security stack|your top security card)$", RegexOptions.IgnoreCase))
             return (c => c.Owner.SecurityStack.Count > 0,
                     c => { c.Owner.Trash.Add(c.Owner.SecurityStack[0]); c.Owner.SecurityStack.RemoveAt(0); c.Engine.NotifySecurityRemoved(c.Owner); },
