@@ -126,7 +126,7 @@ public sealed class WpfChoiceProvider : IChoiceProvider
         // 번호마다 새 객체를 키로 써서 같은 카드 여러 장도 따로 고를 수 있게 한다
         var keys = options.Select((_, i) => (object)new IndexKey(i)).ToList();
         var items = options.Select((card, i) => new MultiCardPicker.Item(keys[i], card,
-            $"{card.DisplayName}\n{(card.Level > 0 ? $"Lv.{card.Level} " : "")}{CardTypeKo(card.Type)}{(card.Type == CardType.Digimon ? $"\nDP {card.DP:N0}" : "")}")).ToList();
+            $"{card.DisplayName}\n{(card.Level > 0 ? $"Lv.{card.Level} " : "")}{KoreanLabels.Type(card.Type)}{(card.Type == CardType.Digimon ? $"\nDP {card.DP:N0}" : "")}")).ToList();
         var recommendedKeys = recommended.Where(i => i >= 0 && i < keys.Count).Select(i => keys[i]).ToList();
         // 여러 곳(패 · 필드 등)에서 모은 후보(Other)는 장소를 붙이지 않는다
         string title = zone == CardChoiceZone.Other ? "카드 고르기" : $"{where}에서 카드 고르기";
@@ -139,15 +139,6 @@ public sealed class WpfChoiceProvider : IChoiceProvider
     /// <summary>카드 아래 설명 (좁은 칸에서 어색하게 끊기지 않도록 줄을 나눈다)</summary>
     private static string DigimonStats(CardInstance d) =>
         $"Lv.{d.TopCard.Level} · DP {d.GetCurrentDP():N0}" + (d.IsSuspended ? "\n레스트 상태" : "");
-
-    private static string CardTypeKo(CardType type) => type switch
-    {
-        CardType.Digimon => "디지몬",
-        CardType.Tamer => "테이머",
-        CardType.Option => "옵션",
-        CardType.Digitama => "디지타마",
-        _ => type.ToString()
-    };
 
     // =====================================================================
     // 창 · 버튼

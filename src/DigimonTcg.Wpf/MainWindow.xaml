@@ -522,22 +522,22 @@
                                     <TextBlock Text="COLOR" Style="{StaticResource Duel.ZoneLabel}" Margin="0,0,6,0"/>
                                     <ComboBox x:Name="CmbFilterColor" Width="92" Margin="0,0,12,0" SelectionChanged="FilterChanged" SelectedIndex="0">
                                         <ComboBoxItem Content="전체"/>
-                                        <ComboBoxItem Content="Red"/>
-                                        <ComboBoxItem Content="Blue"/>
-                                        <ComboBoxItem Content="Yellow"/>
-                                        <ComboBoxItem Content="Green"/>
-                                        <ComboBoxItem Content="Black"/>
-                                        <ComboBoxItem Content="Purple"/>
-                                        <ComboBoxItem Content="White"/>
+                                        <ComboBoxItem Content="레드" Tag="Red"/>
+                                        <ComboBoxItem Content="블루" Tag="Blue"/>
+                                        <ComboBoxItem Content="옐로" Tag="Yellow"/>
+                                        <ComboBoxItem Content="그린" Tag="Green"/>
+                                        <ComboBoxItem Content="블랙" Tag="Black"/>
+                                        <ComboBoxItem Content="퍼플" Tag="Purple"/>
+                                        <ComboBoxItem Content="화이트" Tag="White"/>
                                     </ComboBox>
 
                                     <TextBlock Text="TYPE" Style="{StaticResource Duel.ZoneLabel}" Margin="0,0,6,0"/>
                                     <ComboBox x:Name="CmbFilterType" Width="100" Margin="0,0,12,0" SelectionChanged="FilterChanged" SelectedIndex="0">
                                         <ComboBoxItem Content="전체"/>
-                                        <ComboBoxItem Content="Digitama"/>
-                                        <ComboBoxItem Content="Digimon"/>
-                                        <ComboBoxItem Content="Tamer"/>
-                                        <ComboBoxItem Content="Option"/>
+                                        <ComboBoxItem Content="디지타마" Tag="Digitama"/>
+                                        <ComboBoxItem Content="디지몬" Tag="Digimon"/>
+                                        <ComboBoxItem Content="테이머" Tag="Tamer"/>
+                                        <ComboBoxItem Content="옵션" Tag="Option"/>
                                     </ComboBox>
 
                                     <TextBlock Text="LEVEL" Style="{StaticResource Duel.ZoneLabel}" Margin="0,0,6,0"/>

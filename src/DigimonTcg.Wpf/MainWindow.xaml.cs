@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        FitRestoredBoundsToWorkArea();
 
         // 앱 버전 표시 (src/DigimonTcg.Version.props + 빌드한 커밋)
         TxtAppVersion.Text = DigimonTcg.Core.AppVersion.Display;
@@ -231,8 +232,8 @@ public partial class MainWindow : Window
         InspectorColorBadge.Background = GetCardColorBrush(card.Color);
 
         TxtInspectorBadge.Text = (card.Type == CardType.Digimon || card.Type == CardType.Digitama
-            ? $"Lv.{card.Level} {card.Color} {card.Type}"
-            : $"{card.Color} {card.Type}") + (string.IsNullOrEmpty(card.Rarity) ? "" : $" · {card.Rarity}");
+            ? $"Lv.{card.Level} {KoreanLabels.Colors(card)} {KoreanLabels.Type(card.Type)}"
+            : $"{KoreanLabels.Colors(card)} {KoreanLabels.Type(card.Type)}") + (string.IsNullOrEmpty(card.Rarity) ? "" : $" · {card.Rarity}");
 
         TxtInspectorName.Text = card.DisplayName;
         TxtInspectorStats.Text = card.Type == CardType.Digimon
@@ -250,7 +251,11 @@ public partial class MainWindow : Window
         var support = EffectSupport.For(card);
         InspectorImplNote.Visibility = support.Level is EffectSupportLevel.Partial or EffectSupportLevel.None ? Visibility.Visible : Visibility.Collapsed;
         if (support.Level is EffectSupportLevel.Partial or EffectSupportLevel.None)
-            TxtInspectorImplNote.Text = DescribeEffectSupport(support);
+        {
+            var (note, detail) = DescribeEffectSupport(support);
+            TxtInspectorImplNote.Text = note;
+            InspectorImplNote.ToolTip = detail;   // 영어 원문 · 엔진 쪽 사유는 마우스를 올렸을 때만
+        }
 
         var bmp = GetCardBitmap(card);
         if (bmp != null)
@@ -369,7 +374,7 @@ public partial class MainWindow : Window
         }
 
         // 우상단 DP 또는 커스텀 배지
-        string rightBadgeText = customDpOrBadge ?? (card.Type == CardType.Digimon ? $"{card.DP} DP" : card.Type.ToString());
+        string rightBadgeText = customDpOrBadge ?? (card.Type == CardType.Digimon ? $"{card.DP} DP" : KoreanLabels.Type(card.Type));
         rootGrid.Children.Add(new Border
         {
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -460,9 +465,34 @@ public partial class MainWindow : Window
         return outerBorder;
     }
 
+    /// <summary>
+    /// 최대화를 풀었을 때의 창 크기 · 위치를 작업 영역(작업 표시줄 제외) 안으로 맞춘다.
+    /// 최대화로 시작하면 CenterScreen이 적용되지 않아 Windows 기본 위치(계단식)에 놓였고, 1640x960 창의 아래가 작업 표시줄에 가렸다.
+    /// </summary>
+    private void FitRestoredBoundsToWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        MinWidth = Math.Min(MinWidth, area.Width);
+        MinHeight = Math.Min(MinHeight, area.Height);
+        Width = Math.Min(Width, area.Width);
+        Height = Math.Min(Height, area.Height);
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = area.Left + (area.Width - Width) / 2;
+        Top = area.Top + (area.Height - Height) / 2;
+    }
+
     // ==================== 메인 로비 & 3대 메인 모드 탭 전환 (실전 대련[AI] / 덱 빌딩 / 연습[솔리테어]) ====================
+    /// <summary>덱 빌더 카드에 열려 있는 툴팁 — 화면을 바꿀 때 닫는다 (카드가 숨겨져도 툴팁 창은 남아 있었다)</summary>
+    private ToolTip? _openCatalogTip;
+
     private void UpdateTopTabVisuals(int activeTab)
     {
+        if (_openCatalogTip != null)
+        {
+            _openCatalogTip.IsOpen = false;
+            _openCatalogTip = null;
+        }
+
         // -1: 메인 로비, 0: 실전 대련[AI], 1: 연습[솔리테어], 2: 덱 빌딩 & 도감
         // 로비(타이틀 화면)에서는 상단 헤더와 안내 바를 숨기고 전면 키 아트 + 세로 메뉴만 보여 준다
         var chrome = activeTab == -1 ? Visibility.Collapsed : Visibility.Visible;
@@ -1895,7 +1925,7 @@ public partial class MainWindow : Window
             // 앞면으로 놓인 시큐리티는 공개 정보 — 실전에서도 보여 준다
             bool nextFaceUp = GoldfishEngine.IsFaceUp(_gameState.DummyOpponent, nextCard);
             TxtNextSecurityTarget.Text = peek || nextFaceUp
-                ? $"🎯 다음 타격 (#{clearedCount + 1}{(nextFaceUp ? " · 앞면" : "")}): [{nextCard.DisplayName}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : nextCard.Type.ToString())}"
+                ? $"🎯 다음 타격 (#{clearedCount + 1}{(nextFaceUp ? " · 앞면" : "")}): [{nextCard.DisplayName}] {(nextCard.Type == CardType.Digimon ? $"DP {nextCard.DP:N0}" : KoreanLabels.Type(nextCard.Type))}"
                 : $"🎯 다음 타격: 시큐리티 #{clearedCount + 1} (뒷면 비공개)";
             TxtNextSecurityTarget.Foreground = BrushFromHex("#89DCEB");
         }
@@ -4452,19 +4482,30 @@ public partial class MainWindow : Window
     };
 
     /// <summary>카드 상세 안내: 어느 절이 왜 동작하지 않는지 (최대 4절, 영어 원문 절 기준)</summary>
-    private static string DescribeEffectSupport(EffectSupportInfo info)
+    /// <summary>
+    /// 카드 상세의 효과 지원 안내. Note = 화면에 보이는 한글 (동작하지 않는 효과를 공식 문체 한글로),
+    /// Detail = 마우스를 올렸을 때 보이는 영어 원문 · 엔진 쪽 사유 (없으면 null)
+    /// </summary>
+    private static (string Note, string? Detail) DescribeEffectSupport(EffectSupportInfo info)
     {
         if (info.IsBuiltIn)
-            return "⚠️ 일부 효과만 동작 — 이 카드 효과 문장의 일부는 아직 대전에서 동작하지 않습니다. (DP · 코스트 · 진화 조건은 정상 적용)";
+            return ("⚠️ 일부 효과만 동작 — 이 카드 효과의 일부는 아직 대전에서 동작하지 않습니다. (DP · 코스트 · 진화 조건은 정상 적용)", null);
 
+        var unsupported = info.UnsupportedClauses.ToList();
         string head = info.Level == EffectSupportLevel.None
-            ? $"⚠️ 효과 미지원 ({info.TotalClauses}절 모두) — 대전에서는 DP · 코스트 · 진화 조건만 적용됩니다."
-            : $"⚠️ 효과 일부만 동작 ({info.SupportedClauses}/{info.TotalClauses}절) — 아래 절은 대전에서 동작하지 않습니다.";
-        var lines = info.UnsupportedClauses
+            ? "⚠️ 이 카드의 효과는 아직 대전에서 동작하지 않습니다 — DP · 코스트 · 진화 조건만 적용됩니다."
+            : $"⚠️ 효과 {info.TotalClauses}개 중 {unsupported.Count}개는 아직 대전에서 동작하지 않습니다.";
+        var lines = unsupported
             .Take(4)
-            .Select(c => $"• {(c.Inherited ? "[진화원] " : "")}{Shorten(c.Text, 70)}{(string.IsNullOrWhiteSpace(c.Note) ? "" : $" — {c.Note}")}");
-        int more = info.UnsupportedClauses.Count() - 4;
-        return head + "\n" + string.Join("\n", lines) + (more > 0 ? $"\n… 외 {more}절" : "");
+            .Select(c => KoreanEffectRenderer.RenderClause(c.Text) is { } ko
+                ? $"• {(c.Inherited ? "【진화원】 " : "")}{Shorten(ko, 70)}"
+                : $"• {(c.Inherited ? "아래 [진화원 효과]" : "아래 [메인 효과]")} 중 1개");   // 한글로 옮기지 못한 절 — 공식 한글 효과 문장과 맞춰 보게
+        int more = unsupported.Count - 4;
+        string note = head + "\n" + string.Join("\n", lines) + (more > 0 ? $"\n… 외 {more}개" : "") + "\n(마우스를 올리면 영어 원문)";
+
+        string detail = string.Join("\n\n", unsupported.Select(c =>
+            $"{(c.Inherited ? "[진화원] " : "")}{c.Text.Trim()}{(string.IsNullOrWhiteSpace(c.Note) ? "" : $"\n— {c.Note}")}"));
+        return (note, detail);
     }
 
     private static string Shorten(string text, int max)
@@ -4479,7 +4520,8 @@ public partial class MainWindow : Window
             return;
 
         string? keyword = TxtSearchKeyword.Text;
-        CardColor? color = (CmbFilterColor.SelectedItem as ComboBoxItem)?.Content?.ToString() switch
+        // 목록에는 한글을 보이고 Tag에 영어 값을 둔다
+        CardColor? color = (CmbFilterColor.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
         {
             "Red" => CardColor.Red,
             "Blue" => CardColor.Blue,
@@ -4491,7 +4533,7 @@ public partial class MainWindow : Window
             _ => null
         };
 
-        CardType? type = (CmbFilterType.SelectedItem as ComboBoxItem)?.Content?.ToString() switch
+        CardType? type = (CmbFilterType.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
         {
             "Digitama" => CardType.Digitama,
             "Digimon" => CardType.Digimon,
@@ -4673,11 +4715,13 @@ public partial class MainWindow : Window
             BorderBrush = inDeck ? Theme.GetBrush("Duel.Brush.GoldEdge") : Theme.GetBrush("Duel.Brush.ZoneEdge.Neutral"),
             BorderThickness = new Thickness(inDeck ? 1.6 : 1),
             Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = "클릭: 덱에 넣기 · 우클릭: 빼기",
             RenderTransformOrigin = new Point(0.5, 0.5),
             RenderTransform = scale,
             Child = new StackPanel { Children = { cardGrid, footer } }
         };
+        var tip = new ToolTip { Content = "클릭: 덱에 넣기 · 우클릭: 빼기" };
+        tip.Opened += (_, _) => _openCatalogTip = tip;
+        pocket.ToolTip = tip;
 
         pocket.MouseEnter += (_, _) =>
         {
@@ -4870,7 +4914,7 @@ public partial class MainWindow : Window
 
             itemDock.Children.Add(new TextBlock
             {
-                Text = $"[{card.CardId}] {card.DisplayName} {(card.Level > 0 ? $"(Lv.{card.Level})" : $"({card.Type})")}",
+                Text = $"[{card.CardId}] {card.DisplayName} {(card.Level > 0 ? $"(Lv.{card.Level})" : $"({KoreanLabels.Type(card.Type)})")}",
                 Foreground = BrushFromHex("#F8FAFC"),
                 FontSize = 11.5,
                 VerticalAlignment = VerticalAlignment.Center
