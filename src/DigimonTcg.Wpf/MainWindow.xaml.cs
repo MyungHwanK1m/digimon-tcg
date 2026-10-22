@@ -728,6 +728,8 @@ public partial class MainWindow : Window
     /// <summary>
     /// 모든 게임 시작은 이 메서드를 통해 진행 (AI 대전일 때만 선택한 상대 덱 적용)
     /// </summary>
+    private readonly GameLogFile _gameLogFile = new();
+
     private void StartGameForStage(PracticeStage stage)
     {
         if (stage == PracticeStage.Stage3_AiBattle)
@@ -740,6 +742,7 @@ public partial class MainWindow : Window
         {
             _engine.StartNewGame(_builderMainDeck, _builderDigitamaDeck, stage: stage);
         }
+        _gameLogFile.NewGame($"DIGIMON TCG {DigimonTcg.Core.AppVersion.Display} · {stage} · 내 덱: {_activeDeckTitle}{(stage == PracticeStage.Stage3_AiBattle ? $" · 상대 덱: {_gameState.OpponentDeckName}" : "")}");
 
         // 실전 AI 대전은 화면에 대련장이 처음 보일 때 코인 토스로 선공 / 후공을 정한다
         _coinTossPending = stage == PracticeStage.Stage3_AiBattle;
@@ -4304,6 +4307,9 @@ public partial class MainWindow : Window
         // ItemsControl 불일치 예외로 앱이 종료된다 → 매번 스냅샷을 바인딩한다.
         var logSnapshot = _gameState.ActionLogs.ToList();
         LstActionLogs.ItemsSource = logSnapshot;
+        // 경기 로그 파일 (앱을 켜기만 한 배경 대련 준비 단계는 남기지 않는다)
+        if (_gameState.CurrentPhase != Phase.Setup)
+            _gameLogFile.Save(logSnapshot);
         if (logSnapshot.Count > 0)
         {
             LstActionLogs.ScrollIntoView(logSnapshot[^1]);
