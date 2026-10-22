@@ -77,9 +77,10 @@ public static class KoreanEffectRenderer
         if (Regex.Match(clause, @"^Your (?<who>.+?) can digivolve into this card in (?:your|the) hand for a (?:memory |digivolution )?cost of (?<n>\d+), ignoring (?:this card's )?digivolution requirements\.?$", RegexOptions.IgnoreCase) is { Success: true } sp
             && WhoKo(sp.Groups["who"].Value) is { } spWho)
             return $"자신의 {spWho}{J(spWho, "은", "는")} 패의 이 카드로, 진화 조건을 무시하고 진화 코스트 {sp.Groups["n"].Value}로 진화할 수 있다.";
-        if (Regex.Match(clause, @"^When (?:this card would be played|you would play this card(?: from your hand)?|you would use this card), (?:if (?<cond>[^,]+), )?reduce (?:the|its) (?:play |use |memory )?cost by (?<n>\d+)\.?$", RegexOptions.IgnoreCase) is { Success: true } red)
+        if (Regex.Match(clause, @"^When (?:this card would be played|you would play this card(?: from your hand)?|you would use this card), (?:if (?<cond>[^,]+), )?reduce (?:the|its) (?:play |use |memory )?cost by (?<n>\d+)(?: if (?<cond2>[^,]+?))?\.?$", RegexOptions.IgnoreCase) is { Success: true } red)
         {
-            string? head = red.Groups["cond"].Success ? CondKo(red.Groups["cond"].Value)?.If : "";
+            // 조건이 앞("if ~, reduce") 또는 뒤("reduce ~ if ~")
+            string? head = red.Groups["cond"].Success ? CondKo(red.Groups["cond"].Value)?.If : red.Groups["cond2"].Success ? CondKo(red.Groups["cond2"].Value)?.If : "";
             if (head == null) return null;
             return $"이 카드를 등장시키거나 사용할 때, {(head.Length > 0 ? head + " " : "")}지불하는 코스트를 -{red.Groups["n"].Value} 한다.";
         }
@@ -428,10 +429,12 @@ public static class KoreanEffectRenderer
             string who = m.Groups["one"].Value.StartsWith("1 of", StringComparison.OrdinalIgnoreCase) ? "그 디지몬 1마리는" : "그 디지몬은";
             return new($"{who} {(deletion ? "소멸하지" : "배틀 에어리어를 벗어나지")} ", Anhda);
         }
-        if ((m = Regex.Match(s, @"^(?<t>.+?) can't (?<v>suspend|unsuspend)$", RegexOptions.IgnoreCase)).Success
+        if ((m = Regex.Match(s, @"^(?<t>.+?) can't (?<v>suspend|unsuspend)(?<next> (?:in|during) (?:their|your opponent's|its owner's) next unsuspend phase)?$", RegexOptions.IgnoreCase)).Success
             && TargetKo(Regex.Replace(m.Groups["t"].Value, @"\btheir\b", "your opponent's", RegexOptions.IgnoreCase), bare: false) is { } lockT)
         {
             bool sus = m.Groups["v"].Value.Equals("suspend", StringComparison.OrdinalIgnoreCase);
+            if (!sus && m.Groups["next"].Success)
+                return new($"{lockT}{J(lockT, "은", "는")} 다음 상대의 액티브 페이즈에 액티브가 되지 ", Anhda);
             var v = sus ? new Verb("레스트할 수 없다", "레스트할 수 없다", "레스트할 수 없는 것으로", "레스트할 수 없고") : new Verb("액티브가 되지 않는다", "액티브가 되지 않는다", "액티브가 되지 않는 것으로", "액티브가 되지 않고");
             return new($"{lockT}{J(lockT, "은", "는")} ", v);
         }
@@ -580,14 +583,14 @@ public static class KoreanEffectRenderer
             return new("어택의 대상을 이 디지몬으로 ", Ha("변경"));
 
         // ---- 진화 ----
-        if ((m = Regex.Match(s, @"^(?<t>this Digimon|\d+ of your Digimon(?: with [^,]+?)?) (?<may>may )?digivolves? into (?<pick>.+?) in (?:the|your) hand(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success
+        if ((m = Regex.Match(s, @"^(?<t>this Digimon|\d+ of your Digimon(?: with [^,]+?)?) (?<may>may )?digivolves? into (?<pick>.+?) in (?:the|your) (?<zone>hand or (?:the |your )?trash|hand|trash)(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success
             && TargetKo(m.Groups["t"].Value) is { } et && (PickKo("1 " + m.Groups["pick"].Value) ?? PickKo(m.Groups["pick"].Value)) is { } ep)
         {
             string how = m.Groups["free"].Value.StartsWith("without", StringComparison.OrdinalIgnoreCase) ? "코스트를 지불하지 않고 "
                 : m.Groups["red"].Success ? $"진화 코스트를 -{m.Groups["red"].Value} 하고 " : m.Groups["cost"].Success ? $"진화 코스트 {m.Groups["cost"].Value}로 " : "";
             // "this Digimon may digivolve ~" — 가운데의 may도 "~할 수 있다"
             string plain = m.Groups["may"].Success ? "진화시킬 수 있다" : "진화시킨다";
-            return new($"{et}{J(et, "을", "를")} 패의 {ep}{J(ep, "으로", "로")} {how}", new Verb(plain, "진화시킬 수 있다", "진화시키는 것으로", "진화시키고"));
+            return new($"{et}{J(et, "을", "를")} {(m.Groups["zone"].Value.Contains("trash", StringComparison.OrdinalIgnoreCase) ? (m.Groups["zone"].Value.Contains("hand", StringComparison.OrdinalIgnoreCase) ? "패 또는 트래시의" : "트래시의") : "패의")} {ep}{J(ep, "으로", "로")} {how}", new Verb(plain, "진화시킬 수 있다", "진화시키는 것으로", "진화시키고"));
         }
         return null;
     }
@@ -599,6 +602,10 @@ public static class KoreanEffectRenderer
         Match m;
         if ((m = Regex.Match(cost, @"^trashing (?<n>\d+) of this Digimon's digivolution cards$", RegexOptions.IgnoreCase)).Success)
             return $"이 디지몬의 진화원을 {m.Groups["n"].Value}장 파기하는 것으로,";
+        // "deleting 1 other Digimon with [Sukamon] in its name"
+        if ((m = Regex.Match(cost, @"^deleting (?:1|one) other (?<what>Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success
+            && TargetKo("1 of your other " + m.Groups["what"].Value) is { } otherDel)
+            return $"{otherDel}{J(otherDel, "을", "를")} 소멸시키는 것으로,";
         // 7단계: 링크 카드 · 앞면 시큐리티 비용
         if ((m = Regex.Match(cost, @"^trashing (?<n>\d+) of (?:this Digimon's|its) link cards$", RegexOptions.IgnoreCase)).Success)
             return $"이 디지몬의 링크 카드를 {m.Groups["n"].Value}장 파기하는 것으로,";
@@ -652,6 +659,19 @@ public static class KoreanEffectRenderer
     {
         cond = cond.Trim();
         Match m;
+        // 화면 점검 2026-10-22: 상대 디지몬이 없을 때 · 이 디지몬이 N색 이상 · "그중 ~ 특징을 가진 디지몬이 있으면"
+        if ((m = Regex.Match(cond, @"^your opponent has no (?<s>unsuspended |suspended )?Digimon(?: in play)?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string x = $"{(m.Groups["s"].Value.Trim().Equals("unsuspended", StringComparison.OrdinalIgnoreCase) ? "액티브 상태인 " : m.Groups["s"].Success ? "레스트 상태인 " : "")}상대의 디지몬이";
+            return new($"{x} 없을 때,", $"{x} 없는 동안,", $"{x} 없다면,");
+        }
+        if ((m = Regex.Match(cond, @"^(?:this Digimon|it) has (?<n>\d+) or more colors$", RegexOptions.IgnoreCase)).Success)
+            return Be($"이 디지몬이 {m.Groups["n"].Value}색 이상");
+        if ((m = Regex.Match(cond, $@"^any of them (?:have|has) the (?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string x = NamesKo(m.Groups["x"].Value, trait: true);
+            return Have($"그중 특징으로 {x}{J(x, "을", "를")} 가진 디지몬이");
+        }
         if ((m = Regex.Match(cond, @"^(?<who>you|your opponent) (?:have|has) (?<n>\d+) or (?<dir>more|fewer|less) security cards$", RegexOptions.IgnoreCase)).Success)
             return Be($"{Side(m.Groups["who"].Value)}의 시큐리티가 {m.Groups["n"].Value}장 {Dir(m.Groups["dir"].Value)}");
         if ((m = Regex.Match(cond, @"^you have (?<n>\d+) security cards?$", RegexOptions.IgnoreCase)).Success)
@@ -834,6 +854,8 @@ public static class KoreanEffectRenderer
         if (Regex.IsMatch(ev, @"^(?:any of |one of )?your Digimon checks? (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase)) return "자신의 디지몬이 앞면의 시큐리티를 체크했을 때,";
         if (Regex.IsMatch(ev, @"^your hand is trashed from$|^cards? (?:are|is) trashed from your hand$", RegexOptions.IgnoreCase)) return "자신의 패가 파기되었을 때,";
         if (Regex.IsMatch(ev, @"^this card is trashed from (?:the|your) hand$", RegexOptions.IgnoreCase)) return "이 카드가 패에서 파기되었을 때,";
+        if ((m = Regex.Match(ev, @"^(?:one of |any of )?your (?<other>other )?Digimon (?:are|is) played or digivolves?$", RegexOptions.IgnoreCase)).Success)
+            return $"자신의 {(m.Groups["other"].Success ? "다른 " : "")}디지몬이 등장하거나 진화했을 때,";
         if (Regex.IsMatch(ev, @"^effects trash this card from (?:the|your) security stack$|^this card is trashed from (?:the|your) security stack by (?:an )?effects?$", RegexOptions.IgnoreCase)) return "효과로 이 카드가 시큐리티에서 파기되었을 때,";
         // 이름 주어: "When any of your [Suzune Kazuki]s are played" · "When any of your [Owen Dreadnought]s suspend"
         if ((m = Regex.Match(ev, $@"^(?:one of |any of )?your (?<x>{TargetSpec.NameList})(?:s|'s)? (?<v>(?:is|are) played|suspends?|become suspended|is suspended|are suspended)$", RegexOptions.IgnoreCase)).Success)
@@ -1215,6 +1237,12 @@ public static class KoreanEffectRenderer
         ("Vortex", "볼텍스", "자신의 턴 종료 시, 이 디지몬으로 상대의 디지몬에게 어택할 수 있다. 이 효과로는 등장한 턴에도 어택할 수 있다"),
         ("Execute", "에그제큐트", "자신의 턴 종료 시, 이 디지몬으로 어택할 수 있다. 이 어택 종료 시, 이 디지몬은 소멸한다. 이 효과로는 액티브 상태인 상대의 디지몬에게도 어택할 수 있다"),
         ("Collision", "충돌", "이 디지몬이 어택하고 있는 동안, 상대의 디지몬 전부는 《블로커》를 얻고, 상대는 가능하다면 블록한다"),
+        // 조건 없이 이름만 나올 때 ("gains ＜Decode＞" 등)
+        ("Decode", "디코드", "이 디지몬이 배틀 이외로 배틀 에어리어를 벗어날 때, 이 디지몬의 진화원에서 지정된 디지몬 카드 1장을 코스트를 지불하지 않고 등장시킬 수 있다"),
+        ("Partition", "파티션", "진화원에 지정된 카드가 1장씩 있는 이 디지몬이 자신의 효과와 배틀 이외로 배틀 에어리어를 벗어날 때, 지정된 카드 1장씩을 코스트를 지불하지 않고 등장시킬 수 있다"),
+        ("Fragment", "프래그먼트", "이 디지몬이 소멸할 때, 이 디지몬의 진화원을 지정된 장수만큼 파기하는 것으로, 소멸하지 않는다"),
+        ("Overclock", "오버클럭", "자신의 턴 종료 시, 지정된 다른 자신의 디지몬 1마리를 소멸시키는 것으로, 이 디지몬으로 레스트시키지 않고 플레이어에게 어택한다"),
+        ("Decoy", "디코이", "지정된 다른 자신의 디지몬이 상대의 효과로 소멸할 때, 이 디지몬을 소멸시키는 것으로, 그 디지몬 1마리는 소멸하지 않는다"),
     };
 
     /// <summary>"Blocker" · "Draw 1" · "Security A. +1" · "De-Digivolve 2" · "Recovery +1 (Deck)" → 《…》 (+ 설명)</summary>

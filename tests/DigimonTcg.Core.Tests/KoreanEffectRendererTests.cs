@@ -189,4 +189,18 @@ public class KoreanEffectRendererTests
         var card = new CardData { CardId = "TEST-NOOFF-TRAIT", Name = "Testmon", Type = CardType.Digimon, Traits = new() { "Vaccine", "Shaman", "TS" } };
         Assert.Equal(new[] { "백신종", "신인형", "TS" }, KoreanCardData.DisplayTraits(card));
     }
+
+    [Fact]
+    public void ScreenCheckSentences2_ShouldRender()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        Assert.StartsWith("《디코드》", R("＜Decode＞"));
+        Assert.Contains("명칭에 「스카몬」을 포함하는 자신의 다른 디지몬 1마리를 소멸시키는 것으로, 그 디지몬은 소멸하지 않는다", R("[All Turns] When this Digimon would be deleted, by deleting 1 other Digimon with [Sukamon] in its name, prevent that deletion."));
+        Assert.Contains("다음 상대의 액티브 페이즈에 액티브가 되지 않는다", R("[On Play] 1 of their Digimon or Tamers can't unsuspend in their next unsuspend phase."));
+        Assert.Contains("옐로인 자신의 디지몬이 있을 때, 지불하는 코스트를 -1 한다", R("When you would play this card from your hand, reduce its play cost by 1 if you have a yellow Digimon in play."));
+        Assert.Contains("액티브 상태인 상대의 디지몬이 없는 동안", R("[All Turns] While your opponent has no unsuspended Digimon in play, this Digimon gets +1000 DP."));
+        Assert.Contains("이 디지몬이 2색 이상인 동안", R("[All Turns] While this Digimon has 2 or more colors, it gets +1000 DP."));
+        Assert.Contains("자신의 다른 디지몬이 등장하거나 진화했을 때, 그중 특징으로", R("[Your Turn] When your other Digimon are played or digivolve, if any of them have the [ADVENTURE] trait, 1 of your Digimon gains ＜Alliance＞ for the turn."));
+        Assert.Contains("패 또는 트래시의", R("[When Attacking] This Digimon may digivolve into a Digimon card with [Leomon] in its name in the hand or trash."));
+    }
 }
