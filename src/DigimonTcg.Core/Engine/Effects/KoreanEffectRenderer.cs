@@ -422,7 +422,7 @@ public static class KoreanEffectRenderer
             return new($"{t}{(J(t, "으로", "로"))} {nosus}{whom}", m.Groups["may"].Success ? new Verb("어택할 수 있다", "어택할 수 있다", "어택하는 것으로", "어택하고") : atk);
         }
         // "Your opponent's effects don't affect this Digimon" · "their Digimon's effects don't affect 1 of your Digimon"
-        if ((m = Regex.Match(s, @"^(?:your opponent's|their|the opponent's) (?<dig>Digimon's )?effects don't affect (?<t>this Digimon|it|1 of your Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(s, @"^(?:your opponent's|their|the opponent's) (?<dig>Digimon(?:'s)? )?effects don't affect (?<t>this Digimon|it|1 of your Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success)
         {
             string t = m.Groups["t"].Value.Equals("this Digimon", StringComparison.OrdinalIgnoreCase) ? "이 디지몬" : m.Groups["t"].Value.Equals("it", StringComparison.OrdinalIgnoreCase) ? "그 디지몬" : TargetKo(m.Groups["t"].Value) ?? "";
             if (t.Length == 0) return null;
@@ -622,6 +622,14 @@ public static class KoreanEffectRenderer
         if ((m = Regex.Match(cost, @"^placing (?<pick>.+?) (?:from|in) (?<from>your hand or (?:your )?trash|your trash|your hand) face[- ]up as (?:the|your) (?<pos>top|bottom) security card$", RegexOptions.IgnoreCase)).Success
             && PickKo(m.Groups["pick"].Value) is { } fuCost)
             return $"{(m.Groups["from"].Value.Contains("trash") && m.Groups["from"].Value.Contains("hand") ? "자신의 패 또는 트래시에서" : m.Groups["from"].Value.Contains("hand") ? "자신의 패에서" : "자신의 트래시에서")} {fuCost}{J(fuCost, "을", "를")} 시큐리티 {(m.Groups["pos"].Value.Equals("top", StringComparison.OrdinalIgnoreCase) ? "위" : "아래")}에 앞면으로 놓는 것으로,";
+        // v0.17.0 비용: 시큐리티 위/아래 · 뒷면 진화원 · 테이머 아래 뒷면 카드
+        if (Regex.IsMatch(cost, @"^trashing your top or bottom security card$", RegexOptions.IgnoreCase))
+            return "자신의 시큐리티의 위 또는 아래에서 1장 파기하는 것으로,";
+        if ((m = Regex.Match(cost, @"^placing (?:(?<deck>the top card of your deck)|(?<pick>.+?) (?:from|in) (?<from>your hand|your trash)) face[- ]down as this Digimon's bottom digivolution card$", RegexOptions.IgnoreCase)).Success
+            && (m.Groups["deck"].Success ? "자신의 덱 위에서 카드 1장" : PickKo(m.Groups["pick"].Value) is { } fd ? $"{(m.Groups["from"].Value.Contains("hand") ? "자신의 패에서" : "자신의 트래시에서")} {fd}" : null) is { } fdWhat)
+            return $"{fdWhat}{J(fdWhat, "을", "를")} 이 디지몬의 진화원 가장 아래에 뒷면으로 놓는 것으로,";
+        if ((m = Regex.Match(cost, @"^trashing the bottom face-down card from under any of your Tamers(?<sec> or your top security card)?$", RegexOptions.IgnoreCase)).Success)
+            return $"자신의 테이머 아래의 뒷면 카드를 아래에서부터 1장{(m.Groups["sec"].Success ? " 또는 자신의 시큐리티를 위에서부터 1장" : "")} 파기하는 것으로,";
         if ((m = Regex.Match(cost, @"^(?:paying (?<n>\d+) (?:memory|cost)|decreasing your memory by (?<n>\d+))$", RegexOptions.IgnoreCase)).Success)
             return $"메모리를 -{m.Groups["n"].Value} 하는 것으로,";
         if ((m = Regex.Match(cost, @"^(?<v>deleting|returning) (?:one|1) of your (?<other>other )?(?<what>[^,]*?)(?<hand> to (?:its owner's|your|the) hand)?$", RegexOptions.IgnoreCase)).Success

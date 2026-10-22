@@ -225,4 +225,21 @@ public class KoreanEffectRendererTests
         Assert.Equal("패의 이 카드를 등장시킬 때, 상대의 디지몬 1마리마다 지불하는 등장 코스트를 -2 한다.", R("When this card would be played, reduce the play cost by 2 for each of your opponent's Digimon."));
         Assert.Equal("패의 이 카드를 등장시킬 때, 블루인 자신의 디지몬이 있다면 지불하는 등장 코스트를 -1 한다.", R("When this card would be played, reduce its play cost by 1 if you have a blue Digimon in play."));
     }
+
+    [Fact]
+    public void CostVariants_ShouldRender()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        // v0.17.0에서 엔진이 새로 읽는 비용
+        Assert.StartsWith("【메인】 디지몬 2마리를 레스트시키는 것으로,", R("[Main] By suspending 2 Digimon, gain 2 memory."));
+        Assert.StartsWith("【메인】 옐로인 자신의 테이머 1장을 레스트시키는 것으로,", R("[Main] By suspending 1 of your yellow Tamers, gain 1 memory."));
+        Assert.StartsWith("【자신의 턴】 이 디지몬을 액티브로 하는 것으로,", R("[Your Turn] By unsuspending this Digimon, gain 1 memory."));
+        Assert.Equal("【등장 시】 【진화 시】 【어택 시】 [턴에 1회] 자신의 시큐리티의 위 또는 아래에서 1장 파기하는 것으로, 상대의 턴 종료 시까지, 이 디지몬은 상대의 디지몬의 효과를 받지 않는다.",
+            R("[On Play] [When Digivolving] [When Attacking] [Once Per Turn] By trashing your top or bottom security card, your opponent's Digimon effects don't affect this Digimon until their turn ends."));
+        Assert.StartsWith("【등장 시】 자신의 패에서 카드 1장을 이 디지몬의 진화원 가장 아래에 뒷면으로 놓는 것으로,", R("[On Play] By placing 1 card in your hand face down as this Digimon's bottom digivolution card, gain 1 memory."));
+        Assert.StartsWith("【등장 시】 자신의 트래시에서 카드 1장을 이 디지몬의 진화원 가장 아래에 뒷면으로 놓는 것으로,", R("[On Play] By placing 1 card from your trash face down as this Digimon's bottom digivolution card, gain 1 memory."));
+        Assert.StartsWith("【등장 시】 자신의 덱 위에서 카드 1장을 이 디지몬의 진화원 가장 아래에 뒷면으로 놓는 것으로,", R("[On Play] By placing the top card of your deck face down as this Digimon's bottom digivolution card, gain 1 memory."));
+        Assert.StartsWith("【메인】 자신의 테이머 아래의 뒷면 카드를 아래에서부터 1장 파기하는 것으로,", R("[Main] By trashing the bottom face-down card from under any of your Tamers, gain 2 memory."));
+        Assert.Contains("아래에서부터 1장 또는 자신의 시큐리티를 위에서부터 1장 파기하는 것으로,", R("[Main] By trashing the bottom face-down card from under any of your Tamers or your top security card, gain 2 memory."));
+    }
 }

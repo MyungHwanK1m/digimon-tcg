@@ -10,6 +10,15 @@
 
 ---
 
+## v0.17.1 — 2026-10-22
+생성 한글: v0.17.0의 새 비용 표기
+- "자신의 시큐리티의 위 또는 아래에서 1장 파기하는 것으로,"
+- "자신의 패에서 / 트래시에서 / 덱 위에서 카드 1장을 이 디지몬의 진화원 가장 아래에 뒷면으로 놓는 것으로,"
+- "자신의 테이머 아래의 뒷면 카드를 아래에서부터 1장 (또는 자신의 시큐리티를 위에서부터 1장) 파기하는 것으로,"
+- "your opponent's Digimon effects don't affect ~" (소유격 없는 표기)도 "상대의 디지몬의 효과를 받지 않는다"로
+- 이 비용을 가진 실제 카드 54장 중 비용 때문에 원문으로 남는 카드 0장
+- 테스트 1개 (KoreanEffectRendererTests)
+
 ## v0.17.0 — 2026-10-22
 비용("By ~ing, ~") 표기 확장
 - "By suspending 2 Digimon" · "By suspending 1 of your [WG] trait Digimon"(자신의 디지몬, 이 디지몬도 가능) · "By suspending 1 of your yellow Tamers"
