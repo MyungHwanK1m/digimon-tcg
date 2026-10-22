@@ -138,8 +138,11 @@ public static class KoreanCardData
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string CardId, bool Inherited), string> GeneratedCache = new();
 
+    /// <summary>특징 표시: 공식 한글 → (공식 한글이 없는 카드) 특징 이름표로 하나씩 (모르는 특징은 영어 그대로)</summary>
     public static IReadOnlyList<string> DisplayTraits(CardData card) =>
-        Get(card.CardId) is { Traits.Count: > 0 } ko ? ko.Traits : card.Traits;
+        Get(card.CardId) is { Traits.Count: > 0 } ko ? ko.Traits
+        : StarterDecks.IsBuiltInCard(card.CardId) || Count == 0 ? card.Traits
+        : card.Traits.Select(Engine.Effects.KoreanEffectRenderer.TraitKo).ToList();
 
     private static string Clean(string? text)
     {

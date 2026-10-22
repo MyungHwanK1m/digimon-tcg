@@ -53,7 +53,12 @@ public partial class GoldfishEngine
     public void Log(string message)
     {
         // 화면에 나가는 문장: 영어 카드 이름 → 공식 한글 이름 (엔진 판정은 영어 이름 그대로)
-        string entry = $"[T{State.CurrentTurn} | {PhaseLabel(State.CurrentPhase)} | M:{State.MemoryGauge:+#;-#;0}] {KoreanNameLocalizer.Localize(message)}";
+        // AI 턴 동안 엔진의 단계 값은 플레이어 기준 TurnEnd — 머리말은 "상대 턴"으로 (AI 로그는 🤖로 시작).
+        // 턴 시작 줄은 단계를 바꾸기 전에 남기므로 "턴 시작"으로
+        string phase = _aiTurn != null || message.StartsWith("🤖", StringComparison.Ordinal) ? "상대 턴"
+            : message.StartsWith("=== ", StringComparison.Ordinal) && message.Contains("턴 시작", StringComparison.Ordinal) ? "턴 시작"
+            : PhaseLabel(State.CurrentPhase);
+        string entry = $"[T{State.CurrentTurn} | {phase} | M:{State.MemoryGauge:+#;-#;0}] {KoreanNameLocalizer.Localize(message)}";
         State.ActionLogs.Add(entry);
     }
 

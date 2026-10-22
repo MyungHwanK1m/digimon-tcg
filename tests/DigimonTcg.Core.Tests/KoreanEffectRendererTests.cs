@@ -167,4 +167,26 @@ public class KoreanEffectRendererTests
         // "이 효과로 등장한 카드의 【등장 시】 효과는 발휘하지 않는다"를 빼먹지 않는다 (BT2-038)
         Assert.Contains("【등장 시】 효과는 발휘하지 않는다", R("[When Digivolving] You may play 1 yellow Tamer card from your hand without paying the cost. [On Play] effects of Tamers played by this effect don't activate."));
     }
+
+    [Fact]
+    public void ScreenCheckSentences_ShouldRender()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        // 앞에 오는 기간 (BT24-072)
+        Assert.Contains("상대의 턴 종료 시까지, 특징으로", R("[On Play] By trashing 1 card in your hand, until your opponent's turn ends, 1 of your Digimon with the [Demon], [Shaman] or [Titan] trait gains ＜Blocker＞ and ＜Retaliation＞."));
+        Assert.Contains("이거나 특징으로", R("[Your Turn] While this Digimon is [Titamon] or has the [Titan] trait, it gains ＜Security A. +1＞."));
+        Assert.Equal("【어택 시】 [턴에 1회] 서로 《1 드로우》 (자신의 덱에서 카드를 1장 드로우한다).", R("[When Attacking] [Once Per Turn] Both players ＜Draw 1＞"));
+        Assert.Equal("【자신의 턴】 이 디지몬의 어택의 대상은 변경되지 않는다.", R("[Your Turn] This Digimon's attack target can't change."));
+        Assert.Equal("【자신의 턴 종료 시】 자신의 디지몬 1마리로 어택할 수 있다.", R("[End of Your Turn] 1 of your Digimon may attack."));
+        Assert.Contains("진화원이 5장 이상인 이 디지몬으로 레스트시키지 않고 어택할 수 있다", R("[End of Your Turn] This Digimon with 5 or more digivolution cards may attack without suspending."));
+        Assert.Contains("상대의 디지몬의 효과를 받지 않는다", R("[On Play] Until your opponent's turn ends, their Digimon's effects don't affect 1 of your Digimon."));
+    }
+
+    [Fact]
+    public void NoOfficialCardTraits_ShouldUseTheTraitGlossary()
+    {
+        if (KoreanCardData.Count == 0) return;   // 공식 한글 데이터가 없는 PC
+        var card = new CardData { CardId = "TEST-NOOFF-TRAIT", Name = "Testmon", Type = CardType.Digimon, Traits = new() { "Vaccine", "Shaman", "TS" } };
+        Assert.Equal(new[] { "백신종", "신인형", "TS" }, KoreanCardData.DisplayTraits(card));
+    }
 }

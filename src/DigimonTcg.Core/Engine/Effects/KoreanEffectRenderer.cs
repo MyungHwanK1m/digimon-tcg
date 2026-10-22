@@ -238,6 +238,9 @@ public static class KoreanEffectRenderer
     /// <summary>동작 하나 (앞뒤 기간 포함) → 활용된 한글</summary>
     private static string? Act(string s, Form form)
     {
+        // 앞에 오는 기간 "Until your opponent's turn ends, 1 of your Digimon gains ~" → 뒤로 옮겨 같은 처리
+        if (Regex.Match(s, @"^(?<d>until [^,]+), (?<rest>.+)$", RegexOptions.IgnoreCase) is { Success: true } lead)
+            s = $"{lead.Groups["rest"].Value} {lead.Groups["d"].Value.ToLowerInvariant()}";
         var (dur, core) = SplitDuration(s);
         var phrase = Core(core);
         if (phrase == null) return null;
@@ -382,6 +385,42 @@ public static class KoreanEffectRenderer
             }
             return new($"{fromKo} {pp}{J(pp, "을", "를")} 코스트를 지불하지 않고 {(m.Groups["sus"].Success ? "레스트 상태로 " : "")}", play);
         }
+        // ---- 자주 보이는 짧은 동작 (화면 점검 2026-10-22) ----
+        if (Regex.IsMatch(s, @"^＜Delay＞$", RegexOptions.IgnoreCase))
+            return new(KeywordKo("Delay", true)!, KeywordAct);
+        if ((m = Regex.Match(s, @"^Both players ＜Draw (?<n>\d+)＞$", RegexOptions.IgnoreCase)).Success)
+            return new($"서로 {KeywordKo("Draw " + m.Groups["n"].Value, true)}", KeywordAct);
+        if (Regex.IsMatch(s, @"^(?:this Digimon's|its) attack target can't (?:change|be switched|be changed)$", RegexOptions.IgnoreCase))
+            return new("이 디지몬의 어택의 대상은 변경되지 ", Anhda);
+        if ((m = Regex.Match(s, @"^change the attack target to (?<t>1 of your (?:suspended |unsuspended )?Digimon(?: with [^,]+?)?|this Digimon)$", RegexOptions.IgnoreCase)).Success && TargetKo(m.Groups["t"].Value) is { } chg)
+            return new($"어택의 대상을 {chg}{J(chg, "으로", "로")} ", Ha("변경"));
+        if ((m = Regex.Match(s, @"^(?<t>this Digimon|it|that Digimon) (?<may>may )?unsuspends?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string t = m.Groups["t"].Value.Equals("this Digimon", StringComparison.OrdinalIgnoreCase) ? "이 디지몬" : "그 디지몬";
+            return new($"{t}{J(t, "을", "를")} 액티브로 ", m.Groups["may"].Success ? new Verb("할 수 있다", "할 수 있다", "하는 것으로", "하고") : Ha());
+        }
+        // 효과로 하는 어택: "1 of your Digimon may attack" · "this Digimon may attack" · "it may attack"
+        if ((m = Regex.Match(s, @"^(?<t>\d+ of your Digimon(?: with [^,]+?)?|this Digimon|it|that Digimon|the DNA digivolved Digimon|that DNA digivolved Digimon)(?: with (?<n>\d+) or more digivolution cards)? (?<may>may )?attack(?<who> a player| your opponent| an opponent's Digimon| your opponent's Digimon)?(?<nosus> without suspending)?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string atkWho = m.Groups["t"].Value;
+            string? t = atkWho.Equals("this Digimon", StringComparison.OrdinalIgnoreCase) ? "이 디지몬" : Regex.IsMatch(atkWho, @"^(?:it|that|the)", RegexOptions.IgnoreCase) ? "그 디지몬" : TargetKo(atkWho);
+            if (t == null) return null;
+            if (m.Groups["n"].Success) t = $"진화원이 {m.Groups["n"].Value}장 이상인 {t}";   // "this Digimon with 5 or more digivolution cards"
+            string whom = m.Groups["who"].Value.Contains("player", StringComparison.OrdinalIgnoreCase) || m.Groups["who"].Value.Trim().Equals("your opponent", StringComparison.OrdinalIgnoreCase) ? "플레이어에게 "
+                : m.Groups["who"].Success ? "상대의 디지몬에게 " : "";
+            string nosus = m.Groups["nosus"].Success ? "레스트시키지 않고 " : "";
+            var atk = new Verb("어택한다", "어택할 수 있다", "어택하는 것으로", "어택하고");
+            return new($"{t}{(J(t, "으로", "로"))} {nosus}{whom}", m.Groups["may"].Success ? new Verb("어택할 수 있다", "어택할 수 있다", "어택하는 것으로", "어택하고") : atk);
+        }
+        // "Your opponent's effects don't affect this Digimon" · "their Digimon's effects don't affect 1 of your Digimon"
+        if ((m = Regex.Match(s, @"^(?:your opponent's|their|the opponent's) (?<dig>Digimon's )?effects don't affect (?<t>this Digimon|it|1 of your Digimon(?: with [^,]+?)?)$", RegexOptions.IgnoreCase)).Success)
+        {
+            string t = m.Groups["t"].Value.Equals("this Digimon", StringComparison.OrdinalIgnoreCase) ? "이 디지몬" : m.Groups["t"].Value.Equals("it", StringComparison.OrdinalIgnoreCase) ? "그 디지몬" : TargetKo(m.Groups["t"].Value) ?? "";
+            if (t.Length == 0) return null;
+            return new($"{t}{J(t, "은", "는")} 상대의 {(m.Groups["dig"].Success ? "디지몬의 " : "")}효과를 받지 ", Anhda);
+        }
+        if (Regex.IsMatch(s, @"^play this card without battling and without paying (?:the|its) (?:memory )?cost$", RegexOptions.IgnoreCase))
+            return new("배틀하지 않고, 이 카드를 코스트를 지불하지 않고 ", Siki("등장"));
         // ---- 7단계 (벗어나지 않음 · 레스트 / 액티브 불가 · 주인 없는 대상 · DNA 진화 · 링크 · 앞면 시큐리티) ----
         if ((m = Regex.Match(s, @"^(?:prevent (?:it|that Digimon|this Digimon|them|those Digimon) from (?:leaving(?: the battle area)?|being deleted)|(?<one>1 of those Digimon|it|they|that Digimon|this Digimon) (?:doesn't|don't|does not|do not) leave(?: the battle area)?|prevent (?:that|its|this|the) deletion|(?:it|this Digimon|that Digimon) (?:isn't|is not) deleted)$", RegexOptions.IgnoreCase)).Success)
         {
@@ -696,6 +735,12 @@ public static class KoreanEffectRenderer
             return Be($"이 디지몬이 Lv.{m.Groups["n"].Value}{(m.Groups["dir"].Success ? " " + Dir(m.Groups["dir"].Value) : "")}");
         if ((m = Regex.Match(cond, @"^(?:this Digimon|it) has ＜(?<k>[^＞]+?)\s*＞$", RegexOptions.IgnoreCase)).Success && KeywordKo(m.Groups["k"].Value, false) is { } hk)
             return new($"이 디지몬이 {hk}{J(hk, "을", "를")} 가지고 있을 때,", $"이 디지몬이 {hk}{J(hk, "을", "를")} 가지는 동안,");
+        // "this Digimon is [Titamon] or has the [Titan] trait" → 이 디지몬이 「티타몬」이거나 특징으로 「타이탄족」을 가질 때
+        if ((m = Regex.Match(cond, $@"^(?:this Digimon|it) is (?<n>{TargetSpec.NameList}) or has (?:the )?(?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
+        {
+            string n = NamesKo(m.Groups["n"].Value), x = NamesKo(m.Groups["x"].Value, trait: true);
+            return new($"이 디지몬이 {n}이거나 특징으로 {x}{J(x, "을", "를")} 가질 때,", $"이 디지몬이 {n}이거나 특징으로 {x}{J(x, "을", "를")} 가지는 동안,");
+        }
         if ((m = Regex.Match(cond, $@"^(?:this Digimon|it) has (?:the )?(?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
         {
             string x = NamesKo(m.Groups["x"].Value, trait: true);
@@ -788,6 +833,15 @@ public static class KoreanEffectRenderer
         if (Regex.IsMatch(ev, @"^this Digimon checks (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase)) return "이 디지몬이 앞면의 시큐리티를 체크했을 때,";
         if (Regex.IsMatch(ev, @"^(?:any of |one of )?your Digimon checks? (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase)) return "자신의 디지몬이 앞면의 시큐리티를 체크했을 때,";
         if (Regex.IsMatch(ev, @"^your hand is trashed from$|^cards? (?:are|is) trashed from your hand$", RegexOptions.IgnoreCase)) return "자신의 패가 파기되었을 때,";
+        if (Regex.IsMatch(ev, @"^this card is trashed from (?:the|your) hand$", RegexOptions.IgnoreCase)) return "이 카드가 패에서 파기되었을 때,";
+        if (Regex.IsMatch(ev, @"^effects trash this card from (?:the|your) security stack$|^this card is trashed from (?:the|your) security stack by (?:an )?effects?$", RegexOptions.IgnoreCase)) return "효과로 이 카드가 시큐리티에서 파기되었을 때,";
+        // 이름 주어: "When any of your [Suzune Kazuki]s are played" · "When any of your [Owen Dreadnought]s suspend"
+        if ((m = Regex.Match(ev, $@"^(?:one of |any of )?your (?<x>{TargetSpec.NameList})(?:s|'s)? (?<v>(?:is|are) played|suspends?|become suspended|is suspended|are suspended)$", RegexOptions.IgnoreCase)).Success)
+        {
+            string x = NamesKo(m.Groups["x"].Value);
+            return $"자신의 {x}{J(x, "이", "가")} {(m.Groups["v"].Value.Contains("played", StringComparison.OrdinalIgnoreCase) ? "등장했을" : "레스트했을")} 때,";
+        }
+        if (Regex.IsMatch(ev, @"^(?:one of |any of )?your Digimon suspends?$|^any of your Digimon suspend$", RegexOptions.IgnoreCase)) return "자신의 디지몬이 레스트 상태가 되었을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon (?:unsuspends|becomes unsuspended)$", RegexOptions.IgnoreCase)) return "이 디지몬이 액티브가 되었을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon (?:suspends|becomes suspended|is suspended)$", RegexOptions.IgnoreCase)) return "이 디지몬이 레스트 상태가 되었을 때,";
         if (Regex.IsMatch(ev, @"^this Digimon (?:becomes unsuspended|unsuspends) during your main phase$", RegexOptions.IgnoreCase)) return "자신의 메인 페이즈에 이 디지몬이 액티브가 되었을 때,";
