@@ -219,4 +219,10 @@ public sealed class CardScript
 
     /// <summary>"이 카드를 등장시킬 때 / 사용할 때 코스트 -N" — (자신의 필드, 상대의 필드)를 받아 줄일 코스트를 돌려준다</summary>
     public Func<PlayerZones, PlayerZones, int>? PlayCostReduction { get; set; }
+
+    /// <summary>"When this card would be played, by deleting 1 of your Digimon, reduce the play cost by 4." — 등장할 때 비용을 낼지 묻는 코스트 감소</summary>
+    public List<PlayCostOption> PlayCostOptions { get; } = new();
 }
+
+/// <summary>등장할 때 고르는 코스트 감소: 비용(낼 수 있는지 · 내기 · 추천 · 설명)을 내면 Reduce만큼 줄인다</summary>
+public sealed record PlayCostOption(int Reduce, Func<EffectContext, bool> CanPay, Action<EffectContext> Pay, Func<EffectContext, bool> Recommend, string Describe);

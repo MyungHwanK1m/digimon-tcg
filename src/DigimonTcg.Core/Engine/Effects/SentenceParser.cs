@@ -178,6 +178,16 @@ internal static class SentenceParser
             def?.Digisorption(int.Parse(digisorption.Groups["n"].Value));
             return null;
         }
+        // 비용을 내는 코스트 감소: "When this card would be played, by deleting 1 of your Digimon, reduce the play cost by 4."
+        //  · "When you would play this card from your hand, you may delete 1 of your [Diaboromon] to reduce this card's play cost by 12."
+        var paid = Regex.Match(Normalize(clause), @"^(?:\[[^\]]+\]\s*)*When (?:this card would be played(?: from (?:the|your) hand)?|you would play this (?:card|Digimon)(?: from (?:the|your) hand)?), (?:by (?<cost>[^,]+?), reduce|you may (?<verb>delete|trash|suspend|return|place)(?<obj> .+?) to reduce) (?:the|its|this card's) (?:play |memory )?cost by (?<n>\d+)\.?$", RegexOptions.IgnoreCase);
+        if (paid.Success)
+        {
+            string costText = paid.Groups["cost"].Success ? paid.Groups["cost"].Value : $"{Gerund(paid.Groups["verb"].Value)}{paid.Groups["obj"].Value}";
+            if (ParseCost(costText, card) is not { } payCost) return $"미지원 비용 (코스트 감소: by {costText})";
+            def?.OptionalPlayCostReduction(new PlayCostOption(int.Parse(paid.Groups["n"].Value), payCost.CanPay, payCost.Pay, payCost.Recommend, payCost.Describe));
+            return null;
+        }
         // 코스트 감소: "When this card would be played, if you have ~, reduce the play cost by 4."
         //  · "When you would play this card from your hand, reduce its play cost by 1 if you have a blue Digimon in play."
         //  · "~, reduce the play cost by 2 for each of your opponent's Digimon" · "~ by 4 for every 10 cards in your trash"

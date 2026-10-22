@@ -522,6 +522,7 @@ public partial class GoldfishEngine
         State.Player.Hand.Remove(card);
         var xros = card.Type == CardType.Digimon ? TakeXrosMaterials(State.Player, card) : new List<CardData>();   // 디지크로스 재료 (1장마다 코스트 -N)
         int cost = Math.Max(0, CardScripts.EffectivePlayCost(State.Player, card, State.DummyOpponent) - XrosReduction(card, xros.Count));   // 카드의 코스트 감소 효과 반영
+        cost = ApplyPlayCostOptions(State.Player, card, cost);   // "by ~ing, reduce the play cost" — 비용을 낼지 묻는다
         State.MemoryGauge -= cost;
         State.TotalMemorySpent += cost;
 
@@ -1712,10 +1713,12 @@ public partial class GoldfishEngine
         opp.Hand.Remove(card);
         int beforeMem = ctx.Memory;
         var xros = TakeXrosMaterials(opp, card);   // 디지크로스: AI는 패의 카드만
+        // 코스트는 필드에 놓기 전에 정한다 (플레이어와 같다 — "by deleting 1 of your Digimon"이 이 카드를 고르지 않게)
+        int cost = Math.Max(0, CardScripts.EffectivePlayCost(opp, card, State.Player) - XrosReduction(card, xros.Count));
+        cost = ApplyPlayCostOptions(opp, card, cost);
         var summoned = new CardInstance(card, State.CurrentTurn) { IsOwnersTurn = true };
         PlaceXrosMaterials(summoned, xros);
         opp.BattleArea.Add(summoned);
-        int cost = Math.Max(0, CardScripts.EffectivePlayCost(opp, card, State.Player) - XrosReduction(card, xros.Count));
         ctx.Memory -= cost;
         RecalculateFieldBuffs();
         Log($"🤖 [AI 등장] [{card.Name}(Lv.{card.Level}, 코스트 {cost})] 소환! (AI 메모리: +{beforeMem} → {ctx.Memory})");

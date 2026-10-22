@@ -141,6 +141,13 @@ public sealed class CardScriptDefinition
 
     public CardScriptDefinition ReducePlayCost(Func<PlayerZones, int> reduction) => ReducePlayCost((z, _) => reduction(z));
 
+    /// <summary>등장할 때 비용을 내면 코스트 -N ("When this card would be played, by ~ing, reduce the play cost by N")</summary>
+    public CardScriptDefinition OptionalPlayCostReduction(PlayCostOption option)
+    {
+        _script.PlayCostOptions.Add(option);
+        return this;
+    }
+
     /// <summary>코스트 감소 (자신의 필드, 상대의 필드 — 상대를 모르면 빈 필드)</summary>
     public CardScriptDefinition ReducePlayCost(Func<PlayerZones, PlayerZones, int> reduction)
     {
