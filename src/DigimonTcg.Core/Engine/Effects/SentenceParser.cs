@@ -435,7 +435,7 @@ internal static class SentenceParser
             cond = c =>
             {
                 if (baseCond != null && !baseCond(c)) return false;
-                if (!canPay(c) || !c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] {describe} 효과를 발휘할까요?", recommend(c))) return false;
+                if (!PayOrSkip(c, canPay, recommend, describe)) return false;
                 pay(c);
                 return true;
             };
@@ -1627,7 +1627,7 @@ internal static class SentenceParser
             var innerStep = inner.Step;
             Action<EffectContext> paidAct = c =>
             {
-                if (!canPay(c) || !c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] {describe} 효과를 발휘할까요?", recommend(c))) { c.LastStepResolved = false; return; }
+                if (!PayOrSkip(c, canPay, recommend, describe)) { c.LastStepResolved = false; return; }
                 pay(c);
                 RunStep(innerStep, c);
             };
@@ -3331,6 +3331,24 @@ internal static class SentenceParser
         p.Zone != null ? p.Zone.Remove(p.Card) : c.Self?.TakeSource(x => ReferenceEquals(x, p.Card)) != null;
 
     /// <summary>효과 결과 기록: [메인] · [시큐리티]는 결과 메시지로, 그 밖엔 로그로</summary>
+    /// <summary>
+    /// 비용("By ~ing, ~")을 낼지: 낼 수 없거나 내지 않기로 하면 로그를 남긴다 (조용히 넘어가면 효과가 안 나온 것처럼 보인다)
+    /// </summary>
+    private static bool PayOrSkip(EffectContext c, Func<EffectContext, bool> canPay, Func<EffectContext, bool> recommend, string describe)
+    {
+        if (!canPay(c))
+        {
+            c.Log($"[{c.Card.Name}] 비용을 낼 수 없어 효과를 발휘하지 않습니다 ({describe} 발휘하는 효과)");
+            return false;
+        }
+        if (!c.Engine.AskYesNo(c.Owner, c.Self, $"[{c.Card.Name}] {describe} 효과를 발휘할까요?", recommend(c)))
+        {
+            c.Log($"[{c.Card.Name}] 효과를 발휘하지 않았습니다 ({describe} 발휘하는 효과)");
+            return false;
+        }
+        return true;
+    }
+
     private static void Emit(EffectContext c, string label, string text, bool attackerRemoved = false)
     {
         if (attackerRemoved) c.AttackerRemoved = true;
