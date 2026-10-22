@@ -198,6 +198,28 @@ public class AiPolicyTests
     }
 
     [Fact]
+    public void Smart_ShouldUseADpBuffOption_OnlyWhenItWinsTheBlockedAttack()
+    {
+        // 그레이몬 4000은 코어드라몬 ≪블로커≫ 6000에게 막혀 진다 → 섀도 윙(이 턴 DP +3000, 코스트 1)이면 7000으로 이긴다
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-07"]);
+        state.DummyOpponent.Hand.Add(cards["ST1-13"]);
+        var smart = new SmartAiPolicy();
+
+        Assert.Null(smart.ChooseOption(engine, memory: 3, beforeAttacks: true));   // 블로커가 없으면 버프가 어택을 바꾸지 않는다
+
+        Field(state.Player, cards["ST1-06"]);
+        var use = smart.ChooseOption(engine, memory: 3, beforeAttacks: true);
+        Assert.NotNull(use);
+        Assert.Equal("ST1-13", use!.Value.Card.CardId);
+        Assert.Same(attacker, use.Value.Target);
+        Assert.Equal(4000, attacker.GetCurrentDP());                                // 판단하느라 얹어 본 DP는 되돌린다
+
+        Assert.Null(smart.ChooseOption(engine, memory: 0, beforeAttacks: true));   // 메모리를 상대에게 넘기면서까지 쓰지 않는다
+        Assert.Null(smart.ChooseOption(engine, memory: 3, beforeAttacks: false));  // 어택이 끝난 뒤에는 의미 없다
+    }
+
+    [Fact]
     public void EffectAttack_ShouldNotCountTheAttackerAsLost()
     {
         // "may attack" 효과 어택은 ≪에그제큐트≫와 달리 어택 뒤 소멸하지 않는다 → 시큐리티 5장이어도 시큐리티로 간다

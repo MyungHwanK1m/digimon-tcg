@@ -3924,7 +3924,7 @@ public partial class MainWindow : Window
                     HighlightDropZone(BattleAreaZoneBorder, playCheck.CanExecute ? "#89B4FA" : "#F38BA8");
                     if (playCheck.CanExecute)
                     {
-                        _dragGhostBadgeText.Text = $"✨ 배틀 에어리어에 바로 등장! (코스트 {PlayCostNow(card)})";
+                        _dragGhostBadgeText.Text = $"✨ 배틀 에어리어에 바로 등장! (코스트 {DigimonPlayCostLabel(card)})";
                         _dragGhostBadgeBorder.Background = BrushFromHex("#89B4FA");
                         ShowToast(true, playCheck.GuideMessage);
                     }
@@ -4075,6 +4075,17 @@ public partial class MainWindow : Window
     /// <summary>지금 내면 실제로 낼 등장 · 사용 코스트 (코스트 감소 반영 — 카드에 인쇄된 값이 아니라)</summary>
     private int PlayCostNow(CardData card) => CardScripts.EffectivePlayCost(_gameState.Player, card, _gameState.DummyOpponent);
 
+    /// <summary>
+    /// 디지몬 등장 코스트 안내: "5", 또는 "비용을 내면 -N" 선택형 감소(예: 자신의 디지몬 1마리를 소멸시켜 -4)를 지금 낼 수 있으면 "5, 비용을 내면 1".
+    /// 실제로 낼지는 등장할 때 묻는다.
+    /// </summary>
+    private string DigimonPlayCostLabel(CardData card)
+    {
+        int now = PlayCostNow(card);
+        int withOption = _engine.PreviewPlayCostWithOptions(_gameState.Player, card);
+        return withOption < now ? $"{now}, 비용을 내면 {withOption}" : $"{now}";
+    }
+
     /// <summary>지금 진화하면 실제로 낼 진화 코스트 (진화 코스트 감소 반영, 비용을 내는 감소는 빼고)</summary>
     private int EvoCostNow(CardInstance target, CardData card) => _engine.PreviewEvoCost(_gameState.Player, target, card);
 
@@ -4088,7 +4099,7 @@ public partial class MainWindow : Window
                 if (intent.IsEvolve && intent.EvoTarget != null && ActionValidator.ValidateEvolution(_gameState, intent.EvoTarget, card).CanExecute)
                     return $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화 (코스트 {EvoCostNow(intent.EvoTarget, card)})";
                 if (intent.IsPlay && ActionValidator.ValidatePlay(_gameState, card).CanExecute)
-                    return $"✨ 배틀 에어리어에 등장 (코스트 {PlayCostNow(card)})";
+                    return $"✨ 배틀 에어리어에 등장 (코스트 {DigimonPlayCostLabel(card)})";
                 return null;
             case CardType.Option:
                 return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"⚡ [{card.DisplayName}] 사용 (코스트 {PlayCostNow(card)})" : null;

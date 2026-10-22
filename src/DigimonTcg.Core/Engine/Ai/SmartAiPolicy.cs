@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using DigimonTcg.Core.Engine.Effects;
 using DigimonTcg.Core.Models;
 
@@ -96,7 +97,57 @@ public sealed class SmartAiPolicy : IAiPolicy
                 best = card;
             }
         }
-        return best == null ? null : new AiOptionUse(best, null);
+        if (best != null)
+            return new AiOptionUse(best, null);
+        return beforeAttacks ? ChooseBuffOption(engine, memory) : null;
+    }
+
+    private static readonly Regex BuffThisTurn = new(
+        @"이 턴 동안, 자신의 디지몬 1마리의 DP를 \+(\d+)|1 of your Digimon gets \+(\d+) DP for the turn",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 어택을 바꾸는 강화 옵션 — 어택할 수 있는 내 디지몬마다 DP +N을 잠깐 얹어 가장 좋은 어택 점수를 다시 재고,
+    /// 오른 만큼이 BuffOptionMinGain + 코스트 비용을 넘는 디지몬에게 쓴다 (지금 메모리 안에서만).
+    /// </summary>
+    private AiOptionUse? ChooseBuffOption(GoldfishEngine engine, int memory)
+    {
+        if (Tuning.BuffOptionMinGain <= 0)
+            return null;
+        var state = engine.State;
+        var ai = state.DummyOpponent;
+        var attackers = ai.BattleArea.Where(engine.CanAttackThisTurn).ToList();
+        if (attackers.Count == 0)
+            return null;
+        var targets = state.Player.BattleArea.Where(d => d.IsSuspended).Select(d => (CardInstance?)d).Append(null).ToList();
+        double BestAttack(CardInstance a) => targets.Max(t => AiBoard.AttackScore(state, a, t, Tuning));
+
+        AiOptionUse? best = null;
+        double bestGain = 0;
+        foreach (var card in ai.Hand.Where(c => c.Type == CardType.Option).Distinct())
+        {
+            if (BuffThisTurn.Match(AiBoard.MainPart(card.EffectText)) is not { Success: true } m)
+                continue;
+            int cost = CardScripts.EffectivePlayCost(ai, card, state.Player);
+            if (cost > memory || ActionValidator.MissingOptionColors(ai, card).Count > 0)
+                continue;
+            int bonus = int.Parse(m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value);
+            foreach (var a in attackers)
+            {
+                double before = BestAttack(a);
+                a.TemporaryDpBonus += bonus;     // 잠깐 얹어 보고 바로 되돌린다 (판단만, 상태는 그대로)
+                double after;
+                try { after = BestAttack(a); }
+                finally { a.TemporaryDpBonus -= bonus; }
+                double gain = after - before - cost * Tuning.OptionCostWeight;
+                if (gain >= Tuning.BuffOptionMinGain && gain > bestGain)
+                {
+                    bestGain = gain;
+                    best = new AiOptionUse(card, a);
+                }
+            }
+        }
+        return best;
     }
 
     public AiAttack? ChooseNextAttack(GoldfishEngine engine, int memory)
@@ -164,7 +215,7 @@ public sealed class SmartAiPolicy : IAiPolicy
         double bestScore = 0.5;
         foreach (var card in ai.Hand.Where(c => c.Type == CardType.Digimon).Distinct())
         {
-            int cost = CardScripts.EffectivePlayCost(ai, card, engine.State.Player);
+            int cost = engine.PreviewPlayCostWithOptions(ai, card);   // "비용을 내면 -N" 선택형 감소까지 (엔진이 AI 등장 때 추천대로 내는 것과 같은 기준)
             if (cost > memory + MaxMemoryHandOver)
                 continue;
             bool canGrow = ai.Hand.Any(h => h.Type == CardType.Digimon && h.EvoRequirementLevel == card.Level && h.EvoRequirementColor == card.Color);
@@ -299,4 +350,10 @@ public sealed record SmartAiTuning
     /// 지금 메모리 안에서 (상대에게 메모리를 넘기지 않고) 쓸 수 있을 때. 메모리를 상대에게 넘기는 템포 손해가 커서 이 기준이 승률에 낫다.
     /// </summary>
     public bool SituationalOptions { get; init; } = true;
+    /// <summary>
+    /// "이 턴 동안 자신의 디지몬 1마리 DP +N" 옵션: 어택 전에, 지금 메모리 안에서, 그 버프로 어떤 디지몬의 가장 좋은 어택 점수가
+    /// 이만큼(+ 코스트 비용) 오를 때만 쓴다 (지던 배틀을 이기게 되거나 블로커를 넘는 경우). 0 이하 = 쓰지 않음.
+    /// 720판 측정: 쓰지 않을 때 66.7% (옵션 0번) → 1.5에서 67.6% (옵션 79번), 1.0 · 2.5도 67.5 ~ 67.6%.
+    /// </summary>
+    public double BuffOptionMinGain { get; init; } = 1.5;
 }
