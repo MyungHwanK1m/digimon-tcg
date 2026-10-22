@@ -10,6 +10,12 @@
 
 ---
 
+## v0.15.1 — 2026-10-22
+생성 한글: 어택 대상 변경 (v0.15.0의 새 시점 · 동작)
+- "어택의 대상이 변경되었을 때," · "이 디지몬의 어택의 대상이 변경되었을 때," · "자신의 디지몬의 어택의 대상이 변경되었을 때,"
+- "어택의 대상을 ~로 변경할 수 있다" — switch 표기, 이름만 있는 대상("자신의 「에오스몬」 1마리")
+- 테스트 1개 (KoreanEffectRendererTests)
+
 ## v0.15.0 — 2026-10-22
 어택 대상 변경 — 발동 시점 · 동작 · 잠금
 - 새 발동 시점: "When an attack target is switched" · "When attack targets change"(어느 쪽이든), "When this Digimon's attack target is switched", "When one of your Digimon's attack targets is switched" — 효과(RedirectAttack)나 ≪돌진≫으로 대상이 바뀐 뒤

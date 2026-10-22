@@ -203,4 +203,13 @@ public class KoreanEffectRendererTests
         Assert.Contains("자신의 다른 디지몬이 등장하거나 진화했을 때, 그중 특징으로", R("[Your Turn] When your other Digimon are played or digivolve, if any of them have the [ADVENTURE] trait, 1 of your Digimon gains ＜Alliance＞ for the turn."));
         Assert.Contains("패 또는 트래시의", R("[When Attacking] This Digimon may digivolve into a Digimon card with [Leomon] in its name in the hand or trash."));
     }
+
+    [Fact]
+    public void AttackTargetSwitchSentences_ShouldRender()
+    {
+        string? R(string en) => KoreanEffectRenderer.RenderClause(en);
+        Assert.StartsWith("【서로의 턴】 어택의 대상이 변경되었을 때,", R("[All Turns] When an attack target is switched, ＜Draw 1＞"));
+        Assert.StartsWith("【자신의 턴】 이 디지몬의 어택의 대상이 변경되었을 때,", R("[Your Turn] When this Digimon's attack target is switched, it gets +3000 DP for the turn."));
+        Assert.Contains("어택의 대상을 레스트 상태인 자신의 디지몬 1마리로 변경할 수 있다", R("[Opponent's Turn] When one of your opponent's Digimon attacks, you may switch the attack target to 1 of your suspended Digimon."));
+    }
 }

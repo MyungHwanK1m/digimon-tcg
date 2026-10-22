@@ -393,7 +393,9 @@ public static class KoreanEffectRenderer
             return new($"서로 {KeywordKo("Draw " + m.Groups["n"].Value, true)}", KeywordAct);
         if (Regex.IsMatch(s, @"^(?:this Digimon's|its) attack target can't (?:change|be switched|be changed)$", RegexOptions.IgnoreCase))
             return new("이 디지몬의 어택의 대상은 변경되지 ", Anhda);
-        if ((m = Regex.Match(s, @"^change the attack target to (?<t>1 of your (?:suspended |unsuspended )?Digimon(?: with [^,]+?)?|this Digimon)$", RegexOptions.IgnoreCase)).Success && TargetKo(m.Groups["t"].Value) is { } chg)
+        if ((m = Regex.Match(s, @"^(?:change|switch) the attack target to (?<t>1 of your .+|this Digimon)$", RegexOptions.IgnoreCase)).Success
+            && (TargetKo(m.Groups["t"].Value)
+                ?? (Regex.Match(m.Groups["t"].Value, $@"^1 of your (?<x>{TargetSpec.NameList})$", RegexOptions.IgnoreCase) is { Success: true } nm ? $"자신의 {NamesKo(nm.Groups["x"].Value)} 1마리" : null)) is { } chg)
             return new($"어택의 대상을 {chg}{J(chg, "으로", "로")} ", Ha("변경"));
         if ((m = Regex.Match(s, @"^(?<t>this Digimon|it|that Digimon) (?<may>may )?unsuspends?$", RegexOptions.IgnoreCase)).Success)
         {
@@ -854,6 +856,10 @@ public static class KoreanEffectRenderer
         if (Regex.IsMatch(ev, @"^(?:any of |one of )?your Digimon checks? (?:a )?face[- ]up security cards?$", RegexOptions.IgnoreCase)) return "자신의 디지몬이 앞면의 시큐리티를 체크했을 때,";
         if (Regex.IsMatch(ev, @"^your hand is trashed from$|^cards? (?:are|is) trashed from your hand$", RegexOptions.IgnoreCase)) return "자신의 패가 파기되었을 때,";
         if (Regex.IsMatch(ev, @"^this card is trashed from (?:the|your) hand$", RegexOptions.IgnoreCase)) return "이 카드가 패에서 파기되었을 때,";
+        // 어택 대상이 바뀌었을 때 (v0.15.0 — SentenceParser와 같은 표기)
+        if (Regex.IsMatch(ev, @"^(?:an|the) attack targets? (?:is|are) (?:switched|changed)$|^attack targets? (?:change|changes|switch|switches)$", RegexOptions.IgnoreCase)) return "어택의 대상이 변경되었을 때,";
+        if (Regex.IsMatch(ev, @"^this Digimon's attack target (?:is switched|is changed|changes|switches)$", RegexOptions.IgnoreCase)) return "이 디지몬의 어택의 대상이 변경되었을 때,";
+        if (Regex.IsMatch(ev, @"^(?:one|any) of your Digimon's attack targets? (?:is|are) (?:switched|changed)$", RegexOptions.IgnoreCase)) return "자신의 디지몬의 어택의 대상이 변경되었을 때,";
         if ((m = Regex.Match(ev, @"^(?:one of |any of )?your (?<other>other )?Digimon (?:are|is) played or digivolves?$", RegexOptions.IgnoreCase)).Success)
             return $"자신의 {(m.Groups["other"].Success ? "다른 " : "")}디지몬이 등장하거나 진화했을 때,";
         if (Regex.IsMatch(ev, @"^effects trash this card from (?:the|your) security stack$|^this card is trashed from (?:the|your) security stack by (?:an )?effects?$", RegexOptions.IgnoreCase)) return "효과로 이 카드가 시큐리티에서 파기되었을 때,";
