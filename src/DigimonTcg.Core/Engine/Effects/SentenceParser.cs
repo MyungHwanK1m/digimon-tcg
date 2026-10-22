@@ -463,6 +463,8 @@ internal static class SentenceParser
         s = Regex.Replace(s, @"\bbatttle\b", "battle", RegexOptions.IgnoreCase);   // 원문 오타
         s = Regex.Replace(s, @"\b(rest|cards) the the (bottom|top)\b", "$1 to the $2", RegexOptions.IgnoreCase);   // 원문 오타 "Return the rest the the bottom"
         s = Regex.Replace(s, @"\bBy Reveal\b", "Reveal");   // 원문 오타 "By Reveal the top 4 cards"
+        // 어택: "you may attack with this Digimon without suspending it" → "this Digimon may attack without suspending"
+        s = Regex.Replace(s, @"\byou may attack with (?<t>this Digimon|it|that Digimon)(?<nosus> without suspending(?: it)?)?(?=[.,]|$)", "${t} may attack${nosus}", RegexOptions.IgnoreCase);
         // 진화: "you may digivolve this Digimon into ~" → "this Digimon may digivolve into ~" (주어를 앞으로)
         s = Regex.Replace(s, @"\b(?:you may )?digivolve (?<t>this Digimon|\d+ of your (?:other )?[^,.]*?Digimon(?: with [^,.]+?)?) into\b", "${t} may digivolve into", RegexOptions.IgnoreCase);
         // "~ for its digivolution cost. When it would digivolve by this effect, reduce the cost by 2." → "~ for its digivolution cost with the digivolution cost reduced by 2."
@@ -2552,6 +2554,26 @@ internal static class SentenceParser
         }
         if (security && card.Type == CardType.Digimon && Regex.IsMatch(s, @"^At the end of the battle, play this card without paying (?:the|its) (?:memory )?cost$", RegexOptions.IgnoreCase))
             return (c => { c.PlayAfterBattle = true; Emit(c, label, "배틀이 끝나면 이 카드를 코스트 없이 등장"); }, null);
+
+        // 효과로 어택: "This Digimon may attack" · "1 of your Digimon may attack your opponent's Digimon" · "It may attack a player" · "~ may attack without suspending"
+        if ((m = Regex.Match(s, @"^(?<t>.+?) may attack(?: (?<what>a player|your opponent|(?:your|an) opponent's Digimon))?(?<nosus> without suspending(?: it)?)?$", RegexOptions.IgnoreCase)).Success)
+        {
+            var target = TargetSpec.Parse(m.Groups["t"].Value);
+            if (target == null || target.Opponent || target.AnySide) return (null, $"미지원 대상 (어택): {m.Groups["t"].Value}");
+            string what = m.Groups["what"].Value.ToLowerInvariant();
+            var allowed = what.EndsWith("digimon") ? EffectAttackTarget.DigimonOnly : what.Length > 0 ? EffectAttackTarget.PlayerOnly : EffectAttackTarget.Any;
+            bool noSuspend = m.Groups["nosus"].Success;
+            target.PreferOwnSide = true;
+            target.ContextFilters.Add((c, d) => c.Engine.CanEffectAttack(c.Owner, d, noSuspend));   // 어택할 수 있는 디지몬 중에서 고른다
+            return (c =>
+            {
+                var attackers = Pick(target, c, security);
+                int attacked = 0;
+                foreach (var d in attackers)
+                    if (c.Engine.EffectAttack(c.Owner, d, allowed, noSuspend, $"{c.Card.Name} {label}")) attacked++;
+                if (attacked == 0) { c.LastStepResolved = false; Emit(c, label, "어택하지 않았습니다"); }
+            }, null);
+        }
 
         // ---- 대상을 가진 동작 ----
         if ((m = Regex.Match(s, @"^Delete (?<t>.+)$", RegexOptions.IgnoreCase)).Success)

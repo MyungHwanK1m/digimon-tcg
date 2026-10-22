@@ -33,6 +33,8 @@ public partial class GoldfishEngine
         public CardInstance? BlitzAttacker;   // ≪진격≫으로 메모리가 상대 쪽이어도 어택할 수 있는 AI 디지몬
         public int AttacksDeclared;           // 이번 턴에 정책에서 받은 어택 수 (무한 반복 방지)
         public bool EndPhase;                 // 턴 종료 단계 ([자신의 턴 종료 시] 효과 뒤 ≪볼텍스≫ · ≪에그제큐트≫ 어택)
+        public readonly Dictionary<CardInstance, CardInstance?> QueuedTargets = new(ReferenceEqualityComparer.Instance);   // 효과로 큐에 넣은 어택자 → 대상 (null = 시큐리티)
+        public readonly HashSet<CardInstance> NoSuspendAttackers = new(ReferenceEqualityComparer.Instance);                // "may attack without suspending"
     }
 
     private AiTurnContext? _aiTurn;
@@ -621,7 +623,7 @@ public partial class GoldfishEngine
     /// <summary>내 디지몬이 상대 디지몬을 어택한다 (검사 없이 — ≪볼텍스≫ · ≪에그제큐트≫도 쓴다). 반환: 결과 메시지</summary>
     private string PlayerAttackOnDigimonCore(CardInstance attacker, CardInstance defender)
     {
-        Suspend(attacker);
+        SuspendForAttack(attacker);   // "may attack without suspending"이면 레스트하지 않는다
         State.BlitzAttacker = null;
         _playerAttackRedirect = null;
         TriggerWhenAttackingEffects(attacker, defender);
@@ -692,7 +694,7 @@ public partial class GoldfishEngine
     /// <summary>내 디지몬이 시큐리티(플레이어)를 어택한다 (검사 없이 — ≪에그제큐트≫도 쓴다)</summary>
     private ActionResult PlayerSecurityAttackCore(CardInstance attacker)
     {
-        Suspend(attacker);
+        SuspendForAttack(attacker);   // "may attack without suspending"이면 레스트하지 않는다
         State.BlitzAttacker = null;
         _playerAttackRedirect = null;
         TriggerWhenAttackingEffects(attacker, null);
@@ -1226,7 +1228,7 @@ public partial class GoldfishEngine
             }
 
             // 공격 도중 내 시큐리티 해머 스파크 등으로 AI 메모리가 0 미만이 되면 즉시 AI 턴 종료! (≪진격≫ 어택은 예외)
-            if (ctx.Memory < 0 && !ctx.EndPhase && !ReferenceEquals(ctx.Attackers.Peek(), ctx.BlitzAttacker))
+            if (ctx.Memory < 0 && !ctx.EndPhase && !ReferenceEquals(ctx.Attackers.Peek(), ctx.BlitzAttacker) && !ctx.QueuedTargets.ContainsKey(ctx.Attackers.Peek()))
             {
                 Log($"⚡ AI 메모리가 {ctx.Memory}(0 미만)이 되어 AI의 추가 공격 및 메인 페이즈가 즉시 종료됩니다!");
                 ctx.Attackers.Clear();
@@ -1236,10 +1238,14 @@ public partial class GoldfishEngine
             var aiAttacker = ctx.Attackers.Dequeue();
             if (ReferenceEquals(aiAttacker, ctx.BlitzAttacker))
                 ctx.BlitzAttacker = null;
-            if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || aiAttacker.IsSuspended || EffectRules.IsAttackLocked(State, aiAttacker))
+            // 효과 어택 ("may attack"): 큐에 넣을 때 고른 대상 (그사이 사라졌거나 어택할 수 없게 됐으면 시큐리티)
+            if (ctx.QueuedTargets.Remove(aiAttacker, out var queuedTarget))
+                ctx.AttackTarget = queuedTarget != null && State.Player.BattleArea.Contains(queuedTarget) && EffectRules.CanBeAttackTarget(queuedTarget) ? queuedTarget : null;
+            bool noSuspend = ctx.NoSuspendAttackers.Remove(aiAttacker);
+            if (!State.DummyOpponent.BattleArea.Contains(aiAttacker) || (aiAttacker.IsSuspended && !noSuspend) || EffectRules.IsAttackLocked(State, aiAttacker))
                 continue;
 
-            Suspend(aiAttacker);
+            if (!noSuspend) Suspend(aiAttacker);
             State.OpponentAttackedThisTurn = true;
 
             // AI 디지몬의 [어택 시] 효과 (플레이어와 같은 카드 스크립트) → ≪연계≫ · ≪돌진≫
@@ -1620,6 +1626,11 @@ public partial class GoldfishEngine
             ctx.EndPhase = true;
             _endOfTurnAttacked.Clear();
             AddEffectEvent(endLabel, CaptureEffectLogs(() => TriggerEndOfTurn(State.DummyOpponent)));
+        }
+        if (!State.IsGameOver && ctx.Attackers.Count > 0)
+        {
+            RunAiTurn();   // [자신의 턴 종료 시] "~ may attack" 효과로 큐에 들어온 어택 → 끝나면 다시 여기로
+            return;
         }
         if (!State.IsGameOver && NextAiEndOfTurnAttack() is { } eot)
         {
