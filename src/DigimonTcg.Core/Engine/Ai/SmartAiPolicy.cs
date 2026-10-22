@@ -44,7 +44,7 @@ public sealed class SmartAiPolicy : IAiPolicy
             {
                 if (!ActionValidator.ValidateEvolution(field, card).CanExecute)
                     continue;
-                int cost = ActionValidator.EvolutionCost(field, card);
+                int cost = engine.PreviewEvoCost(ai, field, card);   // 진화 코스트 감소 반영 (엔진이 실제로 받는 값)
                 if (cost > limit)
                     continue;
                 double score = 1.5                                          // Lv이 오르고 진화 보너스로 1장 드로우

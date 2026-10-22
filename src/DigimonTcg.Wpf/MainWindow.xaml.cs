@@ -3880,7 +3880,7 @@ public partial class MainWindow : Window
                     HighlightDropZone(info.OverBreedingZone ? BreedingAreaZoneBorder : BattleAreaZoneBorder, check.CanExecute ? "#A6E3A1" : "#F38BA8");
                     if (check.CanExecute)
                     {
-                        _dragGhostBadgeText.Text = $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화! (코스트 {card.EvoCost}, 1드로우)";
+                        _dragGhostBadgeText.Text = $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화! (코스트 {EvoCostNow(intent.EvoTarget, card)}, 1드로우)";
                         _dragGhostBadgeBorder.Background = BrushFromHex("#A6E3A1");
                         ShowToast(true, check.GuideMessage);
                     }
@@ -3899,7 +3899,7 @@ public partial class MainWindow : Window
                     HighlightDropZone(BattleAreaZoneBorder, playCheck.CanExecute ? "#89B4FA" : "#F38BA8");
                     if (playCheck.CanExecute)
                     {
-                        _dragGhostBadgeText.Text = $"✨ 배틀 에어리어에 바로 등장! (코스트 {card.PlayCost})";
+                        _dragGhostBadgeText.Text = $"✨ 배틀 에어리어에 바로 등장! (코스트 {PlayCostNow(card)})";
                         _dragGhostBadgeBorder.Background = BrushFromHex("#89B4FA");
                         ShowToast(true, playCheck.GuideMessage);
                     }
@@ -3962,7 +3962,7 @@ public partial class MainWindow : Window
                     bool overPlaymat = info.OverBattleZone || info.OverBreedingZone;
                     HighlightDropZone(overPlaymat ? BattleAreaZoneBorder : null, "#89B4FA");
                     _dragGhostBadgeText.Text = overPlaymat
-                        ? $"⚡ [{card.DisplayName}] 즉시 발동! (코스트 {card.PlayCost})"
+                        ? $"⚡ [{card.DisplayName}] 즉시 발동! (코스트 {PlayCostNow(card)})"
                         : $"🖱️ 배틀 에어리어에 드롭하여 [{card.DisplayName}] 발동!";
                     _dragGhostBadgeBorder.Background = BrushFromHex(overPlaymat ? "#A6E3A1" : "#F9E2AF");
                 }
@@ -3972,7 +3972,7 @@ public partial class MainWindow : Window
                 bool overPlaymat = info.OverBattleZone || info.OverBreedingZone || info.AllyDigimon != null;
                 HighlightDropZone(overPlaymat ? BattleAreaZoneBorder : null, "#A6E3A1");
                 _dragGhostBadgeText.Text = overPlaymat
-                    ? $"🎖️ 테이머 [{card.DisplayName}] 필드에 등장! (코스트 {card.PlayCost})"
+                    ? $"🎖️ 테이머 [{card.DisplayName}] 필드에 등장! (코스트 {PlayCostNow(card)})"
                     : "🖱️ 배틀 에어리어에 드롭하여 테이머를 등장시키세요!";
                 _dragGhostBadgeBorder.Background = BrushFromHex(overPlaymat ? "#A6E3A1" : "#F9E2AF");
             }
@@ -4037,6 +4037,12 @@ public partial class MainWindow : Window
     private string LinkLabel(CardData card, CardInstance target) =>
         $"🔗 [{target.TopCard.DisplayName}]에 링크" + (_engine.GetLinkCost(card) is int cost ? $" (코스트 {cost})" : "");
 
+    /// <summary>지금 내면 실제로 낼 등장 · 사용 코스트 (코스트 감소 반영 — 카드에 인쇄된 값이 아니라)</summary>
+    private int PlayCostNow(CardData card) => CardScripts.EffectivePlayCost(_gameState.Player, card, _gameState.DummyOpponent);
+
+    /// <summary>지금 진화하면 실제로 낼 진화 코스트 (진화 코스트 감소 반영, 비용을 내는 감소는 빼고)</summary>
+    private int EvoCostNow(CardInstance target, CardData card) => _engine.PreviewEvoCost(_gameState.Player, target, card);
+
     /// <summary>같은 자리에 놓았을 때 링크 말고 할 수 있는 동작 (없으면 null) — 진화 · 등장 · 옵션 · 테이머</summary>
     private string? DescribeOtherHandDrop(CardData card, (CardInstance? AllyDigimon, CardInstance? OpponentDigimon, bool OverBattleZone, bool OverBreedingZone, bool OverOpponentSecurityZone, bool OverOpponentBattleZone) info)
     {
@@ -4045,14 +4051,14 @@ public partial class MainWindow : Window
             case CardType.Digimon:
                 var intent = ResolveHandDigimonDropIntent(card, info);
                 if (intent.IsEvolve && intent.EvoTarget != null && ActionValidator.ValidateEvolution(_gameState, intent.EvoTarget, card).CanExecute)
-                    return $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화 (코스트 {ActionValidator.EvolutionCost(intent.EvoTarget, card)})";
+                    return $"🧬 [{intent.EvoTarget.TopCard.DisplayName}] 위에 진화 (코스트 {EvoCostNow(intent.EvoTarget, card)})";
                 if (intent.IsPlay && ActionValidator.ValidatePlay(_gameState, card).CanExecute)
-                    return $"✨ 배틀 에어리어에 등장 (코스트 {card.PlayCost})";
+                    return $"✨ 배틀 에어리어에 등장 (코스트 {PlayCostNow(card)})";
                 return null;
             case CardType.Option:
-                return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"⚡ [{card.DisplayName}] 사용 (코스트 {card.PlayCost})" : null;
+                return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"⚡ [{card.DisplayName}] 사용 (코스트 {PlayCostNow(card)})" : null;
             case CardType.Tamer:
-                return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"🎖️ 테이머 등장 (코스트 {card.PlayCost})" : null;
+                return ActionValidator.ValidatePlay(_gameState, card).CanExecute ? $"🎖️ 테이머 등장 (코스트 {PlayCostNow(card)})" : null;
             default:
                 return null;
         }
