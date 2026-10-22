@@ -28,7 +28,7 @@ public partial class GoldfishEngine
 
         int max = Math.Min(count, ranked.Count);
         int min = upTo ? 0 : max;
-        var picked = PlayerChoices!.ChooseDigimons(State, question, ranked, min, max, recommended);
+        var picked = PlayerChoices!.ChooseDigimons(State, KoreanNameLocalizer.Localize(question), ranked, min, max, recommended);
         return IsValidPick(picked, ranked, min, max) ? picked.ToList() : recommended;
     }
 
@@ -53,7 +53,7 @@ public partial class GoldfishEngine
 
         int max = Math.Min(count, ranked.Count);
         int min = upTo ? 0 : max;
-        var picked = PlayerChoices!.ChooseCards(State, question, zone, ranked, min, max, recommended);
+        var picked = PlayerChoices!.ChooseCards(State, KoreanNameLocalizer.Localize(question), zone, ranked, min, max, recommended);
         bool valid = picked != null
             && picked.Count >= min && picked.Count <= max
             && picked.All(i => i >= 0 && i < ranked.Count)

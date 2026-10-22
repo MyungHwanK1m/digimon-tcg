@@ -9,6 +9,7 @@ using Xunit;
 namespace DigimonTcg.Core.Tests;
 
 /// <summary>여러 장을 한 번에 고르는 선택 (디지몬 N마리 · 패 / 트래시 카드) — 플레이어만 묻고 AI · 테스트는 추천 답</summary>
+[Collection("KoreanCardData")]   // 질문의 카드 이름을 공식 한글로 바꾸는 KoreanNameLocalizer가 전역 한글 데이터를 읽는다
 public class MultiChoiceTests
 {
     /// <summary>정해 둔 답을 돌려주는 선택기 (호출 횟수와 받은 인자를 기록)</summary>
@@ -17,6 +18,7 @@ public class MultiChoiceTests
         public IReadOnlyList<CardInstance>? DigimonAnswer;
         public IReadOnlyList<int>? CardAnswer;
         public int Calls;
+        public string? LastQuestion;
         public (int Min, int Max, IReadOnlyList<int> Recommended)? LastCardArgs;
 
         public bool Confirm(GameState state, CardInstance? subject, string question, bool recommended) => recommended;
@@ -26,12 +28,14 @@ public class MultiChoiceTests
         public IReadOnlyList<CardInstance> ChooseDigimons(GameState state, string question, IReadOnlyList<CardInstance> options, int min, int max, IReadOnlyList<CardInstance> recommended)
         {
             Calls++;
+            LastQuestion = question;
             return DigimonAnswer ?? recommended;
         }
 
         public IReadOnlyList<int> ChooseCards(GameState state, string question, CardChoiceZone zone, IReadOnlyList<CardData> options, int min, int max, IReadOnlyList<int> recommended)
         {
             Calls++;
+            LastQuestion = question;
             LastCardArgs = (min, max, recommended);
             return CardAnswer ?? recommended;
         }
@@ -128,6 +132,22 @@ public class MultiChoiceTests
         Assert.Equal((1, 1), (choices.LastCardArgs!.Value.Min, choices.LastCardArgs.Value.Max));
         Assert.Equal(new[] { 0 }, choices.LastCardArgs.Value.Recommended);
         Assert.Equal(trash, picked);
+    }
+
+    [Fact]
+    public void ChoiceQuestions_ShouldShowOfficialKoreanCardNames()
+    {
+        // 효과 문장에서 온 영어 카드 이름 → 공식 한글 이름 (한글 데이터가 없는 PC에서는 그대로)
+        var (state, engine, choices, cards) = Setup();
+        const string question = "[MetalGarurumon] 효과로 고르세요.";
+        var digimon = new[] { new CardInstance(cards["ST1-02"], 1), new CardInstance(cards["ST1-03"], 1) };
+
+        engine.ChooseCards(state.Player, CardChoiceZone.Trash, new List<CardData> { cards["ST1-07"], cards["ST1-03"] }, 1, upTo: false, question);
+        Assert.Equal(KoreanNameLocalizer.Localize(question), choices.LastQuestion);
+        engine.AskDigimons(state.Player, digimon, 1, upTo: false, question);
+        Assert.Equal(KoreanNameLocalizer.Localize(question), choices.LastQuestion);
+        if (KoreanCardData.Count > 0)
+            Assert.Contains("메탈가루몬", choices.LastQuestion);
     }
 
     [Fact]
