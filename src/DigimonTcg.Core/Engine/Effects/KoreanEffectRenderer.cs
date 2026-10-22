@@ -590,6 +590,40 @@ public static class KoreanEffectRenderer
         if (Regex.IsMatch(s, @"^Change the attack target to this Digimon$", RegexOptions.IgnoreCase))
             return new("어택의 대상을 이 디지몬으로 ", Ha("변경"));
 
+        // 옵션을 코스트 없이 사용 — 공식: "자신의 패에서 사용 코스트 5 이하의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다"
+        if ((m = Regex.Match(s, $@"^Use (?:1|an?) (?<single>single-color )?(?:use cost (?<pc>\d+) or (?<pdir>lower|less|higher|more) )?(?<col>(?:{Colors}) )?Option card(?: with (?<filter>.+?))? (?:in|from) your (?<from>hand or under your Tamers|hand or trash|hand|trash) without paying (?:the|its) (?:memory |use )?cost$", RegexOptions.IgnoreCase)).Success)
+        {
+            var mods = new List<string>();
+            // 공식 순서: 색 → 조건 · 코스트 → 1색 → 옵션 카드 ("특징 「CS」를 가진 1색의 옵션 카드" · "퍼플인 사용 코스트 7 이하의 옵션 카드")
+            if (m.Groups["col"].Success) mods.Add($"{ColorKo(m.Groups["col"].Value.Trim())}인");
+            if (m.Groups["filter"].Success)
+            {
+                string f = m.Groups["filter"].Value;
+                Match fm;
+                if ((fm = Regex.Match(f, @"^an? (?:memory |use |play )?cost (?:of )?(?<n>\d+)(?: or (?<dir>less|lower|more|higher))?$", RegexOptions.IgnoreCase)).Success)
+                    mods.Add($"사용 코스트 {fm.Groups["n"].Value}{(fm.Groups["dir"].Success ? " " + Dir(fm.Groups["dir"].Value) : "")}의");
+                else if ((fm = Regex.Match(f, $@"^(?:the )?(?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
+                { string x = NamesKo(fm.Groups["x"].Value, trait: true); mods.Add($"특징으로 {x}{J(x, "을", "를")} 가진"); }
+                else if ((fm = Regex.Match(f, $@"^(?<x>{TargetSpec.NameList}) in (?:its|their) (?<w>names?|texts?)$", RegexOptions.IgnoreCase)).Success)
+                {
+                    string x = NamesKo(fm.Groups["x"].Value);
+                    mods.Add(fm.Groups["w"].Value.StartsWith("name", StringComparison.OrdinalIgnoreCase) ? $"명칭에 {x}{J(x, "을", "를")} 포함하는" : $"{x}{J(x, "이", "가")} 기술되어 있는");
+                }
+                else return null;
+            }
+            if (m.Groups["pc"].Success) mods.Add($"사용 코스트 {m.Groups["pc"].Value} {Dir(m.Groups["pdir"].Value)}의");
+            if (m.Groups["single"].Success) mods.Add("1색의");
+            string from = m.Groups["from"].Value.ToLowerInvariant() switch
+            {
+                "hand or under your tamers" => "자신의 패 또는 테이머 아래에서",
+                "hand or trash" => "자신의 패 또는 트래시에서",
+                "trash" => "자신의 트래시에서",
+                _ => "자신의 패에서",
+            };
+            string what = string.Join(" ", mods.Append("옵션 카드 1장"));
+            return new($"{from} {what}{J(what, "을", "를")} 코스트를 지불하지 않고 ", Ha("사용"));
+        }
+
         // ---- 진화 ----
         if ((m = Regex.Match(s, @"^reduce (?:the|its) digivolution cost by (?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
             return new($"지불하는 진화 코스트를 -{m.Groups["n"].Value} ", Ha());

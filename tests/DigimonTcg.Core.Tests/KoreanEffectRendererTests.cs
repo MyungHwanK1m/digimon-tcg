@@ -287,4 +287,15 @@ public class KoreanEffectRendererTests
     [InlineData("When any Digimon suspend", "디지몬이 레스트했을 때,")]
     public void TriggerVariants_ShouldUseOfficialNotation(string en, string ko) =>
         Assert.StartsWith($"【서로의 턴】 {ko} 《1 드로우》", KoreanEffectRenderer.RenderClause($"[All Turns] {en}, ＜Draw 1＞"));
+
+    [Theory]
+    // 옵션을 코스트 없이 사용 — 공식: "자신의 패에서 사용 코스트 5 이하의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다"
+    [InlineData("You may use 1 Option card with a cost of 5 or less in your hand without paying the cost.", "자신의 패에서 사용 코스트 5 이하의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
+    [InlineData("You may use 1 purple Option card with a cost of 6 or less from your hand without paying the cost.", "자신의 패에서 퍼플인 사용 코스트 6 이하의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
+    [InlineData("You may use 1 single-color Option card with the [CS] trait from your hand without paying the cost.", "자신의 패에서 특징으로 「CS」를 가진 1색의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
+    [InlineData("You may use 1 Option card with the [Three Musketeers] trait from your hand or under your Tamers without paying the cost.", "자신의 패 또는 테이머 아래에서 특징으로 「3총사」를 가진 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
+    [InlineData("You may use 1 use cost 3 or lower Option card with [Greymon] in its text from your hand or trash without paying the cost.", "자신의 패 또는 트래시에서 「그레이몬」이 기술되어 있는 사용 코스트 3 이하의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
+    [InlineData("You may use an Option card with a memory cost of 7 in your hand without paying its memory cost.", "자신의 패에서 사용 코스트 7의 옵션 카드 1장을 코스트를 지불하지 않고 사용할 수 있다.")]
+    public void UseOptionWithoutPaying_ShouldUseOfficialNotation(string en, string ko) =>
+        Assert.Equal($"【진화 시】 {ko}", KoreanEffectRenderer.RenderClause($"[When Digivolving] {en}"));
 }
