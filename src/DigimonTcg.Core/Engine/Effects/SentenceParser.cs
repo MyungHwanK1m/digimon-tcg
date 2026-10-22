@@ -463,6 +463,10 @@ internal static class SentenceParser
         s = Regex.Replace(s, @"\bbatttle\b", "battle", RegexOptions.IgnoreCase);   // 원문 오타
         s = Regex.Replace(s, @"\b(rest|cards) the the (bottom|top)\b", "$1 to the $2", RegexOptions.IgnoreCase);   // 원문 오타 "Return the rest the the bottom"
         s = Regex.Replace(s, @"\bBy Reveal\b", "Reveal");   // 원문 오타 "By Reveal the top 4 cards"
+        // 진화: "you may digivolve this Digimon into ~" → "this Digimon may digivolve into ~" (주어를 앞으로)
+        s = Regex.Replace(s, @"\b(?:you may )?digivolve (?<t>this Digimon|\d+ of your (?:other )?[^,.]*?Digimon(?: with [^,.]+?)?) into\b", "${t} may digivolve into", RegexOptions.IgnoreCase);
+        // "~ for its digivolution cost. When it would digivolve by this effect, reduce the cost by 2." → "~ for its digivolution cost with the digivolution cost reduced by 2."
+        s = Regex.Replace(s, @"(?<head>for its digivolution cost)\.\s*When (?:digivolving|(?:it|this Digimon|that Digimon) would digivolve) (?:by|with|using) this effect, (?:reduce|yellowuce) the (?:digivolution )?cost by (?<n>\d+)\.?", "${head} with the digivolution cost reduced by ${n}.", RegexOptions.IgnoreCase);   // "yellowuce" = 원문 오타
         s = Regex.Replace(s, @"\[(?<a>[^\]]+)\] trait or \[(?<b>[^\]]+)\] trait\b", "[${a}] or [${b}] trait");   // "the [A] trait or [B] trait" = "the [A] or [B] trait"
         // "Add 1 Digimon card and 1 Tamer card―both with the [Xros Heart] trait―among them" → 조건을 양쪽에 붙인다
         s = Regex.Replace(s, @"\b(?<a>\d+ (?:Digimon|Tamer|Option) cards?) and (?<b>\d+ (?:Digimon|Tamer|Option) cards?)\s*[―—-]\s*both (?<w>with [^―—]+?)\s*[―—-]\s*", "${a} ${w} and ${b} ${w} ", RegexOptions.IgnoreCase);
@@ -3013,7 +3017,7 @@ internal static class SentenceParser
         }
         // "1 of your Digimon may digivolve into [Greymon] in the hand without paying the cost" · "~ in the hand or trash" · "~ from your trash"
         // 육성: "1 of your Digimon in the breeding area may digivolve into ~" (육성 에어리어에서의 진화 — [진화 시]는 발휘하지 않는다)
-        if ((m = Regex.Match(s, @"^(?<t>(?<breed>(?:\d+ of )?your (?<bspec>[^,]*?)Digimon(?<bwith> with [^,]+?)? in (?:the|your) breeding area)|this Digimon|\d+ of your Digimon(?: with [^,]+?)?) (?:may )?digivolves? into (?<pick>.+?) (?:in|from) (?:the |your )?(?<from>hand or (?:the |your |from your )?trash|hand|trash)(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success)
+        if ((m = Regex.Match(s, @"^(?<t>(?<breed>(?:\d+ of )?your (?<bspec>[^,]*?)Digimon(?<bwith> with [^,]+?)? in (?:the|your) breeding area)|this Digimon|\d+ of your (?:other )?(?:[^,]*? )?Digimon(?: with [^,]+?)?) (?:may )?digivolves? into (?<pick>.+?) (?:in|from) (?:the |your )?(?<from>hand or (?:the |your |from your )?trash|hand|trash)(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success)
         {
             bool breed = m.Groups["breed"].Success;
             var target = breed ? TargetSpec.Parse("all of your " + m.Groups["bspec"].Value + "Digimon" + m.Groups["bwith"].Value) : TargetSpec.Parse(m.Groups["t"].Value);

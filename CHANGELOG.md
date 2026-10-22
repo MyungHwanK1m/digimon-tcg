@@ -10,6 +10,14 @@
 
 ---
 
+## v0.12.0 — 2026-10-22
+효과로 진화할 때 코스트 감소 · 주어가 뒤에 오는 진화 문장
+- "~ in your hand for its digivolution cost. When it would digivolve by this effect, reduce the cost by N." (앞 문장의 진화에 코스트 −N을 붙임, "When digivolving with this effect, ~" · 원문 오타 "yellowuce" 포함)
+- "You may digivolve this Digimon / 1 of your other Digimon into ~" → 주어를 앞으로 옮겨 읽음, 진화할 디지몬에 "other" · 특징 같은 조건 허용
+- 이 문장들이 읽히면서 "・" 고르기 효과(＜딜레이＞ 옵션 등)도 함께 동작
+- 시나리오 테스트 DigivolveCostReductionTests 2개
+- 도감 효과 문장 지원 6,290 → 6,359 / 10,279 (수정 전 지원되던 문장 중 깨진 것 0)
+
 ## v0.11.1 — 2026-10-22
 카드 한글 표시 점검 · 수정 (공식 한글 데이터가 있는 PC 기준 — 없으면 예전처럼 영어)
 - 로그 · 상대 턴 리플레이 · 알림(토스트) · 시큐리티 결과 · 확인 질문의 카드 이름을 공식 한글 이름으로 (예: [Chapmon] → [챠프몬], [MetalGarurumon] → [메탈가루몬]). 엔진 판정은 영어 이름 그대로
