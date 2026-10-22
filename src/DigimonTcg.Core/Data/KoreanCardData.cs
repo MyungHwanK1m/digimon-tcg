@@ -74,8 +74,11 @@ public static class KoreanCardData
 
     // ---- CardData 표시용 ----
 
+    /// <summary>이름 표시: 공식 한글 → (공식 한글이 없는 카드) 같은 영어 이름의 공식 한글 이름 → 영어 이름</summary>
     public static string DisplayName(CardData card) =>
-        Get(card.CardId) is { Name.Length: > 0 } ko ? ko.Name : card.Name;
+        Get(card.CardId) is { Name.Length: > 0 } ko ? ko.Name
+        : StarterDecks.IsBuiltInCard(card.CardId) ? card.Name
+        : Engine.Effects.KoreanNameLocalizer.KoreanNameFor(card.Name) ?? card.Name;
 
     /// <summary>
     /// 메인 효과 표시 — 테이머 · 옵션은 [시큐리티] 효과(하단 텍스트)까지 붙인다 (내장 카드와 같은 형식).
@@ -100,6 +103,9 @@ public static class KoreanCardData
         if (card.Type is CardType.Tamer or CardType.Option)
         {
             string sec = Clean(ko.SourceText);
+            // 공식 한글 데이터에 [시큐리티] 효과가 빠진 카드(BT11 옵션 등): 영어 [시큐리티] 효과의 생성 한글로 채운다
+            if (sec.Length == 0 && !main.Contains("시큐리티】") && !string.IsNullOrWhiteSpace(card.InheritedEffectText))
+                sec = Generated(card, inherited: true);
             return sec.Length == 0 ? main : main.Length == 0 ? sec : main + "\n" + sec;
         }
         return main;

@@ -50,9 +50,22 @@ public partial class GoldfishEngine
 
     public void Log(string message)
     {
-        string entry = $"[T{State.CurrentTurn} | {State.CurrentPhase} | M:{State.MemoryGauge:+#;-#;0}] {message}";
+        // 화면에 나가는 문장: 영어 카드 이름 → 공식 한글 이름 (엔진 판정은 영어 이름 그대로)
+        string entry = $"[T{State.CurrentTurn} | {PhaseLabel(State.CurrentPhase)} | M:{State.MemoryGauge:+#;-#;0}] {KoreanNameLocalizer.Localize(message)}";
         State.ActionLogs.Add(entry);
     }
+
+    /// <summary>로그 머리말의 단계 이름 (공식 한글판 표기)</summary>
+    private static string PhaseLabel(Phase phase) => phase switch
+    {
+        Phase.Active => "액티브",
+        Phase.Draw => "드로우",
+        Phase.Breeding => "육성",
+        Phase.Main => "메인",
+        Phase.TurnEnd => "턴 종료",
+        Phase.Setup => "준비",
+        _ => phase.ToString(),
+    };
 
     /// <summary>
     /// 덱 및 선택한 스테이지/상대방 덱으로 새 게임 초기화

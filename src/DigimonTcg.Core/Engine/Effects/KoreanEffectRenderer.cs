@@ -48,6 +48,10 @@ public static class KoreanEffectRenderer
         string clause = SentenceParser.NormalizeForRender(rawClause);
         clause = Regex.Replace(clause, @"^(?:Inherited|Security) Effect\s*", "", RegexOptions.IgnoreCase).Trim();
         clause = Regex.Replace(clause, @"\byou have don't have\b", "you don't have", RegexOptions.IgnoreCase);   // API 원문 오타
+        // API 원문의 짝 없는 괄호: "…cost.))" · "＜Security A. +1}＞"
+        while (clause.EndsWith(')') && clause.Count(ch => ch == ')') > clause.Count(ch => ch == '('))
+            clause = clause[..^1].TrimEnd();
+        if (!clause.Contains('{')) clause = clause.Replace("}", "");
         if (clause.Length == 0)
             return string.Empty;
 
@@ -61,6 +65,13 @@ public static class KoreanEffectRenderer
             var parts = Regex.Matches(clause, @"＜([^＞]+)＞").Select(m => KeywordKo(m.Groups[1].Value, withReminder: true)).ToList();
             return parts.All(p => p != null) ? string.Join(" ", parts) : null;
         }
+        // 링크 조건: "Link Requirements [Link] [Appmon] trait: Cost 2" → 〈링크〉특징 「어플몬」 : 코스트 2
+        if (Regex.Match(clause, @"^Link Requirements \[Link\]\s*(?<req>.+?)\s*:\s*Cost (?<n>\d+)\.?$", RegexOptions.IgnoreCase) is { Success: true } link
+            && SpecKo(link.Groups["req"].Value) is { } linkReq)
+            return $"〈링크〉{linkReq} : 코스트 {link.Groups["n"].Value} (패/배틀 에어리어에서 이 카드를 배틀 에어리어의 지정된 디지몬에 가로로 끼운다)";
+        // 사용 조건: "Use Requirement: Glowing Dawn trait" → 사용 조건: 특징「글로잉 던」
+        if (Regex.Match(clause, @"^Use Requirement:\s*(?<x>.+?)\s+trait\.?$", RegexOptions.IgnoreCase) is { Success: true } useReq)
+            return $"사용 조건: 특징「{TraitKo(useReq.Groups["x"].Value)}」";
         if (Regex.Match(clause, @"^(?:Ace )?Overflow ＜-(?<n>\d+)＞\.?$", RegexOptions.IgnoreCase) is { Success: true } of)
             return $"〈오버플로우 《-{of.Groups["n"].Value}》〉 (이 카드가 배틀 에어리어나 진화원에서 다른 곳으로 이동할 때, 메모리를 -{of.Groups["n"].Value} 한다)";
         if (Regex.Match(clause, @"^Your (?<who>.+?) can digivolve into this card in (?:your|the) hand for a (?:memory |digivolution )?cost of (?<n>\d+), ignoring (?:this card's )?digivolution requirements\.?$", RegexOptions.IgnoreCase) is { Success: true } sp
@@ -460,12 +471,14 @@ public static class KoreanEffectRenderer
             return new("어택의 대상을 이 디지몬으로 ", Ha("변경"));
 
         // ---- 진화 ----
-        if ((m = Regex.Match(s, @"^(?<t>this Digimon|\d+ of your Digimon(?: with [^,]+?)?) (?:may )?digivolves? into (?<pick>.+?) in (?:the|your) hand(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success
+        if ((m = Regex.Match(s, @"^(?<t>this Digimon|\d+ of your Digimon(?: with [^,]+?)?) (?<may>may )?digivolves? into (?<pick>.+?) in (?:the|your) hand(?: for (?:a digivolution cost of (?<cost>\d+)|its digivolution cost))? ?(?<free>without paying (?:the|its) (?:memory |digivolution )?cost|with the digivolution cost reduced by (?<red>\d+))?$", RegexOptions.IgnoreCase)).Success
             && TargetKo(m.Groups["t"].Value) is { } et && (PickKo("1 " + m.Groups["pick"].Value) ?? PickKo(m.Groups["pick"].Value)) is { } ep)
         {
             string how = m.Groups["free"].Value.StartsWith("without", StringComparison.OrdinalIgnoreCase) ? "코스트를 지불하지 않고 "
                 : m.Groups["red"].Success ? $"진화 코스트를 -{m.Groups["red"].Value} 하고 " : m.Groups["cost"].Success ? $"진화 코스트 {m.Groups["cost"].Value}로 " : "";
-            return new($"{et}{J(et, "을", "를")} 패의 {ep}{J(ep, "으로", "로")} {how}", new Verb("진화시킨다", "진화시킬 수 있다", "진화시키는 것으로", "진화시키고"));
+            // "this Digimon may digivolve ~" — 가운데의 may도 "~할 수 있다"
+            string plain = m.Groups["may"].Success ? "진화시킬 수 있다" : "진화시킨다";
+            return new($"{et}{J(et, "을", "를")} 패의 {ep}{J(ep, "으로", "로")} {how}", new Verb(plain, "진화시킬 수 있다", "진화시키는 것으로", "진화시키고"));
         }
         return null;
     }
@@ -607,7 +620,7 @@ public static class KoreanEffectRenderer
             return new($"이 디지몬이 {hk}{J(hk, "을", "를")} 가지고 있을 때,", $"이 디지몬이 {hk}{J(hk, "을", "를")} 가지는 동안,");
         if ((m = Regex.Match(cond, $@"^(?:this Digimon|it) has (?:the )?(?<x>{TargetSpec.NameList}) traits?$", RegexOptions.IgnoreCase)).Success)
         {
-            string x = NamesKo(m.Groups["x"].Value);
+            string x = NamesKo(m.Groups["x"].Value, trait: true);
             return new($"이 디지몬이 특징으로 {x}{J(x, "을", "를")} 가질 때,", $"이 디지몬이 특징으로 {x}{J(x, "을", "를")} 가지는 동안,");
         }
         if ((m = Regex.Match(cond, $@"^(?:this Digimon|it) has (?<x>{TargetSpec.NameList}) in its names?$", RegexOptions.IgnoreCase)).Success)
@@ -622,7 +635,7 @@ public static class KoreanEffectRenderer
         }
         if ((m = Regex.Match(cond, $@"^this Digimon's digivolution cards include (?:a |an )?(?:(?<kind>Digimon|Tamer) )?card with the (?<x>{TargetSpec.NameList}) traits?(?: or (?:a |an )?(?<color>{Colors}) Tamer card)?$", RegexOptions.IgnoreCase)).Success)
         {
-            string x = NamesKo(m.Groups["x"].Value);
+            string x = NamesKo(m.Groups["x"].Value, trait: true);
             string extra = m.Groups["color"].Success ? $" 또는 {ColorKo(m.Groups["color"].Value)}의 테이머 카드가" : "";
             return Have($"이 디지몬의 진화원에 특징으로 {x}{J(x, "을", "를")} 가진 카드{(extra.Length > 0 ? extra : "가")}");
         }
@@ -746,6 +759,10 @@ public static class KoreanEffectRenderer
             return $"{(m.Groups["who"].Value.Contains("opponent") ? "상대" : "자신")}의 {(m.Groups["z"].Value.Equals("hand", StringComparison.OrdinalIgnoreCase) ? "패" : "트래시")} {Per(m)}장마다";
         if ((m = Regex.Match(counter, @"^(?:(?<n>\d+) )?(?:cards? in this Digimon's digivolution cards|of this Digimon's digivolution cards|digivolution cards? (?:this Digimon has|under this Digimon))$", RegexOptions.IgnoreCase)).Success)
             return $"이 디지몬의 진화원 {Per(m)}장마다";
+        // "for each of your opponent's Digimon with ＜Security A.＞" → 《시큐리티 어택》을 가진 상대의 디지몬 1마리마다
+        if ((m = Regex.Match(counter, @"^(?:of your opponent's Digimon|Digimon your opponent has) with (?<k>＜[^＞]+＞)$", RegexOptions.IgnoreCase)).Success
+            && KeywordKo(m.Groups["k"].Value.Trim('＜', '＞'), withReminder: false) is { } withKw)
+            return $"{withKw}{J(withKw, "을", "를")} 가진 상대의 디지몬 1마리마다";
         if (Regex.IsMatch(counter, @"^Digimon deleted$", RegexOptions.IgnoreCase))
             return "소멸한 디지몬 1마리마다";
         if ((m = Regex.Match(counter, $@"^(?<x>{TargetSpec.NameList}) in this Digimon's digivolution cards$", RegexOptions.IgnoreCase)).Success)
@@ -1044,6 +1061,29 @@ public static class KoreanEffectRenderer
             return $"《스케이프고트》{R("이 디지몬이 자신의 효과 이외로 소멸할 때, 다른 자신의 디지몬 1마리를 소멸시키는 것으로, 소멸하지 않는다")}";
         if ((m = Regex.Match(en, @"^Training$", RegexOptions.IgnoreCase)).Success)
             return $"《트레이닝》{R("메인 중, 이 디지몬을 레스트시키는 것으로, 자신의 덱 위에서부터 1장을 이 디지몬의 진화원 아래에 뒷면으로 놓는다. 이 효과는 육성 에어리어에서도 발휘할 수 있다")}";
+        // 7단계 메커닉 키워드 (공식 한글 표기 《이름《조건》》 — 공식 표기가 없는 신규 키워드는 음역)
+        if ((m = Regex.Match(en, @"^Link \+(?<n>\d+)$", RegexOptions.IgnoreCase)).Success)
+            return $"《링크 +{m.Groups["n"].Value}》{R($"이 디지몬의 링크 매수 상한 +{m.Groups["n"].Value}")}";
+        if ((m = Regex.Match(en, @"^Fragment\s*\(?(?<n>\d+)\)?$", RegexOptions.IgnoreCase)).Success)
+            return $"《프래그먼트《{m.Groups["n"].Value}》》{R($"이 디지몬이 소멸할 때, 이 디지몬의 진화원을 {m.Groups["n"].Value}장 파기하는 것으로, 소멸하지 않는다")}";
+        if ((m = Regex.Match(en, @"^Decode\s*\((?<x>.+)\)$", RegexOptions.IgnoreCase)).Success && SpecKo(m.Groups["x"].Value) is { } decode)
+            return $"《디코드《{decode}》》{R("이 디지몬이 배틀 이외로 배틀 에어리어를 벗어날 때, 이 디지몬의 진화원에서 지정된 디지몬 카드 1장을 코스트를 지불하지 않고 등장시킬 수 있다")}";
+        if ((m = Regex.Match(en, @"^Partition\s*\((?<a>.+?)\s*&\s*(?<b>.+)\)$", RegexOptions.IgnoreCase)).Success && SpecKo(m.Groups["a"].Value) is { } pa && SpecKo(m.Groups["b"].Value) is { } pb)
+            return $"《파티션《{pa}&{pb}》》{R("진화원에 지정된 카드가 1장씩 있는 이 디지몬이 자신의 효과와 배틀 이외로 배틀 에어리어를 벗어날 때, 지정된 카드 1장씩을 코스트를 지불하지 않고 등장시킬 수 있다")}";
+        if ((m = Regex.Match(en, @"^Overclock\s*\((?<x>.+)\)$", RegexOptions.IgnoreCase)).Success && SpecKo(m.Groups["x"].Value) is { } oc)
+            return $"《오버클럭《{oc}》》{R($"자신의 턴 종료 시, 자신의 토큰 또는 {oc}의 다른 자신의 디지몬 1마리를 소멸시키는 것으로, 이 디지몬으로 레스트시키지 않고 플레이어에게 어택한다")}";
+        if ((m = Regex.Match(en, @"^Decoy\s*\((?<x>.+)\)$", RegexOptions.IgnoreCase)).Success && SpecKo(m.Groups["x"].Value) is { } decoy)
+            return $"《디코이《{decoy}》》{R($"{decoy}의 다른 자신의 디지몬이 상대의 효과로 소멸할 때, 이 디지몬을 소멸시키는 것으로, 그 디지몬 1마리는 소멸하지 않는다")}";
+        if ((m = Regex.Match(en, @"^Detach\s*\((?<x>.+)\)$", RegexOptions.IgnoreCase)).Success && SpecKo(m.Groups["x"].Value) is { } detach)
+            return $"《디태치《{detach}》》{R("이 디지몬이 자신의 효과 이외로 배틀 에어리어를 벗어날 때, 지정된 링크 카드 1장을 파기하는 것으로, 벗어나지 않는다")}";
+        if ((m = Regex.Match(en, @"^Use Req(?:\.|uirement)?\s*\((?<x>.+)\)$", RegexOptions.IgnoreCase)).Success && SpecKo(m.Groups["x"].Value) is { } useReq)
+            return $"《사용 조건《{useReq}》》{R("지정된 카드가 있으면 색 조건을 무시할 수 있다")}";
+        if (Regex.IsMatch(en, @"^Engage$", RegexOptions.IgnoreCase))
+            return $"《인게이지》{R("자신의 턴 종료 시, 이 디지몬으로 어택할 수 있다")}";
+        if (Regex.IsMatch(en, @"^Ascension$", RegexOptions.IgnoreCase))
+            return $"《어센션》{R("이 디지몬이 소멸했을 때, 이 카드를 시큐리티 위에 놓을 수 있다")}";
+        if (Regex.IsMatch(en, @"^Guard$", RegexOptions.IgnoreCase))
+            return $"《가드》{R("다른 자신의 디지몬이 상대의 효과로 배틀 에어리어를 벗어날 때, 이 디지몬을 소멸시키는 것으로, 벗어나지 않는다")}";
         if ((m = Regex.Match(en, @"^(?<k>Raid|Barrier|Armor Purge)\s*(?<n>\d+)?$", RegexOptions.IgnoreCase)).Success && !m.Groups["n"].Success)
         {
             var kw0 = Keywords.First(k => k.En.Equals(m.Groups["k"].Value, StringComparison.OrdinalIgnoreCase));
@@ -1056,9 +1096,33 @@ public static class KoreanEffectRenderer
     /// <summary>"＜Blocker＞ and ＜Reboot＞" · "＜Security A. +1＞" → 《블로커》와 《재기동》 (설명 포함)</summary>
     private static string? KeywordListKo(string text)
     {
+        // 키워드와 구분(쉼표 · and)만 있어야 한다 — "＜A＞ for each ~ with ＜B＞"처럼 다른 말이 섞이면 키워드 목록이 아니다
+        if (Regex.IsMatch(Regex.Replace(text, @"＜[^＞]+＞|\band\b|[,\s.]", ""), "[A-Za-z]")) return null;
         var parts = Regex.Matches(text, @"＜([^＞]+)＞").Select(m => KeywordKo(m.Groups[1].Value, withReminder: true)).ToList();
         if (parts.Count == 0 || parts.Any(p => p == null)) return null;
         return parts.Count == 1 ? parts[0] : string.Join(", ", parts.Take(parts.Count - 1)) + J(parts[^2]!, "과", "와") + " " + parts[^1];
+    }
+
+    /// <summary>
+    /// 키워드 괄호 속 조건: "Blue Lv.4" → 블루 Lv.4 · "[Aegiomon]" → 「아이기오몬」 · "[Seven Code] trait" → 특징「세븐 코드」 ·
+    /// "[Maquinamon] in text" → 「마키나몬」 기술 · "Lv.4 or lower w/[Agumon]/[Greymon] in name or w/[ME] trait" (옮기지 못한 영어가 남으면 null)
+    /// </summary>
+    private static string? SpecKo(string spec)
+    {
+        string s = spec.Trim();
+        // 특징: "[A]/[B] trait" · "[A] Trait" · "w/[A] trait"
+        s = Regex.Replace(s, @"(?:w/)?(?<x>\[[^\]]+\](?:\s*/\s*\[[^\]]+\])*)\s+trait\b", m => "특징" + NamesKo(m.Groups["x"].Value, trait: true), RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"(?:w/)?(?<x>\[[^\]]+\](?:\s*/\s*\[[^\]]+\])*)\s+in (?:its )?name\b", m => "명칭에 " + NamesKo(m.Groups["x"].Value) + "를 포함", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"(?:w/)?(?<x>\[[^\]]+\](?:\s*/\s*\[[^\]]+\])*)\s+in (?:its )?text\b", m => NamesKo(m.Groups["x"].Value) + " 기술", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\[[^\]]+\](?:\s*/\s*\[[^\]]+\])*", m => NamesKo(m.Value));
+        s = Regex.Replace(s, @"\b(?:Level|Lv\.)\s*(?<n>\d+)\s+or\s+(?<d>lower|higher)\b", m => $"Lv.{m.Groups["n"].Value} {(m.Groups["d"].Value.Equals("lower", StringComparison.OrdinalIgnoreCase) ? "이하" : "이상")}", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\bLevel\s*(?<n>\d+)\b", "Lv.${n}", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, Colors, m => ColorKo(m.Value), RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\s+or\s+", " 또는 ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"\s+", " ").Trim();
+        // 남은 영어(카드 이름 「」 안 · Lv. 제외)가 있으면 옮기지 못한 것
+        string rest = Regex.Replace(s, @"「[^」]*」|Lv\.", "");
+        return Regex.IsMatch(rest, "[A-Za-z]") ? null : s;
     }
 
     private static string ColorKo(string color) => color.ToLowerInvariant() switch
@@ -1086,6 +1150,9 @@ public static class KoreanEffectRenderer
     /// </summary>
     private static readonly Lazy<(Dictionary<string, string> Names, Dictionary<string, string> Traits)> Glossary = new(BuildGlossary);
 
+    /// <summary>영어 카드 이름 → 공식 한글 이름 (공식 한글 데이터가 없으면 비어 있다) — 로그 · 메시지의 이름 바꾸기에 쓴다</summary>
+    internal static IReadOnlyDictionary<string, string> NameGlossary => Glossary.Value.Names;
+
     private static (Dictionary<string, string>, Dictionary<string, string>) BuildGlossary()
     {
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1100,20 +1167,39 @@ public static class KoreanEffectRenderer
             var opts = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
             var cards = JsonSerializer.Deserialize<List<CardData>>(File.ReadAllText(cache), opts) ?? new();
             var traitVotes = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+            var nameVotes = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+            var enTraitCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var koTraitCount = new Dictionary<string, int>();
             foreach (var c in cards)
             {
                 if (KoreanCardData.Get(c.CardId) is not { } ko) continue;
-                if (ko.Name.Length > 0 && !names.ContainsKey(c.Name)) names[c.Name] = ko.Name;
-                // 특징: 순서가 같은 목록끼리 위치로 짝짓고 가장 많이 나온 짝을 쓴다
-                if (c.Traits.Count == ko.Traits.Count)
-                    for (int i = 0; i < c.Traits.Count; i++)
-                    {
-                        if (!traitVotes.TryGetValue(c.Traits[i], out var v)) traitVotes[c.Traits[i]] = v = new();
-                        v[ko.Traits[i]] = v.GetValueOrDefault(ko.Traits[i]) + 1;
-                    }
+                // 이름: 같은 영어 이름의 공식 한글 이름 중 가장 많이 나온 것 ("WereGarurumon" → "워가루몬", ACE 카드 이름 아님)
+                if (ko.Name.Length > 0)
+                {
+                    if (!nameVotes.TryGetValue(c.Name, out var nv)) nameVotes[c.Name] = nv = new();
+                    nv[ko.Name] = nv.GetValueOrDefault(ko.Name) + 1;
+                }
+                // 특징: 같은 카드에 함께 나온 횟수로 짝짓는다 (영어 · 한글 특징의 순서가 다른 카드가 있어 위치로 짝지으면 틀린다 — Hybrid ≠ 배리어블종)
+                foreach (var en in c.Traits.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    enTraitCount[en] = enTraitCount.GetValueOrDefault(en) + 1;
+                    if (!traitVotes.TryGetValue(en, out var v)) traitVotes[en] = v = new();
+                    foreach (var k in ko.Traits.Distinct()) v[k] = v.GetValueOrDefault(k) + 1;
+                }
+                foreach (var k in ko.Traits.Distinct()) koTraitCount[k] = koTraitCount.GetValueOrDefault(k) + 1;
             }
-            foreach (var (en, votes) in traitVotes)
-                traits[en] = votes.OrderByDescending(v => v.Value).First().Key;
+            // 점수 = 함께² / (영어 특징 수 × 한글 특징 수) — 늘 함께 나오는 짝이 1에 가깝다
+            // 점수가 높은 짝부터 1:1로 배정 — 늘 함께 붙는 특징(Hybrid · Variable, App Driver · Appmon)이 같은 한글 특징을 나눠 갖지 않게
+            var scored = traitVotes.SelectMany(kv => kv.Value.Select(v => (En: kv.Key, Ko: v.Key, Score: (double)v.Value * v.Value / (enTraitCount[kv.Key] * (double)koTraitCount[v.Key]), Co: v.Value)))
+                .OrderByDescending(x => x.Score).ThenByDescending(x => x.Co).ToList();
+            var usedKo = new HashSet<string>();
+            foreach (var x in scored)
+                if (!traits.ContainsKey(x.En) && usedKo.Add(x.Ko))
+                    traits[x.En] = x.Ko;
+            foreach (var x in scored)   // 짝을 못 얻은 영어 특징은 가장 좋은 짝 (나눠 갖기)
+                traits.TryAdd(x.En, x.Ko);
+            foreach (var (en, votes) in nameVotes)
+                names[en] = votes.OrderByDescending(v => v.Value).ThenBy(v => v.Key.Length).First().Key;
         }
         catch
         {

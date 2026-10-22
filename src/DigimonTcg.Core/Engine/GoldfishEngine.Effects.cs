@@ -660,14 +660,14 @@ public partial class GoldfishEngine
 
     internal bool AskYesNo(PlayerZones owner, CardInstance? subject, string question, bool recommended) =>
         ReferenceEquals(owner, State.Player) && PlayerChoices != null
-            ? PlayerChoices.Confirm(State, subject, question, recommended)
+            ? PlayerChoices.Confirm(State, subject, KoreanNameLocalizer.Localize(question), recommended)   // 질문의 영어 카드 이름 → 공식 한글 이름
             : recommended;
 
     internal CardInstance? AskDigimon(PlayerZones owner, string question, IReadOnlyList<CardInstance> options, CardInstance? recommended, bool optional)
     {
         if (!ReferenceEquals(owner, State.Player) || PlayerChoices == null)
             return recommended;
-        var picked = PlayerChoices.ChooseDigimon(State, question, options, recommended, optional);
+        var picked = PlayerChoices.ChooseDigimon(State, KoreanNameLocalizer.Localize(question), options, recommended, optional);
         return picked != null && options.Contains(picked) ? picked : optional ? null : recommended;
     }
 

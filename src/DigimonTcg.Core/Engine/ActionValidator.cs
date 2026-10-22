@@ -10,10 +10,10 @@ public record ActionResult
     public string GuideMessage { get; init; } = string.Empty;
 
     public static ActionResult Success(string guide) =>
-        new ActionResult { CanExecute = true, Reason = string.Empty, GuideMessage = guide };
+        new ActionResult { CanExecute = true, Reason = string.Empty, GuideMessage = KoreanNameLocalizer.Localize(guide) };   // 영어 카드 이름 → 공식 한글 이름
 
     public static ActionResult Fail(string reason) =>
-        new ActionResult { CanExecute = false, Reason = reason, GuideMessage = string.Empty };
+        new ActionResult { CanExecute = false, Reason = KoreanNameLocalizer.Localize(reason), GuideMessage = string.Empty };
 }
 
 public static class ActionValidator

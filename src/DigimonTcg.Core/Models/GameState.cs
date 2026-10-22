@@ -8,7 +8,12 @@ public record SecurityCheckHistoryItem(
     int AttackerDp,
     bool IsBattleWon,
     string OutcomeSummary = ""
-);
+)
+{
+    // 화면에 나가는 문장: 영어 카드 이름 → 공식 한글 이름 (KoreanNameLocalizer)
+    public string AttackerName { get; init; } = Engine.Effects.KoreanNameLocalizer.Localize(AttackerName);
+    public string OutcomeSummary { get; init; } = Engine.Effects.KoreanNameLocalizer.Localize(OutcomeSummary);
+}
 
 /// <summary>상대(AI) 턴에 일어난 행동 1건 — UI가 상대 턴을 한 장면씩 다시 보여 주는 데 사용한다.</summary>
 public enum OpponentActionKind { TurnStart, Breeding, Evolve, Play, Tamer, Attack, Block, SecurityResult, DirectAttack, TurnEnd, Effect }
@@ -19,7 +24,12 @@ public record OpponentActionEvent(
     string Detail,
     CardData? Card = null,
     CardData? SubCard = null
-);
+)
+{
+    // 화면에 나가는 문장: 영어 카드 이름 → 공식 한글 이름
+    public string Title { get; init; } = Engine.Effects.KoreanNameLocalizer.Localize(Title);
+    public string Detail { get; init; } = Engine.Effects.KoreanNameLocalizer.Localize(Detail);
+}
 
 /// <summary>AI의 어택에 대해 플레이어가 블록할지(어느 블로커로 막을지) 고를 차례 — 공식 룰상 블록은 방어 측의 선택이다.</summary>
 public record PendingBlockDecision(
@@ -110,7 +120,9 @@ public class GameState
     public List<SecurityCheckHistoryItem> SecurityCheckHistory { get; set; } = new List<SecurityCheckHistoryItem>();
     public List<SecurityCheckHistoryItem> PlayerSecurityCheckHistory { get; set; } = new List<SecurityCheckHistoryItem>();
     public CardData? LastRevealedSecurityCard { get; set; }
-    public string LastSecurityBattleResult { get; set; } = string.Empty;
+    private string _lastSecurityBattleResult = string.Empty;
+    // 화면에 나가는 문장: 영어 카드 이름 → 공식 한글 이름
+    public string LastSecurityBattleResult { get => _lastSecurityBattleResult; set => _lastSecurityBattleResult = Engine.Effects.KoreanNameLocalizer.Localize(value); }
     public bool LastSecurityBattleWon { get; set; } = true;
 
     // 게임 종료 및 타임어택 평가 지표 (HUD용)

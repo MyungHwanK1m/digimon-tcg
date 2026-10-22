@@ -112,4 +112,42 @@ public class KoreanEffectRendererTests
             try { Directory.Delete(dir, true); } catch { }
         }
     }
+
+    // ---- 번역 점검 (2026-10-22): 7단계 키워드 · 뜻 오류 · 이름 바꾸기 ----
+
+    [Fact]
+    public void Phase7Keywords_ShouldRenderWithOfficialNotation()
+    {
+        Assert.StartsWith("《링크 +1》", KoreanEffectRenderer.RenderClause("＜Link +1＞ (Add 1 to this Digimon's maximum links.)"));
+        Assert.StartsWith("《프래그먼트《3》》", KoreanEffectRenderer.RenderClause("＜Fragment (3)＞ (When this Digimon would be deleted, by trashing any 3 of its digivolution cards, it isn't deleted.)"));
+        Assert.StartsWith("《디코드《블루 Lv.4》》", KoreanEffectRenderer.RenderClause("＜Decode (Blue Lv.4)＞ (When this Digimon would leave the battle area other than in battle, you may play 1 Blue Level 4 Digimon card from its digivolution cards without paying the cost.)"));
+        Assert.StartsWith("《파티션《레드 Lv.4&옐로 Lv.4》》", KoreanEffectRenderer.RenderClause("＜Partition (Red Lv.4 & Yellow Lv.4)＞"));
+        // API 원문의 짝 없는 괄호 "…cost.))"
+        Assert.NotNull(KoreanEffectRenderer.RenderClause("＜Fragment (2)＞ (When this Digimon would be deleted, by trashing any 2 of its digivolution cards, it isn't deleted.))"));
+    }
+
+    [Fact]
+    public void MeaningErrors_ShouldBeFixed()
+    {
+        // "for each ~ with ＜Security A.＞"를 키워드 목록으로 읽지 않는다 (BT12-044)
+        var each = KoreanEffectRenderer.RenderClause("[Your Turn] This Digimon gains ＜Security A. +1＞ for each of your opponent's Digimon with ＜Security A.＞");
+        Assert.NotNull(each);
+        Assert.Contains("가진 상대의 디지몬 1마리마다", each);
+        // 가운데의 may도 "~할 수 있다" (BT14-007)
+        var may = KoreanEffectRenderer.RenderClause("[Start of Your Main Phase] This Digimon may digivolve into [Greymon] in your hand without paying the cost.");
+        Assert.NotNull(may);
+        Assert.Contains("진화시킬 수 있다", may);
+    }
+
+    [Fact]
+    public void NameLocalizer_ShouldReplaceOnlyWholeEnglishCardNames()
+    {
+        if (KoreanCardData.Count == 0) return;   // 공식 한글 데이터가 없는 PC — 아무것도 바꾸지 않는다
+        Assert.Equal("[메탈가루몬(Lv.6)] 드로우", KoreanNameLocalizer.Localize("[MetalGarurumon(Lv.6)] 드로우"));
+        Assert.DoesNotContain("Snow아구몬", KoreanNameLocalizer.Localize("SnowAgumon"));   // 영문자에 붙은 이름은 바꾸지 않는다
+        Assert.Equal("워가루몬", KoreanNameLocalizer.KoreanNameFor("WereGarurumon"));       // ACE 카드 이름이 아니라 가장 많이 쓰인 이름
+        Assert.Equal("패스(Pass)를 선언", KoreanNameLocalizer.Localize("패스(Pass)를 선언"));
+        // 공식 한글이 없는 카드도 같은 영어 이름의 공식 한글 이름으로 표시
+        Assert.Equal("아구몬", KoreanCardData.DisplayName(new CardData { CardId = "TEST-NOOFF-1", Name = "Agumon", Type = CardType.Digimon }));
+    }
 }
