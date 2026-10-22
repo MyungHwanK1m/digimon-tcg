@@ -229,10 +229,16 @@ public sealed class SmartAiPolicy : IAiPolicy
     /// ≪볼텍스≫ · ≪에그제큐트≫: 대상(과 시큐리티)마다 어택 점수를 어림해 가장 좋은 것. ≪에그제큐트≫(canAttackSecurity)는
     /// 어택이 끝나면 이 디지몬이 소멸하므로 그 가치만큼 깎는다 — 사실상 다이렉트 어택 승리나 큰 이득일 때만 쓴다.
     /// </summary>
-    public EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity)
+    public EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity) =>
+        BestExtraAttack(engine, attacker, targets, canAttackSecurity, selfCost: canAttackSecurity ? AiBoard.Value(attacker) : 0);   // ≪에그제큐트≫ = 어택 뒤 소멸
+
+    /// <summary>효과 어택은 어택한 뒤 소멸하지 않는다 — 보통 어택과 같은 점수로 대상(또는 시큐리티)을 고른다</summary>
+    public EndOfTurnAttack? ChooseEffectAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity) =>
+        BestExtraAttack(engine, attacker, targets, canAttackSecurity, selfCost: 0);
+
+    private EndOfTurnAttack? BestExtraAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity, double selfCost)
     {
         var state = engine.State;
-        double selfCost = canAttackSecurity ? AiBoard.Value(attacker) : 0;   // ≪에그제큐트≫ = 어택 뒤 소멸
         EndOfTurnAttack? best = null;
         double bestScore = Tuning.AttackThreshold;
 

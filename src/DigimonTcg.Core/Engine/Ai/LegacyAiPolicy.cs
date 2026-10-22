@@ -78,6 +78,13 @@ public sealed class LegacyAiPolicy : IAiPolicy
         return best == null ? null : new EndOfTurnAttack(best);
     }
 
+    /// <summary>
+    /// 정책을 분리하기 전 AI는 효과 어택이 없었다 — 턴 종료 시 어택과 같이 이기는 대상을 고르고,
+    /// 없으면 보통 어택처럼 시큐리티 (시큐리티를 어택할 수 있을 때)
+    /// </summary>
+    public EndOfTurnAttack? ChooseEffectAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity) =>
+        ChooseEndOfTurnAttack(engine, attacker, targets, canAttackSecurity) ?? (canAttackSecurity ? new EndOfTurnAttack(null) : null);
+
     /// <summary>AI가 진화시킬 수 있는 디지몬: 배틀 에어리어 + 육성 에어리어 (육성 중인 Lv.2 → Lv.3 진화 포함)</summary>
     internal static List<CardInstance> EvolutionBases(PlayerZones ai)
     {

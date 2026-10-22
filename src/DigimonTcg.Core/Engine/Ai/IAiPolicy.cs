@@ -58,4 +58,10 @@ public interface IAiPolicy
     /// EndOfTurnAttack(null) = 시큐리티, EndOfTurnAttack(디지몬) = 그 디지몬.
     /// </summary>
     EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity);
+
+    /// <summary>
+    /// 효과로 생긴 어택 ("This Digimon may attack" · "1 of your Digimon may attack ~"). 반환 뜻은 ChooseEndOfTurnAttack과 같지만
+    /// 어택한 뒤 소멸하지 않으므로 ≪에그제큐트≫처럼 어택자를 잃는 값을 빼지 않는다.
+    /// </summary>
+    EndOfTurnAttack? ChooseEffectAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity);
 }

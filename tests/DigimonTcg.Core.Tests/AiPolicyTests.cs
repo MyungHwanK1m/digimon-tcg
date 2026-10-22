@@ -197,6 +197,25 @@ public class AiPolicyTests
         Assert.Null(smart.ChooseEndOfTurnAttack(engine, attacker, new[] { weak }, canAttackSecurity: false));
     }
 
+    [Fact]
+    public void EffectAttack_ShouldNotCountTheAttackerAsLost()
+    {
+        // "may attack" 효과 어택은 ≪에그제큐트≫와 달리 어택 뒤 소멸하지 않는다 → 시큐리티 5장이어도 시큐리티로 간다
+        var (state, engine, cards) = AiTurn();
+        var attacker = Field(state.DummyOpponent, cards["ST1-07"]);    // DP 4000
+        var none = new List<CardInstance>();
+        var smart = new SmartAiPolicy();
+
+        Assert.Null(smart.ChooseEndOfTurnAttack(engine, attacker, none, canAttackSecurity: true));
+        Assert.Equal(new EndOfTurnAttack(null), smart.ChooseEffectAttack(engine, attacker, none, canAttackSecurity: true));
+        Assert.Null(smart.ChooseEffectAttack(engine, attacker, none, canAttackSecurity: false));   // 상대 디지몬만 어택할 수 있는데 대상이 없다
+
+        var legacy = new LegacyAiPolicy();
+        var weak = Field(state.Player, cards["ST1-03"]);                // DP 2000
+        Assert.Equal(new EndOfTurnAttack(weak), legacy.ChooseEffectAttack(engine, attacker, new[] { weak }, canAttackSecurity: true));   // 이기는 대상 먼저
+        Assert.Equal(new EndOfTurnAttack(null), legacy.ChooseEffectAttack(engine, attacker, none, canAttackSecurity: true));            // 없으면 시큐리티
+    }
+
     /// <summary>어택만 정해 둔 답을 내는 정책 (나머지는 기존 AI) — 엔진의 AI 어택 처리를 확인한다</summary>
     private sealed class ScriptedAttackPolicy : IAiPolicy
     {
@@ -211,6 +230,7 @@ public class AiPolicyTests
         public CardData? ChooseDigimonToPlay(GoldfishEngine engine, int memory) => null;
         public AiDnaEvolution? ChooseDnaEvolution(GoldfishEngine engine, int memory, bool beforeAttacks) => null;
         public EndOfTurnAttack? ChooseEndOfTurnAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity) => null;
+        public EndOfTurnAttack? ChooseEffectAttack(GoldfishEngine engine, CardInstance attacker, IReadOnlyList<CardInstance> targets, bool canAttackSecurity) => null;
 
         public AiAttack? ChooseNextAttack(GoldfishEngine engine, int memory)
         {
